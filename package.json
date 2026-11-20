@@ -11,9 +11,12 @@
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview",
     "test": "node --experimental-strip-types --test tests/*.test.ts",
-    "test:network": "node --experimental-strip-types --test tests/network.test.ts"
+    "test:network": "node --experimental-strip-types --test tests/network.test.ts",
+    "start:runtime": "node --experimental-strip-types --env-file-if-exists=.env.local scripts/start-runtime.mjs",
+    "dev:hub": "vite --base /relay-room/"
   },
   "dependencies": {
+    "@supabase/supabase-js": "2.119.0",
     "three": "0.187.0",
     "ws": "8.23.0"
   },

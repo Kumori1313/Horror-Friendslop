@@ -7,6 +7,28 @@
   <title>Relay Room · Co-op test</title>
 </head>
 <body>
+  <section id="hub-lobby" hidden>
+    <h1>Relay Room</h1>
+    <p id="hub-info" role="status">Checking guest session…</p>
+    <form id="hub-guest" hidden>
+      <label>Display name <input id="hub-name" maxlength="48" required></label>
+      <button>Continue</button>
+    </form>
+    <div id="hub-select" hidden>
+      <label>Room visibility <select id="hub-visibility"><option value="public">Public</option><option value="private">Private</option></select></label>
+      <button id="hub-create">Create lobby</button>
+      <form id="hub-code-form"><label>Private room code <input id="hub-code" autocomplete="off" required></label>
+        <button>Join with code</button></form>
+      <h2>Public rooms</h2><div id="hub-public"></div>
+    </div>
+    <div id="hub-wait" hidden>
+      <h2>Waiting room</h2><p id="hub-invite"></p><ul id="hub-members"></ul>
+      <button id="hub-start" hidden>Start game</button>
+    </div>
+    <p id="hub-error" role="alert"></p>
+    <button id="hub-refresh">Refresh lobby</button>
+    <button id="hub-back">Return to Game Hub</button>
+  </section>
   <main>
     <canvas id="scene" aria-label="First-person view of the relay room"></canvas>
     <header><div><span class="lamp-icon" aria-hidden="true">◈</span> RELAY ROOM</div><span id="connection" role="status">Connecting…</span></header>
@@ -26,7 +48,7 @@
       </div>
     </div>
     <aside id="diagnostics" hidden><h2>Room diagnostics</h2><pre id="stats"></pre><button id="outage">Simulate 2 s outage</button></aside>
-    <footer><span id="action">Waiting for room</span><button id="debug" aria-expanded="false">Diagnostics · G</button></footer>
+    <footer><button id="live-leave" hidden>Leave to hub</button><span id="action">Waiting for room</span><button id="debug" aria-expanded="false">Diagnostics · G</button></footer>
   </main>
   <script type="module" src="/src/main.ts"></script>
 </body>

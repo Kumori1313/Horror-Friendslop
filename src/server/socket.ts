@@ -21,27 +21,39 @@ interface Seat {
   lastPong: number;
 }
 
-export function attachRoom(server: EventEmitter, graceMs = 20000) {
-  const sockets = new WebSocketServer({ noServer: true, maxPayload: 1024 });
+export function listenForSockets(server: EventEmitter, path: string, maxPayload: number, accept: (ws: WebSocket) => void, clientOrigin?: string) {
+  const sockets = new WebSocketServer({ noServer: true, maxPayload });
+  function upgrade(req: IncomingMessage, socket: Duplex, head: Buffer) {
+    if (req.url !== path) return;
+    const origins = clientOrigin ? [clientOrigin] : ['http://' + req.headers.host,'https://' + req.headers.host];
+    if (req.headers.origin && !origins.includes(req.headers.origin)) {
+      socket.destroy();
+      return;
+    }
+    sockets.handleUpgrade(req, socket, head, ws => accept(ws));
+  }
+  server.on('upgrade',upgrade);
+  function shutdown() {
+    server.off('close',shutdown);
+    server.off('upgrade',upgrade);
+    for (const ws of sockets.clients) ws.terminate();
+    sockets.close();
+  }
+  server.once('close',shutdown);
+  return shutdown;
+}
+
+export function createLiveRoom(graceMs: number, onEmpty?: () => void) {
   const seats = new Map<string, Seat>();
   let room = new Simulation();
   function send(socket: WebSocket, message: ServerMessage) {
     if (socket.readyState === WebSocket.OPEN) socket.send(JSON.stringify(message));
   }
-  function upgrade(req: IncomingMessage, socket: Duplex, head: Buffer) {
-    if (req.url !== '/live') return;
-    if (req.headers.origin && !['http://','https://'].some(s => req.headers.origin === s + req.headers.host)) {
-      socket.destroy();
-      return;
-    }
-    sockets.handleUpgrade(req, socket, head, ws => sockets.emit('connection', ws));
-  }
   function stopWalking(id: number) {
     const input = room.inputs.get(id)!;
     input.forward = input.right = 0;
   }
-  server.on('upgrade', upgrade);
-  sockets.on('connection', ws => {
+  function accept(ws: WebSocket, assignedSeat?: number) {
     let seat: Seat | undefined;
     const joinTimeout = setTimeout(() => ws.close(1008, 'Join timed out'), 5000);
     ws.on('message', data => {
@@ -52,17 +64,23 @@ export function attachRoom(server: EventEmitter, graceMs = 20000) {
         if (m.type !== 'join') return;
         if (m.ticket !== null) {
           const saved = seats.get(m.ticket?.token);
-          if (!saved || m.ticket.round !== room.state.round || saved.expires <= Date.now()) {
+          if (!saved || (assignedSeat !== undefined && saved.id !== assignedSeat) || m.ticket.round !== room.state.round || saved.expires <= Date.now()) {
             ws.close(4001, 'Previous round or seat ended');
             return;
           }
           saved.ws?.close(4002, 'Seat resumed elsewhere');
           seat = saved;
         } else {
-          const id = room.join();
-          if (!id) { ws.close(1008, 'Both seats are occupied'); return; }
-          seat = { id, token: randomUUID(), lastAction: 0, ws, expires: Infinity, lastInput: 0, lastPong: 0 };
-          seats.set(seat.token,seat);
+          const existing = assignedSeat && [...seats.values()].find(s => s.id === assignedSeat);
+          if (existing) {
+            existing.ws?.close(4002, 'Seat resumed elsewhere');
+            seat = existing;
+          } else {
+            const id = room.join(assignedSeat);
+            if (!id) { ws.close(1008, 'Both seats are occupied'); return; }
+            seat = { id, token: randomUUID(), lastAction: 0, ws, expires: Infinity, lastInput: 0, lastPong: 0 };
+            seats.set(seat.token,seat);
+          }
         }
         clearTimeout(joinTimeout);
         seat.ws = ws;
@@ -97,7 +115,7 @@ export function attachRoom(server: EventEmitter, graceMs = 20000) {
       stopWalking(seat.id);
       room.state.players.find(p => p.id === seat!.id)!.connected = false;
     });
-  });
+  }
   const timer = setInterval(() => {
     if (!seats.size) return;
     const now = Date.now();
@@ -107,7 +125,7 @@ export function attachRoom(server: EventEmitter, graceMs = 20000) {
         seats.delete(seat.token);
       } else if (now - seat.lastInput > 350) stopWalking(seat.id);
     }
-    if (!seats.size) { room = new Simulation(); return; }
+    if (!seats.size) { room = new Simulation(); onEmpty?.(); return; }
     room.tick(1 / 30);
     for (const {ws,lastPong} of seats.values()) {
       if (ws?.readyState !== WebSocket.OPEN) continue;
@@ -117,13 +135,12 @@ export function attachRoom(server: EventEmitter, graceMs = 20000) {
     }
   }, 1000 / 30);
   timer.unref();
-  function shutdown() {
-    server.off('close',shutdown);
-    clearInterval(timer);
-    server.off('upgrade', upgrade);
-    for (const ws of sockets.clients) ws.terminate();
-    sockets.close();
-  }
-  server.once('close',shutdown);
-  return shutdown;
+  return { accept, stop: () => clearInterval(timer), occupied: () => seats.size > 0 };
+}
+
+export function attachRoom(server: EventEmitter, graceMs = 20000) {
+  const room = createLiveRoom(graceMs);
+  const close = listenForSockets(server,'/live',1024,room.accept);
+  server.once('close',room.stop);
+  return () => { close(); room.stop(); };
 }

@@ -1,7 +1,7 @@
 import './style.css';
 import { canTake } from './room.ts';
 import { RoomConnection } from './connection.ts';
-import type { Ticket, Snapshot } from './room.ts';
+import type { Admission, Ticket, Snapshot } from './room.ts';
 import { bindDrag } from './touch.ts';
 import { createScene } from './scene.ts';
 
@@ -18,15 +18,19 @@ const panel = element('diagnostics');
 const stats = element('stats');
 const reticle = element('reticle');
 
-function start(render: ReturnType<typeof createScene>) {
-  const key = 'relay-room-seat-v2';
+function start(render: ReturnType<typeof createScene>, admission?: () => Promise<Admission>, scope = 'local') {
+  const key = admission ? 'relay-room-seat-' + scope : 'relay-room-seat-v2';
   let saved: Ticket | null = null;
   const nav = performance.getEntriesByType('navigation')[0] as PerformanceNavigationTiming | undefined;
   if (nav?.type !== 'navigate') {
     try { saved = JSON.parse(sessionStorage.getItem(key) || 'null'); } catch { /* Fresh session */ }
   }
-  const url = new URL('/live',location.href);
+  const url = new URL(admission ? '/relay-room/live' : '/live',location.href);
   url.protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
+  if (admission && import.meta.env.VITE_RELAY_RUNTIME_ORIGIN) {
+    url.host = new URL(import.meta.env.VITE_RELAY_RUNTIME_ORIGIN).host;
+    url.protocol = 'wss:';
+  }
   const delay = Math.max(0,Math.min(500,Number(new URLSearchParams(location.search).get('delay')) || 0));
   let id = 0, yaw = 0, pitch = -0.12;
   let state: Snapshot | undefined;
@@ -176,11 +180,11 @@ function start(render: ReturnType<typeof createScene>) {
         sessionStorage.removeItem(key);
         brief.hidden = false;
         enter.disabled = false;
-        enter.textContent = 'Join again';
-        enter.onclick = () => location.reload();
+        enter.textContent = admission ? 'Return to Game Hub' : 'Join again';
+        enter.onclick = admission ? () => element('live-leave').click() : () => location.reload();
       }
     },
-  },delay);
+  },delay,admission);
   connection.connect();
   element('outage').onclick = () => { if (state) connection.interrupt(2000); };
   window.addEventListener('pagehide',() => connection.stop());
@@ -199,7 +203,12 @@ function start(render: ReturnType<typeof createScene>) {
   requestAnimationFrame(frame);
 }
 
-try { start(createScene(canvas)); }
+try {
+  if (location.pathname.startsWith('/relay-room/')) {
+    const { mountLobby } = await import('./lobby.ts');
+    await mountLobby((auth,scope) => start(createScene(canvas),auth,scope));
+  } else start(createScene(canvas));
+}
 catch (error) {
   status.textContent = '3D view unavailable';
   prompt.textContent = 'Enable WebGL 2 in a desktop browser and reload.';

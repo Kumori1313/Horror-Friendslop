@@ -36,3 +36,10 @@ pre { margin-bottom: 0; line-height: 1.5 }
   #debug { min-height: 44px }
   #reticle { pointer-events: none }
 }
+#hub-lobby { max-width: 36rem; margin: 8vh auto; padding: 1.5rem; background: #15211f; border-left: 3px solid #e7b667 }
+#hub-lobby h2 { margin: 1.2rem 0 .5rem }
+#hub-lobby label { display: block; margin: .8rem 0 }
+#hub-lobby input, #hub-lobby select { font: inherit; padding: .5rem; max-width: 100% }
+#hub-lobby button { margin: .25rem .25rem .25rem 0 }
+#hub-error { color: #ffce9b }
+#live-leave { pointer-events: auto; padding: .45rem }

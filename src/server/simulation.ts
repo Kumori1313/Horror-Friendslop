@@ -6,8 +6,8 @@ export class Simulation {
   state: Snapshot = { round: randomUUID(), update: 0, players: [], lamp: { x: 0, y: 0.14, z: 2, yaw: 0, pitch: 0, on: true, owner: null } };
   inputs = new Map<number, Input>();
 
-  join() {
-    const id = [1, 2].find(seat => !this.inputs.has(seat));
+  join(assignedSeat?: number) {
+    const id = (assignedSeat ? [assignedSeat] : [1, 2]).find(seat => !this.inputs.has(seat));
     if (!id) return;
     this.state.players.push({ id, connected: true, x: id === 1 ? -0.7 : 0.7, z: 3, yaw: 0, pitch: -0.12 });
     this.inputs.set(id, { forward: 0, right: 0, yaw: 0, pitch: -0.12 });

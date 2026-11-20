@@ -1,5 +1,5 @@
 import { newerSnapshot } from './room.ts';
-import type { Action, ClientMessage, Input, ServerMessage, Snapshot, Ticket } from './room.ts';
+import type { Action, Admission, ClientMessage, Input, ServerMessage, Snapshot, Ticket } from './room.ts';
 
 interface Events {
   joined(id: number, ticket: Ticket): void;
@@ -22,11 +22,14 @@ export class RoomConnection {
   private readonly delay: number;
   readonly metrics = { received: 0, sent: 0, rtt: 0, recovery: 0, downRate: 0, upRate: 0 };
 
-  constructor(url: string, ticket: Ticket | null, events: Events, delay = 0) {
+  private readonly admission?: () => Promise<Admission>;
+
+  constructor(url: string, ticket: Ticket | null, events: Events, delay = 0, admission?: () => Promise<Admission>) {
     this.url = url;
     this.ticket = ticket;
     this.events = events;
     this.delay = delay;
+    this.admission = admission;
   }
 
   connect() {
@@ -35,7 +38,12 @@ export class RoomConnection {
     this.latest = -1;
     this.lastHeard = performance.now();
     let previousRx = this.metrics.received, previousTx = this.metrics.sent, sample = this.lastHeard;
-    ws.onopen = () => { if (this.socket === ws) this.send({type:'join', ticket:this.ticket}); };
+    ws.onopen = async () => {
+      try {
+        const admission = await this.admission?.();
+        if (this.socket === ws) this.send({type:'join', ticket:this.ticket, admission});
+      } catch { ws.close(4001,'Guest session unavailable'); }
+    };
     ws.onmessage = event => {
       if (this.socket !== ws) return;
       this.metrics.received += event.data.length; // Protocol frames contain ASCII JSON.

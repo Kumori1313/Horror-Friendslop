@@ -10,8 +10,9 @@ export interface Lamp extends Point { owner: number | null; on: boolean; y: numb
 export interface Snapshot { round: string; update: number; players: Player[]; lamp: Lamp }
 export type Action = 'take' | 'drop' | 'toggle';
 export interface Ticket { round: string; token: string }
+export interface Admission { lobby: string; round: number; token: string }
 export type ClientMessage =
-  | { type: 'join'; ticket: Ticket | null }
+  | { type: 'join'; ticket: Ticket | null; admission?: Admission }
   | { type: 'input'; round: string; input: Input }
   | { type: 'action'; round: string; seq: number; action: Action }
   | { type: 'ping'; time: number };

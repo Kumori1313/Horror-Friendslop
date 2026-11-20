@@ -15,9 +15,16 @@
       <h1>Relay Room</h1>
       <p>Meet at the yellow line. Carry the inspection light through the doorway and pass it to your partner.</p>
       <button id="enter" disabled>Enter room</button>
-      <p class="hint">WASD to walk · Mouse or arrows to look</p>
+      <p class="hint" id="control-hint">WASD to walk · Mouse or arrows to look</p>
     </section>
     <div id="reticle" hidden></div>
+    <div id="touch-controls" hidden>
+      <div id="move-pad" role="group" aria-label="Movement joystick"><span id="thumb"></span></div>
+      <div id="touch-actions">
+        <button id="take" disabled>Pick up</button>
+        <button id="toggle" disabled>Light off</button>
+      </div>
+    </div>
     <aside id="diagnostics" hidden><h2>Room diagnostics</h2><pre id="stats"></pre><button id="outage">Simulate 2 s outage</button></aside>
     <footer><span id="action">Waiting for room</span><button id="debug" aria-expanded="false">Diagnostics · G</button></footer>
   </main>

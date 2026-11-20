@@ -23,3 +23,16 @@ pre { margin-bottom: 0; line-height: 1.5 }
 #reticle { position: absolute; left: 50%; top: 50%; width: 4px; height: 4px; background: white; border-radius: 50%; box-shadow: 0 0 2px black }
 [hidden] { display: none !important }
 #outage { margin-top: .8rem; font-size: .875rem }
+#scene, #move-pad { touch-action: none }
+#touch-controls { position: absolute; inset: auto max(1rem,env(safe-area-inset-right)) 4.8rem max(1rem,env(safe-area-inset-left)); display: flex; align-items: end; justify-content: space-between; pointer-events: none; user-select: none }
+#move-pad { width: 104px; height: 104px; display: grid; place-items: center; border: 2px solid #dddfcfaa; border-radius: 50%; background: #101917a8; pointer-events: auto }
+#thumb { width: 42px; height: 42px; border-radius: 50%; border: 1px solid #f6dbae; background: #c99c5cda; pointer-events: none }
+#touch-actions { display: grid; gap: .4rem; pointer-events: auto }
+#touch-actions button { min-width: 5.6rem; min-height: 44px; touch-action: manipulation }
+#diagnostics { max-height: calc(100dvh - 8rem); z-index: 1 }
+@media (pointer: coarse) {
+  header, footer { padding: .8rem 1rem }
+  footer { min-height: 4rem }
+  #debug { min-height: 44px }
+  #reticle { pointer-events: none }
+}

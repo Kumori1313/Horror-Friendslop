@@ -2,6 +2,7 @@ import './style.css';
 import { canTake } from './room.ts';
 import { RoomConnection } from './connection.ts';
 import type { Ticket, Snapshot } from './room.ts';
+import { bindDrag } from './touch.ts';
 import { createScene } from './scene.ts';
 
 function element<T extends HTMLElement>(id: string) {
@@ -31,27 +32,69 @@ function start(render: ReturnType<typeof createScene>) {
   let state: Snapshot | undefined;
   let playing = false;
   const keys = new Set<string>();
+  let touchMode = matchMedia('(pointer: coarse)').matches;
+  let stickX = 0, stickY = 0;
+  const touchControls = element('touch-controls');
+  const pad = element('move-pad');
+  const thumb = element('thumb');
+  const take = element<HTMLButtonElement>('take');
+  const toggle = element<HTMLButtonElement>('toggle');
+  function showControls() {
+    touchControls.hidden = !playing || !touchMode;
+    element('control-hint').textContent = touchMode ? 'Left pad to walk · Swipe the room to look' : 'WASD to walk · Mouse or arrows to look';
+    debug.textContent = touchMode ? 'Diagnostics' : 'Diagnostics · G';
+  }
+  function look(dx: number, dy: number, sensitivity: number) {
+    yaw -= dx * sensitivity;
+    pitch = Math.max(-1.35,Math.min(1.35,pitch-dy*sensitivity));
+  }
+  const resetStick = bindDrag(pad,(dx,dy) => {
+    const radius = (pad.clientWidth - thumb.offsetWidth) / 2;
+    const scale = Math.max(radius,Math.hypot(dx,dy),1);
+    stickX = dx / scale; stickY = dy / scale;
+    thumb.style.transform = 'translate(' + (stickX * radius) + 'px,' + (stickY * radius) + 'px)';
+    input();
+  },false,() => playing,() => {
+    stickX = stickY = 0;
+    thumb.style.transform = '';
+    if (playing) input();
+  });
+  const resetLook = bindDrag(canvas,(dx,dy) => look(dx,dy,0.005),true,() => playing);
+  for (const surface of [enter,canvas] as HTMLElement[]) {
+    surface.addEventListener('pointerdown', e => {
+      touchMode = e.pointerType === 'touch';
+      showControls();
+    });
+  }
+  function useFlashlight() {
+    if (playing && state) connection.action(state.lamp.owner === id ? 'drop' : 'take');
+  }
+  function switchLight() { if (playing && state) connection.action('toggle'); }
+  take.onclick = useFlashlight;
+  toggle.onclick = switchLight;
+  showControls();
   function input() {
     connection.input({
-      forward: Number(keys.has('KeyW')) - Number(keys.has('KeyS')),
-      right: Number(keys.has('KeyD')) - Number(keys.has('KeyA')), yaw, pitch,
+      forward: Math.max(-1,Math.min(1,Number(keys.has('KeyW')) - Number(keys.has('KeyS')) - stickY)),
+      right: Math.max(-1,Math.min(1,Number(keys.has('KeyD')) - Number(keys.has('KeyA')) + stickX)), yaw, pitch,
     });
   }
   function pause() {
-    keys.clear(); playing = false; reticle.hidden = true; input();
+    keys.clear(); playing = false; resetStick(); resetLook(); showControls(); reticle.hidden = true; input();
   }
   function control() {
     if (!state) return;
     brief.hidden = true; reticle.hidden = false; playing = true;
     // Arrow-key look remains available when pointer capture is unavailable.
-    canvas.requestPointerLock?.()?.catch(() => {});
+    showControls();
+    if (!touchMode) canvas.requestPointerLock?.()?.catch(() => {});
   }
   function diagnostics() {
     panel.hidden = !panel.hidden;
     debug.setAttribute('aria-expanded',String(!panel.hidden));
   }
   enter.onclick = control;
-  canvas.onclick = () => { if (!playing || !document.pointerLockElement) control(); };
+  canvas.onclick = () => { if (!playing || (!touchMode && !document.pointerLockElement)) control(); };
   debug.onclick = diagnostics;
   window.addEventListener('blur',pause);
   document.addEventListener('visibilitychange',() => {
@@ -61,8 +104,7 @@ function start(render: ReturnType<typeof createScene>) {
   document.addEventListener('pointerlockchange',() => { if (!document.pointerLockElement) pause(); });
   window.addEventListener('mousemove',e => {
     if (playing && document.pointerLockElement === canvas) {
-      yaw -= e.movementX * 0.0022;
-      pitch = Math.max(-1.35,Math.min(1.35,pitch-e.movementY*0.0022));
+      look(e.movementX,e.movementY,0.0022);
     }
   });
   window.addEventListener('keydown',e => {
@@ -72,8 +114,8 @@ function start(render: ReturnType<typeof createScene>) {
     if (e.code.startsWith('Arrow')) e.preventDefault();
     if (e.repeat) return;
     keys.add(e.code);
-    if (e.code === 'KeyE') connection.action(state.lamp.owner === id ? 'drop' : 'take');
-    if (e.code === 'KeyF') connection.action('toggle');
+    if (e.code === 'KeyE') useFlashlight();
+    if (e.code === 'KeyF') switchLight();
     if (e.code === 'Escape') pause();
     input();
   });
@@ -84,11 +126,18 @@ function start(render: ReturnType<typeof createScene>) {
     if (!p) return;
     status.textContent = 'Operator ' + id + '  ·  ' + s.players.filter(player => player.connected).length + '/2 online';
     const l = s.lamp;
+    const holding = l.owner === id;
+    if (touchMode) {
+      take.disabled = !holding && !canTake(p,l);
+      take.textContent = holding ? 'Drop' : 'Pick up';
+      toggle.disabled = !holding;
+      toggle.textContent = l.on ? 'Light off' : 'Light on';
+    }
     if (!brief.hidden) prompt.textContent = s.players.length === 2 ? 'Both seats occupied' : 'Waiting for a partner';
-    else if (!playing) prompt.textContent = 'Click the room to resume';
-    else if (l.owner === id) prompt.textContent = 'E  Drop flashlight   ·   F  Switch ' + (l.on ? 'off' : 'on');
+    else if (!playing) prompt.textContent = touchMode ? 'Tap the room to resume' : 'Click the room to resume';
+    else if (holding) prompt.textContent = touchMode ? 'You hold the flashlight' : 'E  Drop flashlight   ·   F  Switch ' + (l.on ? 'off' : 'on');
     else if (l.owner) prompt.textContent = 'Operator ' + l.owner + ' holds the flashlight';
-    else prompt.textContent = canTake(p,l) ? 'E  Pick up flashlight' : 'Move closer to the flashlight';
+    else prompt.textContent = canTake(p,l) ? (touchMode ? 'Flashlight within reach' : 'E  Pick up flashlight') : 'Move closer to the flashlight';
     if (!panel.hidden) {
       const pos = (x: number,z: number) => x.toFixed(2) + ', ' + z.toFixed(2);
       stats.textContent = [

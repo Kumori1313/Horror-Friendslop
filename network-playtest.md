@@ -1,6 +1,6 @@
 # Phase 2 network playtest
 
-Two operators share one simulation on the project computer. Each window's **G** panel reports the round, operator positions, owner, measured RTT, received/sent JSON bytes per second, and the duration of its last reconnect. A zero recovery reading means the page has not measured a reconnect yet. Use a desktop browser with WebGL 2 on each device.
+Two operators share one simulation on the project computer. Each window's **G** panel reports the round, operator positions, owner, measured RTT, received/sent JSON bytes per second, and the duration of its last reconnect. A zero recovery reading means the page has not measured a reconnect yet. Use a WebGL 2 browser on each device. On a phone, tap **Enter room**, drag the left pad to walk, and swipe the scene to look. The **Pick up**, **Drop**, and light switch buttons control the flashlight.
 
 ## Play across two connections
 
@@ -13,7 +13,7 @@ Two operators share one simulation on the project computer. Each window's **G** 
 
 3. Open `http://127.0.0.1:4176/?delay=60` on the first device and `http://127.0.0.1:4176/?delay=140` on the second. To repeat with natural network latency alone, close both tabs after the trial, wait 20 seconds for the seats to expire, then open `http://127.0.0.1:4176/` on both. The value adds milliseconds to each direction on that client, on top of its actual connection latency.
 4. Click **Enter room**. Walk through the doorway and pass the flashlight in both directions. Agree on the round ID, holder, and beam state after each action. Watch for a sustained mismatch or movement continuing after a player stops.
-5. While holding the light, press **Escape**, open diagnostics with **G**, and click **Simulate 2 s outage**. The observer should see the operator reconnecting and holding the light. The returning player should see the same seat, lamp, and position. Click the scene to resume. Repeat with a tab switch, a refresh while holding, and a short real network interruption. Retain the same tab and SSH tunnel, or restore the tunnel if it closed.
+5. While holding the light, release the mouse with **Escape** and open diagnostics with **G** (on touchscreens, tap **Diagnostics**), and click **Simulate 2 s outage**. The observer should see the operator reconnecting and holding the light. The returning player should see the same seat, lamp, and position. Click the scene to resume. Repeat with a tab switch, a refresh while holding, and a short real network interruption. Retain the same tab and SSH tunnel, or restore the tunnel if it closed.
 6. Close the holder's tab and wait for the 20-second reservation to expire. The observer should see the lamp drop. Finally stop the runtime with Ctrl+C, start it again, and verify both clients report that the previous round ended. Use **Join again** to enter a new round.
 
 Record the two connection types, injected delay, measured RTT, RX/TX during movement, observed ownership, and recovery duration on each device. For a WAN measurement of the visible handoff gap, film both screens together if the laptops are side by side on different networks and count frames between ownership changes. A recording at 60 fps resolves about 17 ms. The automated check below measures snapshot arrival with a common monotonic clock.

@@ -1,0 +1,24 @@
+* { box-sizing: border-box }
+:root { color-scheme: dark; font-family: "Atkinson Hyperlegible Next", system-ui, sans-serif; color: #f2efe3; background: #192322 }
+body { margin: 0 }
+main, canvas { width: 100vw; height: 100dvh; display: block; overflow: hidden }
+main { position: relative }
+header, footer { position: absolute; left: 0; width: 100%; display: flex; align-items: center; justify-content: space-between; gap: 1rem; padding: 1.4rem clamp(1rem,3vw,3rem); text-shadow: 0 1px 3px #000; pointer-events: none }
+header { top: 0; background: linear-gradient(#101917dc,transparent); font-family: monospace; letter-spacing: .12em; font-weight: bold }
+header span:last-child { letter-spacing: .04em; font-size: .9rem }
+.lamp-icon, .eyebrow { color: #f0b652 }
+footer { bottom: 0; background: linear-gradient(transparent,#0b1212df); font-size: .94rem }
+button { border: 1px solid #e3b467; background: #e7b667; color: #151b17; padding: .75rem 1.2rem; font: inherit; font-weight: 700; cursor: pointer }
+button:disabled { opacity: .55; cursor: default }
+#debug { pointer-events: auto; padding: .5rem .7rem; background: #18201e; border-color: #717770; color: #f2efe3; font: 14px monospace }
+#brief { position: absolute; top: 47%; left: clamp(1rem,7vw,8rem); transform: translateY(-50%); width: min(25rem,calc(100% - 2rem)); padding: 1.5rem 1.7rem; border-left: 3px solid #e7b667; background: #101918ed; box-shadow: 0 20px 60px #0005 }
+h1 { font-size: clamp(2.75rem,6vw,4.25rem); margin: .25rem 0; line-height: 1; letter-spacing: -.065em }
+p { line-height: 1.5 }
+.eyebrow, .hint, h2 { font-family: monospace }
+.eyebrow { margin: 0; text-transform: uppercase; letter-spacing: .18em }
+.hint { font-size: .85rem; color: #c0c9bf; margin-bottom: 0 }
+#diagnostics { position: absolute; top: 4rem; right: 1rem; padding: 1rem; background: #0e1817f5; border: 1px solid #69756b; max-width: calc(100vw - 2rem); overflow: auto }
+h2 { font-size: 1rem; color: #edc47d; margin: 0 }
+pre { margin-bottom: 0; line-height: 1.5 }
+#reticle { position: absolute; left: 50%; top: 50%; width: 4px; height: 4px; background: white; border-radius: 50%; box-shadow: 0 0 2px black }
+[hidden] { display: none !important }

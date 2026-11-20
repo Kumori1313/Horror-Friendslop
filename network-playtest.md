@@ -18,6 +18,12 @@ Two operators share one simulation on the project computer. Each window's **G** 
 
 Record the two connection types, injected delay, measured RTT, RX/TX during movement, observed ownership, and recovery duration on each device. For a WAN measurement of the visible handoff gap, film both screens together if the laptops are side by side on different networks and count frames between ownership changes. A recording at 60 fps resolves about 17 ms. The automated check below measures snapshot arrival with a common monotonic clock.
 
+## Desktop and Android playtest result
+
+The tester observed the other player moving in real time and could see when that player disconnected during the two-second outage simulation. The desktop and Android players successfully passed the flashlight and saw its light switch on and off.
+
+**Phase 2 passed.** The phone's operator held the flashlight before the simulated two-second outage and remained its owner after reconnecting. This completes the physical-device handoff and recovery checks. The automated suite also verified that restarting the runtime ends the previous round.
+
 ## Repeat the automated experiment
 
 Run `npm run test:network`. Two clients use the game's connection code against a disposable WebSocket runtime. The test times eight alternating take/drop actions, stops movement input, interrupts a holder, discards a committed pickup reply before resuming and retrying it, and restarts a runtime on the same port. A shorter seat expiry keeps the automated run quick.

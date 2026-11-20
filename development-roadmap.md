@@ -39,6 +39,8 @@ Use TypeScript, Three.js, and Vite as the working stack. Start with two desktop 
 
 **Automated verification passed on November 20, 2026.** Version 1 produced 977 distinct route graphs across seeds 0–999, with zero fallbacks. Two Game Hub guests received identical floor plans. Refreshing the operator who opened the intake bulkhead restored its open state, the same layout, and the held flashlight.
 
+**Two-device playtest passed on November 20, 2026.** Both players joined the same private match through Game Hub and saw the generated facility on their devices.
+
 ## Phase 5 — Finish one playable horror round
 
 - Pick one original team objective. For example, one player could trace a fault through a dark building while another operates the breaker panel. Give the team a reason to separate and a reason to find each other again.

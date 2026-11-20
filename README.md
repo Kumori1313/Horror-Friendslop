@@ -1,6 +1,6 @@
 # Relay Room
 
-Phase 1 of the co-op horror prototype is a fixed maintenance room with two operator seats and one working flashlight. A local TypeScript simulation owns movement, collision, and the light. Both browser windows send inputs and receive the same room state over WebSocket.
+The co-op horror prototype has a fixed maintenance room with two operator seats and one working flashlight. A local TypeScript simulation owns movement, collision, and the light. Both browser windows send inputs and receive the same room state over WebSocket.
 
 ## Start a local test
 
@@ -26,12 +26,13 @@ npm run dev
 | G | Show or hide room diagnostics |
 | Escape | Release controls. Click the scene to resume. |
 
-Close a window to free its seat. If that operator held the flashlight, it drops where they stood. Closing both windows resets the room. Stop the server with **Ctrl+C**.
+A disconnected operator keeps their seat, position, and flashlight for 20 seconds after the server detects the disconnect. Refresh the same tab to resume. When the reservation expires, the seat is freed and its flashlight drops. The room resets when both seats expire. Stop the server with **Ctrl+C**.
 
 ## Build and verify
 
 - `npm test` runs the simulation and two-client WebSocket tests on a temporary local port.
+- `npm run test:network` repeats the delayed handoff and recovery scenarios and prints the measured action latency, view disagreement, recovery, and traffic.
 - `npm run build` type-checks the project and generates the static client in `dist/`.
 - `npm run preview` serves that build **and** the local simulation at **http://127.0.0.1:4176/**.
 
-The dev and preview commands each host their own temporary room. Open the same URL in both windows. Serving only the contents of `dist/` on GitHub Pages provides the client assets. Live play also requires a simulation endpoint. Internet testing and Game Hub lobby admission are later [roadmap phases](development-roadmap.md).
+The dev and preview commands each host their own temporary room. Open the same URL in both windows. Serving only the contents of `dist/` on GitHub Pages provides the client assets. Live play also requires a simulation endpoint. Use the [Phase 2 network playtest](network-playtest.md) for two-device testing, measurements, and runtime selection. Game Hub admission belongs to [Phase 3](development-roadmap.md).

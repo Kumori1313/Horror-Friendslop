@@ -9,7 +9,7 @@ export class Simulation {
   join() {
     const id = [1, 2].find(seat => !this.inputs.has(seat));
     if (!id) return;
-    this.state.players.push({ id, x: id === 1 ? -0.7 : 0.7, z: 3, yaw: 0, pitch: -0.12 });
+    this.state.players.push({ id, connected: true, x: id === 1 ? -0.7 : 0.7, z: 3, yaw: 0, pitch: -0.12 });
     this.inputs.set(id, { forward: 0, right: 0, yaw: 0, pitch: -0.12 });
     return id;
   }

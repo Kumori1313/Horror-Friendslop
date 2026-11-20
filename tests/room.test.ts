@@ -5,7 +5,7 @@ import { test } from 'node:test';
 import { WebSocket } from 'ws';
 import { attachRoom } from '../src/server/socket.ts';
 import { Simulation } from '../src/server/simulation.ts';
-import type { ClientMessage, ServerMessage, Snapshot } from '../src/room.ts';
+import type { Action, Input, ServerMessage, Snapshot } from '../src/room.ts';
 
 test('the partition blocks movement except at the doorway', () => {
   const room = new Simulation();
@@ -31,7 +31,7 @@ test('a nearby flashlight across a wall cannot be picked up', () => {
 
 test('two live clients agree on pickup, movement, toggle, handoff and disconnect', { timeout: 10000 }, async t => {
   const server = createServer();
-  attachRoom(server); server.listen(0,'127.0.0.1');
+  attachRoom(server,150); server.listen(0,'127.0.0.1');
   await once(server,'listening');
   const address = server.address();
   assert.ok(address && typeof address === 'object');
@@ -44,7 +44,8 @@ test('two live clients agree on pickup, movement, toggle, handoff and disconnect
   function client() {
     const ws = new WebSocket(url); clients.push(ws);
     let state: Snapshot | undefined;
-    let id = 0;
+    let id = 0, seq = 0;
+    ws.on('open',() => ws.send(JSON.stringify({type:'join',ticket:null})));
     ws.on('message',raw => {
       const m = JSON.parse(raw.toString()) as ServerMessage;
       if (m.type === 'joined') id = m.id;
@@ -52,7 +53,9 @@ test('two live clients agree on pickup, movement, toggle, handoff and disconnect
     });
     return {
       ws, get id() { return id; },
-      send(m: ClientMessage) { ws.send(JSON.stringify(m)); },
+      send(m: {type:'action'; action: Action} | {type:'input'; input: Input}) {
+        ws.send(JSON.stringify({...m, round:state!.round, seq:++seq}));
+      },
       async wait(check: (s: Snapshot) => boolean) {
         const end = Date.now()+2000;
         while (Date.now() < end) {
@@ -66,6 +69,7 @@ test('two live clients agree on pickup, movement, toggle, handoff and disconnect
   const a = client(), b = client();
   await Promise.all([a,b].map(c => c.wait(s => s.players.length === 2)));
   const extra = new WebSocket(url);
+  extra.on('open',() => extra.send(JSON.stringify({type:'join',ticket:null})));
   assert.equal((await once(extra,'close'))[0],1008);
   for (const c of [a,b]) c.send({type:'action',action:'take'});
   const [s1,s2] = await Promise.all([a,b].map(c => c.wait(s => s.lamp.owner !== null)));

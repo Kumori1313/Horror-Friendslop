@@ -22,3 +22,4 @@ h2 { font-size: 1rem; color: #edc47d; margin: 0 }
 pre { margin-bottom: 0; line-height: 1.5 }
 #reticle { position: absolute; left: 50%; top: 50%; width: 4px; height: 4px; background: white; border-radius: 50%; box-shadow: 0 0 2px black }
 [hidden] { display: none !important }
+#outage { margin-top: .8rem; font-size: .875rem }

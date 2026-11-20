@@ -1,6 +1,6 @@
 # Relay Room
 
-The co-op horror prototype has a fixed maintenance room with two operator seats and one working flashlight. A local TypeScript simulation owns movement, collision, and the light. Both browser windows send inputs and receive the same room state over WebSocket.
+Two operators share one flashlight in a seeded industrial facility. The standalone synchronization test uses a fixed maintenance room. A local TypeScript simulation owns movement, collision, and the light. Both browser windows send inputs and receive the same room state over WebSocket.
 
 ## Start a local test
 
@@ -61,6 +61,14 @@ ssh -N -o ExitOnForwardFailure=yes -L 4175:127.0.0.1:4175 -L 54321:127.0.0.1:543
 ```
 
 In the hub checkout, `npm run test:relay` runs the browser acceptance test on port 4175 and starts its own server. Stop the manual preview first. Set `RELAY_SITE_DIR` if the game checkout has another location.
+
+### Explore a generated facility
+
+Start a **new Game Hub room** to get a new facility. Both operators spawn at Intake within reach of the flashlight. Explore the connected rooms and corridors, locate the **Relay station**, then find the **Exit bay**. Overhead signs name the room ahead. At a closed bulkhead, press **R** or tap **Open bulkhead** on a phone. The door opens for both players.
+
+Open **Diagnostics** for the shared floor plan, player positions, seed, generator version, objective and exit IDs, and opened bulkheads. Amber links mark closed bulkheads. Refresh while holding the light to check that your room, door state, and flashlight are restored. Room exploration is the Phase 4 milestone. The playable horror objective and round ending follow in Phase 5.
+
+Run `npm run test:layouts` to check seeds 0–999, graph variety, player clearance, authoritative door collision, and the fixed fallback. The generator tries at most eight candidates per seed. Batch validation writes any fallback or failing seeds to `test-results/layout-seeds.json`. To replay a reported seed with this generator version, stop the local shared server and run `RELAY_LAYOUT_SEED=19 npm run dev:relay` from the **hub** checkout. Omit the override to restore per-room generation. The plan is sent on admission and resume, with only live door and item state in the regular snapshots.
 
 ### Hosted runtime
 

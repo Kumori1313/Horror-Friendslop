@@ -43,3 +43,7 @@ pre { margin-bottom: 0; line-height: 1.5 }
 #hub-lobby button { margin: .25rem .25rem .25rem 0 }
 #hub-error { color: #ffce9b }
 #live-leave { pointer-events: auto; padding: .45rem }
+
+#sector { display: block; color: #edc47d; letter-spacing: .03em; font-weight: normal }
+#layout-map { width: 100%; max-width: 300px; height: auto; background: #172421 }
+#floor-plan { margin: .75rem 0; color: #d2d7c7 }

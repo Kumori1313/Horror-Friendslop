@@ -1,4 +1,6 @@
 import * as T from 'three';
+import { buildFacility } from './facility-scene.ts';
+import type { Layout } from './layout.ts';
 import { walls } from './room.ts';
 import type { Snapshot } from './room.ts';
 
@@ -23,7 +25,7 @@ function painted(color: string, seam: string) {
   return tex;
 }
 
-export function createScene(canvas: HTMLCanvasElement) {
+export function createScene(canvas: HTMLCanvasElement, generated = false) {
   const renderer = new T.WebGLRenderer({ canvas, antialias: true });
   renderer.setPixelRatio(Math.min(devicePixelRatio, 1.75));
   renderer.toneMapping = T.ACESFilmicToneMapping;
@@ -52,44 +54,51 @@ export function createScene(canvas: HTMLCanvasElement) {
     const mesh = new T.Mesh(new T.PlaneGeometry(width, width / 5), new T.MeshBasicMaterial({ map: texture }));
     mesh.position.set(x, y, z); scene.add(mesh);
   }
-  const floor = painted('#585e56', '#353e38'); floor.repeat.set(8, 12);
-  box(0,-0.09,0,10,0.18,14,new T.MeshStandardMaterial({ map: floor }));
-  box(0,3.73,0,10,0.15,14,steel);
-  const plate = painted('#737e72', '#4c5b54'); plate.repeat.set(4, 2);
-  const wallMat = new T.MeshStandardMaterial({ map: plate });
-  for (const w of walls) {
-    box(w.x,1.85,w.z,w.w,3.7,w.d,wallMat);
-    box(w.x,0.19,w.z,w.w+0.025,0.38,w.d+0.025,steel);
-    box(w.x,1.02,w.z,w.w+0.028,0.075,w.d+0.028,yellow);
-  }
-  box(0,3.22,-1,2,0.96,0.35,dark);
-  for (const x of [-1.04,1.04]) {
-    box(x,1.37,-1,0.12,2.75,0.46,steel);
-    for (let i = 0; i < 5; i++) box(x,0.43+i*0.26,-0.76,0.12,0.12,0.025,yellow);
-  }
-  sign('RELAY  /  04',2.9,2.05,-0.80,2.65);
-  sign('SERVICE BAY',0,2.35,-6.85,2.8);
-  for (const x of [-1,1]) box(x,0.008,1.4,0.06,0.012,4.6,yellow);
-  for (let i = 0; i < 15; i++) box(-0.95 + i*0.135,0.012,3.66,0.082,0.015,0.24,yellow);
-  for (const z of [-5,-2,1,4,6]) {
-    box(0,3.43,z,9.85,0.22,0.13,steel);
-    box(-3,3.23,z,1.5,0.13,0.36,dark);
-    box(-3,3.15,z,1.35,0.04,0.23,teal);
-  }
-  for (const x of [3.4,3.7,4.0]) box(x,3.32,0,0.13,0.13,13.9,steel);
-  // Recessed electrical panels line the closed side of the partition.
-  for (const x of [-4,-3.05,-2.1]) {
-    box(x,1.7,-0.78,0.85,1.55,0.1,steel);
-    for (let i = 0; i < 5; i++) box(x,2.20-i*0.075,-0.714,0.59,0.027,0.025,dark);
-    box(x-0.23,1.45,-0.704,0.08,0.08,0.027,lit);
-  }
   scene.add(new T.HemisphereLight(0xc0e0dc,0x605648,1.28));
-  function fixture(x: number, z: number, color: number, power: number) {
-    const light = new T.PointLight(color,power,12);
-    light.position.set(x,2.9,z); scene.add(light);
+  if (generated) {
+    const skylight = new T.DirectionalLight(0xe2d8b7,1);
+    skylight.position.set(-4,6,2); scene.add(skylight);
+  } else {
+    const floor = painted('#585e56', '#353e38'); floor.repeat.set(8, 12);
+    box(0,-0.09,0,10,0.18,14,new T.MeshStandardMaterial({ map: floor }));
+    box(0,3.73,0,10,0.15,14,steel);
+    const plate = painted('#737e72', '#4c5b54'); plate.repeat.set(4, 2);
+    const wallMat = new T.MeshStandardMaterial({ map: plate });
+    for (const w of walls) {
+      box(w.x,1.85,w.z,w.w,3.7,w.d,wallMat);
+      box(w.x,0.19,w.z,w.w+0.025,0.38,w.d+0.025,steel);
+      box(w.x,1.02,w.z,w.w+0.028,0.075,w.d+0.028,yellow);
+    }
+    box(0,3.22,-1,2,0.96,0.35,dark);
+    for (const x of [-1.04,1.04]) {
+      box(x,1.37,-1,0.12,2.75,0.46,steel);
+      for (let i = 0; i < 5; i++) box(x,0.43+i*0.26,-0.76,0.12,0.12,0.025,yellow);
+    }
+    sign('RELAY  /  04',2.9,2.05,-0.80,2.65);
+    sign('SERVICE BAY',0,2.35,-6.85,2.8);
+    for (const x of [-1,1]) box(x,0.008,1.4,0.06,0.012,4.6,yellow);
+    for (let i = 0; i < 15; i++) box(-0.95 + i*0.135,0.012,3.66,0.082,0.015,0.24,yellow);
+    for (const z of [-5,-2,1,4,6]) {
+      box(0,3.43,z,9.85,0.22,0.13,steel);
+      box(-3,3.23,z,1.5,0.13,0.36,dark);
+      box(-3,3.15,z,1.35,0.04,0.23,teal);
+    }
+    for (const x of [3.4,3.7,4.0]) box(x,3.32,0,0.13,0.13,13.9,steel);
+    // Recessed electrical panels line the closed side of the partition.
+    for (const x of [-4,-3.05,-2.1]) {
+      box(x,1.7,-0.78,0.85,1.55,0.1,steel);
+      for (let i = 0; i < 5; i++) box(x,2.20-i*0.075,-0.714,0.59,0.027,0.025,dark);
+      box(x-0.23,1.45,-0.704,0.08,0.08,0.027,lit);
+    }
+    function fixture(x: number, z: number, color: number, power: number) {
+      const light = new T.PointLight(color,power,12);
+      light.position.set(x,2.9,z); scene.add(light);
+    }
+    fixture(-2,2,0xc4e8df,32); fixture(1,-5,0xffb75c,42);
+    box(0,2.81,-0.79,0.75,0.07,0.08,lit);
   }
-  fixture(-2,2,0xc4e8df,32); fixture(1,-5,0xffb75c,42);
-  box(0,2.81,-0.79,0.75,0.07,0.08,lit);
+  let loaded: Layout | undefined;
+  let facility: ReturnType<typeof buildFacility> | undefined;
   const people = new Map<number,T.Group>();
   function avatar(id: number) {
     const g = new T.Group(); scene.add(g);
@@ -119,7 +128,14 @@ export function createScene(canvas: HTMLCanvasElement) {
   cone.position.z = -1.36; cone.rotation.x = Math.PI/2; torch.add(cone);
   camera.position.set(-0.7,1.59,3); camera.rotation.x = -0.12;
   let previousOwner: number | null | undefined;
-  function render(state: Snapshot | undefined, self: number, yaw: number, pitch: number, dt: number) {
+  function render(state: Snapshot | undefined, self: number, yaw: number, pitch: number, dt: number, layout?: Layout) {
+    if (layout && layout !== loaded) {
+      facility?.dispose();
+      facility = buildFacility(layout,painted('#c6ccc6','#8e9890'));
+      scene.add(facility.root);
+      loaded = layout;
+    }
+    if (facility && state) facility.update(state.opened ?? []);
     if (state) {
       const blend = 1 - Math.exp(-18 * dt);
       for (const p of state.players) {

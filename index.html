@@ -31,11 +31,11 @@
   </section>
   <main>
     <canvas id="scene" aria-label="First-person view of the relay room"></canvas>
-    <header><div><span class="lamp-icon" aria-hidden="true">◈</span> RELAY ROOM</div><span id="connection" role="status">Connecting…</span></header>
+    <header><div><span class="lamp-icon" aria-hidden="true">◈</span> RELAY ROOM <span id="sector" hidden></span></div><span id="connection" role="status">Connecting…</span></header>
     <section id="brief">
-      <p class="eyebrow">Local co-op test</p>
+      <p class="eyebrow" id="brief-type">Local co-op test</p>
       <h1>Relay Room</h1>
-      <p>Meet at the yellow line. Carry the inspection light through the doorway and pass it to your partner.</p>
+      <p id="brief-instructions">Meet at the yellow line. Carry the inspection light through the doorway and pass it to your partner.</p>
       <button id="enter" disabled>Enter room</button>
       <p class="hint" id="control-hint">WASD to walk · Mouse or arrows to look</p>
     </section>
@@ -43,11 +43,12 @@
     <div id="touch-controls" hidden>
       <div id="move-pad" role="group" aria-label="Movement joystick"><span id="thumb"></span></div>
       <div id="touch-actions">
+        <button id="open-door" hidden>Open bulkhead</button>
         <button id="take" disabled>Pick up</button>
         <button id="toggle" disabled>Light off</button>
       </div>
     </div>
-    <aside id="diagnostics" hidden><h2>Room diagnostics</h2><pre id="stats"></pre><button id="outage">Simulate 2 s outage</button></aside>
+    <aside id="diagnostics" hidden><h2>Room diagnostics</h2><div id="floor-plan" hidden><canvas id="layout-map" width="300" height="175" aria-label="Facility floor plan"></canvas><small>I · Intake　R · Relay　X · Exit</small></div><pre id="stats"></pre><button id="outage">Simulate 2 s outage</button></aside>
     <footer><button id="live-leave" hidden>Leave to hub</button><span id="action">Waiting for room</span><button id="debug" aria-expanded="false">Diagnostics · G</button></footer>
   </main>
   <script type="module" src="/src/main.ts"></script>

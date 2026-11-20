@@ -27,6 +27,8 @@ Use TypeScript, Three.js, and Vite as the working stack. Start with two desktop 
 
 **Pass when** two guests enter through the hub, join the same lobby, start the flashlight prototype, and return to the hub with their seats released. A guest outside the room cannot join its simulation.
 
+**Passed on November 20, 2026.** The project owner confirmed the local Game Hub playtest worked. The automated browser test also verified private-code entry, flashlight ownership after refresh, rejection of an outside guest, and seat release before starting a fresh room.
+
 ## Phase 4 — Generate shared random layouts
 
 - Author a small kit of rooms and corridors with matching doorways. Generate a connected route from entrance to objective to exit, then place branches and loops so players can split up and regroup. Vary the routes players take as well as the props they see.
@@ -34,6 +36,8 @@ Use TypeScript, Three.js, and Vite as the working stack. Start with two desktop 
 - Check for overlapping rooms, blocked doorways, and unreachable objectives, accounting for player collision size. Bound generation attempts and supply a known playable layout if they fail. Save failing seeds for regression tests.
 
 **Pass when** a repeatable batch of 1,000 seeds yields playable layouts or the documented fallback, selected seeds produce visibly different routes, and two clients agree on walls, doors, and objectives after a refresh. Track fallback frequency so a broken generator cannot quietly ship one map.
+
+**Automated verification passed on November 20, 2026.** Version 1 produced 977 distinct route graphs across seeds 0–999, with zero fallbacks. Two Game Hub guests received identical floor plans. Refreshing the operator who opened the intake bulkhead restored its open state, the same layout, and the held flashlight.
 
 ## Phase 5 — Finish one playable horror round
 

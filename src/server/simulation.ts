@@ -1,8 +1,23 @@
 import { randomUUID } from 'node:crypto';
-import { canTake, clearAt } from '../room.ts';
+import { canTake, clearAt, walls } from '../room.ts';
 import type { Action, Input, Player, Snapshot } from '../room.ts';
 
+import { blockers, geometryFor, nearbyDoor, playerRadius } from '../layout.ts';
+import type { Layout, Geometry, Rect } from '../layout.ts';
+
 export class Simulation {
+  readonly layout?: Layout;
+  readonly geometry?: Geometry;
+  obstacles: Rect[] = walls;
+
+  constructor(layout?: Layout) {
+    this.layout = layout;
+    if (layout) {
+      this.geometry = geometryFor(layout);
+      this.state.opened = [];
+      this.obstacles = blockers(this.geometry,[]);
+    }
+  }
   state: Snapshot = { round: randomUUID(), update: 0, players: [], lamp: { x: 0, y: 0.14, z: 2, yaw: 0, pitch: 0, on: true, owner: null } };
   inputs = new Map<number, Input>();
 
@@ -28,8 +43,8 @@ export class Simulation {
       const step = 3.3 * dt / Math.max(1, Math.hypot(input.forward, input.right));
       const x = p.x + (Math.cos(p.yaw) * input.right - Math.sin(p.yaw) * input.forward) * step;
       const z = p.z - (Math.cos(p.yaw) * input.forward + Math.sin(p.yaw) * input.right) * step;
-      if (clearAt(x, p.z, 0.25)) p.x = x;
-      if (clearAt(p.x, z, 0.25)) p.z = z;
+      if (clearAt(x, p.z, playerRadius,this.obstacles)) p.x = x;
+      if (clearAt(p.x, z, playerRadius,this.obstacles)) p.z = z;
       if (this.state.lamp.owner === p.id) this.hold(p);
     }
     this.state.update++;
@@ -39,7 +54,7 @@ export class Simulation {
     const lamp = this.state.lamp;
     const x = p.x + 0.24 * Math.cos(p.yaw) - 0.38 * Math.sin(p.yaw);
     const z = p.z - 0.24 * Math.sin(p.yaw) - 0.38 * Math.cos(p.yaw);
-    const clear = clearAt(x, z, 0.14) && clearAt((x + p.x) / 2, (z + p.z) / 2, 0.14);
+    const clear = clearAt(x, z, 0.14,this.obstacles) && clearAt((x + p.x) / 2, (z + p.z) / 2, 0.14,this.obstacles);
     Object.assign(lamp, { x: clear ? x : p.x, z: clear ? z : p.z, y: 1.28, yaw: p.yaw, pitch: p.pitch });
   }
 
@@ -47,7 +62,15 @@ export class Simulation {
     const p = this.state.players.find(player => player.id === id);
     if (!p) return;
     const lamp = this.state.lamp;
-    if (action === 'take' && canTake(p, lamp)) {
+    if (action === 'open-door' && this.geometry && this.state.opened) {
+      const door = nearbyDoor(p,this.geometry,this.state.opened);
+      if (door) {
+        this.state.opened.push(door.id);
+        this.obstacles = blockers(this.geometry,this.state.opened);
+      }
+      return;
+    }
+    if (action === 'take' && canTake(p, lamp,this.obstacles)) {
       lamp.owner = id;
       this.hold(p);
     } else if (lamp.owner === id && action === 'drop') {

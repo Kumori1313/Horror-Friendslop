@@ -1,3 +1,6 @@
+import { createHash } from 'node:crypto';
+import { generatorVersion } from '../layout.ts';
+import { generateLayout } from './generate-layout.ts';
 import type { EventEmitter } from 'node:events';
 import { WebSocket } from 'ws';
 import { createLiveRoom, listenForSockets } from './socket.ts';
@@ -7,6 +10,10 @@ const uuid = /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i;
 // The runtime calls the same guarded RPC as a browser, using the guest's access
 // token and a publishable key. Postgres supplies the verified actor and seat.
 export function attachHubRooms(server: EventEmitter, backend: string, key: string, clientOrigin?: string) {
+  const override = process.env.RELAY_LAYOUT_SEED;
+  if (override !== undefined && (!/^\d+$/.test(override) || Number(override)>0xffffffff)) {
+    throw Error('RELAY_LAYOUT_SEED must be an unsigned 32-bit integer.');
+  }
   const endpoint = new URL('/rest/v1/rpc/room_action',backend);
   if (!key || (endpoint.protocol !== 'https:' && !['localhost','127.0.0.1'].includes(endpoint.hostname))) {
     throw Error('Configure a trusted Supabase endpoint and publishable key for Relay Room.');
@@ -45,11 +52,21 @@ export function attachHubRooms(server: EventEmitter, backend: string, key: strin
         }
         const member = await verify();
         if (!member || ws.readyState !== WebSocket.OPEN) return;
+        if (msg.layoutVersion !== generatorVersion) {
+          ws.close(1008,'Refresh the game for the current layout version');
+          return;
+        }
         clearTimeout(deadline);
         const id = lobby + '/' + round;
         let live = rooms.get(id);
         function discard() { live?.stop(); rooms.delete(id); }
-        if (!live) { live = createLiveRoom(20000,discard); rooms.set(id,live); }
+        if (!live) {
+          const seed = override === undefined ? createHash('sha256').update(id).digest().readUInt32LE() : Number(override);
+          const layout = generateLayout(seed);
+          if (layout.fallback) console.warn('Relay layout fallback',layout.version,layout.seed);
+          live = createLiveRoom(20000,discard,layout);
+          rooms.set(id,live);
+        }
         live.accept(ws,member.seat);
         ws.emit('message',JSON.stringify({type:'join',ticket:msg.ticket}));
         if (!live.occupied()) discard();

@@ -13,7 +13,8 @@
     "test": "node --experimental-strip-types --test tests/*.test.ts",
     "test:network": "node --experimental-strip-types --test tests/network.test.ts",
     "start:runtime": "node --experimental-strip-types --env-file-if-exists=.env.local scripts/start-runtime.mjs",
-    "dev:hub": "vite --base /relay-room/"
+    "dev:hub": "vite --base /relay-room/",
+    "test:layouts": "node --experimental-strip-types --test tests/layout.test.ts"
   },
   "dependencies": {
     "@supabase/supabase-js": "2.119.0",

@@ -1,4 +1,7 @@
+import { drawMap } from './layout-map.ts';
 import './style.css';
+import { blockers, footprint, generatorVersion, geometryFor, nearbyDoor, roomNames } from './layout.ts';
+import type { Layout, Geometry, Rect } from './layout.ts';
 import { canTake } from './room.ts';
 import { RoomConnection } from './connection.ts';
 import type { Admission, Ticket, Snapshot } from './room.ts';
@@ -34,6 +37,11 @@ function start(render: ReturnType<typeof createScene>, admission?: () => Promise
   const delay = Math.max(0,Math.min(500,Number(new URLSearchParams(location.search).get('delay')) || 0));
   let id = 0, yaw = 0, pitch = -0.12;
   let state: Snapshot | undefined;
+  let layout: Layout | undefined, geometry: Geometry | undefined;
+  let obstacles: Rect[] | undefined;
+  const map = element<HTMLCanvasElement>('layout-map');
+  let doorState = '';
+  const doorButton = element<HTMLButtonElement>('open-door');
   let playing = false;
   const keys = new Set<string>();
   let touchMode = matchMedia('(pointer: coarse)').matches;
@@ -74,6 +82,8 @@ function start(render: ReturnType<typeof createScene>, admission?: () => Promise
     if (playing && state) connection.action(state.lamp.owner === id ? 'drop' : 'take');
   }
   function switchLight() { if (playing && state) connection.action('toggle'); }
+  function openDoor() { if (playing && state && geometry) connection.action('open-door'); }
+  doorButton.onclick = openDoor;
   take.onclick = useFlashlight;
   toggle.onclick = switchLight;
   showControls();
@@ -119,6 +129,7 @@ function start(render: ReturnType<typeof createScene>, admission?: () => Promise
     if (e.repeat) return;
     keys.add(e.code);
     if (e.code === 'KeyE') useFlashlight();
+    if (e.code === 'KeyR') openDoor();
     if (e.code === 'KeyF') switchLight();
     if (e.code === 'Escape') pause();
     input();
@@ -131,18 +142,31 @@ function start(render: ReturnType<typeof createScene>, admission?: () => Promise
     status.textContent = 'Operator ' + id + '  ·  ' + s.players.filter(player => player.connected).length + '/2 online';
     const l = s.lamp;
     const holding = l.owner === id;
+    const opened = s.opened ?? [];
+    const door = geometry && nearbyDoor(p,geometry,opened);
+    doorButton.hidden = !door;
+    const reachable = canTake(p,l,obstacles);
+    if (layout) {
+      const current = layout.rooms.find(room => {
+        const f = footprint(room);
+        return Math.abs(f.x-p.x)<=f.w/2 && Math.abs(f.z-p.z)<=f.d/2;
+      });
+      element('sector').textContent = current ? roomNames[current.kind] : 'Connecting corridor';
+    }
     if (touchMode) {
-      take.disabled = !holding && !canTake(p,l);
+      take.disabled = !holding && !reachable;
       take.textContent = holding ? 'Drop' : 'Pick up';
       toggle.disabled = !holding;
       toggle.textContent = l.on ? 'Light off' : 'Light on';
     }
     if (!brief.hidden) prompt.textContent = s.players.length === 2 ? 'Both seats occupied' : 'Waiting for a partner';
     else if (!playing) prompt.textContent = touchMode ? 'Tap the room to resume' : 'Click the room to resume';
+    else if (door) prompt.textContent = touchMode ? 'Bulkhead within reach' : 'R  Open bulkhead';
     else if (holding) prompt.textContent = touchMode ? 'You hold the flashlight' : 'E  Drop flashlight   ·   F  Switch ' + (l.on ? 'off' : 'on');
     else if (l.owner) prompt.textContent = 'Operator ' + l.owner + ' holds the flashlight';
-    else prompt.textContent = canTake(p,l) ? (touchMode ? 'Flashlight within reach' : 'E  Pick up flashlight') : 'Move closer to the flashlight';
+    else prompt.textContent = reachable ? (touchMode ? 'Flashlight within reach' : 'E  Pick up flashlight') : 'Move closer to the flashlight';
     if (!panel.hidden) {
+      if (layout) drawMap(map,layout,s);
       const pos = (x: number,z: number) => x.toFixed(2) + ', ' + z.toFixed(2);
       stats.textContent = [
         'Round   ' + s.round, 'Update  ' + s.update, 'RTT     ' + Math.round(connection.metrics.rtt) + ' ms',
@@ -152,16 +176,43 @@ function start(render: ReturnType<typeof createScene>, admission?: () => Promise
         ...s.players.map(player => 'P' + player.id + '  x,z  ' + pos(player.x,player.z) + (player.connected ? '' : ' (reconnecting)')),
         'Light   ' + (l.owner ? 'P' + l.owner : 'floor') + (l.on ? ' · on' : ' · off'),
         'Lamp x,z  ' + pos(l.x,l.z),
+        ...(layout ? [
+          'Layout v' + layout.version + ' · seed ' + layout.seed + (layout.fallback ? ' (fallback)' : ''),
+          'Rooms   ' + layout.rooms.length + ' · passages ' + layout.passages.length,
+          'Relay   ' + layout.objectiveId + ' · Exit ' + layout.exitId,
+          'Open doors  ' + (opened.join(', ') || 'none'),
+        ] : []),
       ].join('\n');
     }
   }
   const connection = new RoomConnection(url.href,saved,{
-    joined(seat,ticket) {
+    joined(seat,ticket,plan) {
+      if (admission && plan?.version !== generatorVersion) {
+        connection.stop();
+        status.textContent = 'Incompatible layout version';
+        prompt.textContent = 'Update the game and runtime, then refresh.';
+        return;
+      }
+      if (plan && (!layout || plan.seed !== layout.seed || plan.version !== layout.version)) {
+        layout = plan;
+        geometry = geometryFor(plan);
+        obstacles = blockers(geometry,[]);
+        doorState = '';
+        element('sector').hidden = false;
+        element('floor-plan').hidden = false;
+        element('brief-type').textContent = 'Facility exploration';
+        element('brief-instructions').textContent = 'Carry the light from Intake to the relay station, then find the exit bay. Follow the signs above each passage.';
+      }
       id = seat;
       sessionStorage.setItem(key,JSON.stringify(ticket));
     },
     snapshot(snapshot, first) {
       state = snapshot;
+      const opened = snapshot.opened ?? [];
+      if (geometry && doorState !== opened.join(',')) {
+        doorState = opened.join(',');
+        obstacles = blockers(geometry,opened);
+      }
       if (first) {
         const self = state.players.find(p => p.id === id)!;
         yaw = self.yaw;
@@ -197,7 +248,7 @@ function start(render: ReturnType<typeof createScene>, admission?: () => Promise
       pitch = Math.max(-1.35,Math.min(1.35,pitch + (Number(keys.has('ArrowUp'))-Number(keys.has('ArrowDown'))) * dt * 1.6));
       if (now-lastSent >= 33) { input(); lastSent = now; }
     }
-    render(state,id,yaw,pitch,dt);
+    render(state,id,yaw,pitch,dt,layout);
     requestAnimationFrame(frame);
   }
   requestAnimationFrame(frame);
@@ -206,7 +257,7 @@ function start(render: ReturnType<typeof createScene>, admission?: () => Promise
 try {
   if (location.pathname.startsWith('/relay-room/')) {
     const { mountLobby } = await import('./lobby.ts');
-    await mountLobby((auth,scope) => start(createScene(canvas),auth,scope));
+    await mountLobby((auth,scope) => start(createScene(canvas,true),auth,scope));
   } else start(createScene(canvas));
 }
 catch (error) {

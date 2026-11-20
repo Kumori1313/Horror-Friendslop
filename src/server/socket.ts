@@ -3,6 +3,7 @@ import type { EventEmitter } from 'node:events';
 import type { IncomingMessage } from 'node:http';
 import type { Duplex } from 'node:stream';
 import { WebSocketServer, WebSocket } from 'ws';
+import type { Layout } from '../layout.ts';
 import { Simulation } from './simulation.ts';
 import type { Input, ServerMessage } from '../room.ts';
 
@@ -43,9 +44,9 @@ export function listenForSockets(server: EventEmitter, path: string, maxPayload:
   return shutdown;
 }
 
-export function createLiveRoom(graceMs: number, onEmpty?: () => void) {
+export function createLiveRoom(graceMs: number, onEmpty?: () => void, layout?: Layout) {
   const seats = new Map<string, Seat>();
-  let room = new Simulation();
+  let room = new Simulation(layout);
   function send(socket: WebSocket, message: ServerMessage) {
     if (socket.readyState === WebSocket.OPEN) socket.send(JSON.stringify(message));
   }
@@ -88,7 +89,7 @@ export function createLiveRoom(graceMs: number, onEmpty?: () => void) {
         seat.lastPong = Date.now();
         stopWalking(seat.id);
         room.state.players.find(p => p.id === seat!.id)!.connected = true;
-        send(ws, { type: 'joined', id: seat.id, ticket: { round: room.state.round, token: seat.token }, lastAction: seat.lastAction });
+        send(ws, { type: 'joined', id: seat.id, ticket: { round: room.state.round, token: seat.token }, lastAction: seat.lastAction, layout:room.layout });
         send(ws, { type: 'state', state: room.state });
         return;
       }
@@ -100,7 +101,7 @@ export function createLiveRoom(graceMs: number, onEmpty?: () => void) {
         room.inputs.set(seat.id,m.input);
       }
       if (m.type === 'action' && Number.isSafeInteger(m.seq) && m.seq > seat.lastAction &&
-          ['take','drop','toggle'].includes(m.action)) {
+          ['take','drop','toggle','open-door'].includes(m.action)) {
         seat.lastAction = m.seq;
         room.act(seat.id,m.action);
       }
@@ -125,7 +126,7 @@ export function createLiveRoom(graceMs: number, onEmpty?: () => void) {
         seats.delete(seat.token);
       } else if (now - seat.lastInput > 350) stopWalking(seat.id);
     }
-    if (!seats.size) { room = new Simulation(); onEmpty?.(); return; }
+    if (!seats.size) { room = new Simulation(layout); onEmpty?.(); return; }
     room.tick(1 / 30);
     for (const {ws,lastPong} of seats.values()) {
       if (ws?.readyState !== WebSocket.OPEN) continue;

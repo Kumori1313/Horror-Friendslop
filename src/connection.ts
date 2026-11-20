@@ -1,8 +1,9 @@
+import { generatorVersion, type Layout } from './layout.ts';
 import { newerSnapshot } from './room.ts';
 import type { Action, Admission, ClientMessage, Input, ServerMessage, Snapshot, Ticket } from './room.ts';
 
 interface Events {
-  joined(id: number, ticket: Ticket): void;
+  joined(id: number, ticket: Ticket, layout?: Layout): void;
   snapshot(state: Snapshot, first: boolean): void;
   offline(reason: string, ended: boolean): void;
 }
@@ -41,7 +42,7 @@ export class RoomConnection {
     ws.onopen = async () => {
       try {
         const admission = await this.admission?.();
-        if (this.socket === ws) this.send({type:'join', ticket:this.ticket, admission});
+        if (this.socket === ws) this.send({type:'join', ticket:this.ticket, admission, layoutVersion:admission ? generatorVersion : undefined});
       } catch { ws.close(4001,'Guest session unavailable'); }
     };
     ws.onmessage = event => {
@@ -52,7 +53,7 @@ export class RoomConnection {
         if (m.type === 'joined') {
           this.ticket = m.ticket;
           this.seq = m.lastAction;
-          this.events.joined(m.id,m.ticket);
+          this.events.joined(m.id,m.ticket,m.layout);
         } else if (m.type === 'state' && this.ticket && newerSnapshot(m.state,this.ticket.round,this.latest)) {
           const first = this.latest < 0;
           this.latest = m.state.update;

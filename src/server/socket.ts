@@ -101,7 +101,7 @@ export function createLiveRoom(graceMs: number, onEmpty?: () => void, layout?: L
         room.inputs.set(seat.id,m.input);
       }
       if (m.type === 'action' && Number.isSafeInteger(m.seq) && m.seq > seat.lastAction &&
-          ['take','drop','toggle','open-door'].includes(m.action)) {
+          ['take','drop','toggle','open-door','operate'].includes(m.action)) {
         seat.lastAction = m.seq;
         room.act(seat.id,m.action);
       }

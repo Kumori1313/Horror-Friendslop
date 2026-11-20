@@ -25,8 +25,18 @@ export function drawMap(canvas: HTMLCanvasElement, layout: Layout, state: Snapsh
     ctx.fillStyle='#15201f'; ctx.font='bold 13px monospace'; ctx.textAlign='center'; ctx.textBaseline='middle';
     ctx.fillText(label,x(room.x),z(room.z));
   }
+  const diver = state.mission?.diver;
+  if (diver && (diver.mode === 'warning' || diver.mode === 'strike')) {
+    const bay = byId.get(diver.bay)!;
+    ctx.strokeStyle = '#ff714d'; ctx.lineWidth = 2;
+    ctx.strokeRect(x(bay.x)-10,z(bay.z)-10,20,20);
+  }
   for (const p of state.players) {
     ctx.fillStyle=p.id===1?'#ff8451':'#6df5ed';
+    if (state.mission?.down.some(d => d.id === p.id)) {
+      ctx.fillStyle='#fff'; ctx.fillRect(x(p.x)-4,z(p.z)-1,8,3); ctx.fillRect(x(p.x)-1,z(p.z)-4,3,8);
+      continue;
+    }
     ctx.beginPath(); ctx.arc(x(p.x),z(p.z),3,0,2*Math.PI); ctx.fill();
   }
 }

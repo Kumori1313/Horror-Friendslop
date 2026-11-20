@@ -1,6 +1,6 @@
 # Relay Room
 
-Two operators share one flashlight in a seeded industrial facility. The standalone synchronization test uses a fixed maintenance room. A local TypeScript simulation owns movement, collision, and the light. Both browser windows send inputs and receive the same room state over WebSocket.
+Two operators share one flashlight in a seeded industrial facility. Restore the exit circuit, survive the Bell Diver, and extract together. The standalone synchronization test uses a fixed maintenance room. A local TypeScript simulation owns movement, collision, and the light. Both browser windows send inputs and receive the same room state over WebSocket.
 
 ## Start a local test
 
@@ -66,9 +66,17 @@ In the hub checkout, `npm run test:relay` runs the browser acceptance test on po
 
 Start a **new Game Hub room** to get a new facility. Both operators spawn at Intake within reach of the flashlight. Explore the connected rooms and corridors, locate the **Relay station**, then find the **Exit bay**. Overhead signs name the room ahead. At a closed bulkhead, press **R** or tap **Open bulkhead** on a phone. The door opens for both players.
 
-Open **Diagnostics** for the shared floor plan, player positions, seed, generator version, objective and exit IDs, and opened bulkheads. Amber links mark closed bulkheads. Refresh while holding the light to check that your room, door state, and flashlight are restored. Room exploration is the Phase 4 milestone. The playable horror objective and round ending follow in Phase 5.
+Open **Diagnostics** for the shared floor plan, player positions, seed, generator version, objective and exit IDs, and opened bulkheads. Amber links mark closed bulkheads. Refresh while holding the light to check that your room, door state, and flashlight are restored. The map also marks the Bell Diver’s target bay in red and a downed operator with a white cross.
 
 Run `npm run test:layouts` to check seeds 0–999, graph variety, player clearance, authoritative door collision, and the fixed fallback. The generator tries at most eight candidates per seed. Batch validation writes any fallback or failing seeds to `test-results/layout-seeds.json`. To replay a reported seed with this generator version, stop the local shared server and run `RELAY_LAYOUT_SEED=19 npm run dev:relay` from the **hub** checkout. Omit the override to restore per-room generation. The plan is sent on admission and resume, with only live door and item state in the regular snapshots.
+
+### Play the emergency callout
+
+1. One operator takes the flashlight with **E** or **Pick up**. The other waits on the center pad at Intake. Use the floor plan in **Diagnostics** to find the Relay station (R) and Exit bay (X).
+2. Stand on the Relay pad with the flashlight on and press **Q** to **Send test tone**. Stay there while the Intake operator presses **Q** to **Answer relay**. On a phone, tap the named action.
+3. The Bell Diver wakes above Relay. Knocks, a warning naming the bay, and a glowing floor circle give four seconds to get clear. It drops inside the circle. On subsequent passes it targets the bay nearest the conscious operator carrying the lit lamp. Without a lit carrier it follows a conscious operator.
+4. A struck operator drops the light. A teammate has 75 seconds to reach them and press **Q** or **Revive partner**. Both operators going down or a rescue timing out ends the shift.
+5. Meet on the green center pad at Exit and select **Extract crew**. Both players see the shift report. **Return to lobbies** releases the seats so one player can create a fresh match and share its new code.
 
 ### Hosted runtime
 

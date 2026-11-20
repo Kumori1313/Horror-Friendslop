@@ -1,4 +1,5 @@
 import * as T from 'three';
+import { strikeRadius } from './mission.ts';
 import { buildFacility } from './facility-scene.ts';
 import type { Layout } from './layout.ts';
 import { walls } from './room.ts';
@@ -111,6 +112,23 @@ export function createScene(canvas: HTMLCanvasElement, generated = false) {
     box(0,1.23,0,0.45,0.055,0.30,yellow,g);
     people.set(id,g); return g;
   }
+  // The diver hangs from the ceiling bell, then folds its tines down to the floor.
+  const diver = new T.Group();
+  const tines = new T.Group();
+  const alarm = new T.MeshBasicMaterial({color:0xff6445});
+  const bell = new T.Mesh(new T.ConeGeometry(0.58,0.65,10),material(0x463832));
+  bell.position.y = 0.7;
+  const ring = new T.Mesh(new T.RingGeometry(strikeRadius-0.08,strikeRadius,64),
+    new T.MeshBasicMaterial({color:0xff774e,side:T.DoubleSide}));
+  ring.rotation.x = -Math.PI/2; ring.position.y = 0.025;
+  tines.add(bell);
+  for (let i=0;i<6;i++) {
+    const angle = i*Math.PI/3, x = Math.cos(angle), z = Math.sin(angle);
+    const tine = box(x*0.43,-0.07,z*0.43,0.095,1.3,0.095,dark,tines);
+    tine.rotation.z = z*0.16; tine.rotation.x = x*0.16;
+    box(x*0.48,0.38,z*0.48,0.13,0.09,0.13,alarm,tines);
+  }
+  diver.add(tines,ring); scene.add(diver); diver.visible = false;
   const torch = new T.Group(); torch.rotation.order = 'YXZ'; scene.add(torch);
   const barrel = new T.Mesh(new T.CylinderGeometry(0.085,0.064,0.32,12),yellow);
   barrel.rotation.x = -Math.PI/2; torch.add(barrel);
@@ -138,14 +156,25 @@ export function createScene(canvas: HTMLCanvasElement, generated = false) {
     if (facility && state) facility.update(state.opened ?? []);
     if (state) {
       const blend = 1 - Math.exp(-18 * dt);
+      const creature = state.mission?.diver;
+      const target = layout?.rooms.find(r => r.id === creature?.bay);
+      diver.visible = !!target && (creature?.mode === 'warning' || creature?.mode === 'strike');
+      if (target && creature && diver.visible) {
+        diver.position.set(target.x,0,target.z);
+        tines.position.y = creature.mode === 'strike' ? 0.75 : 2.8+Math.cos(creature.seconds*7)*0.12;
+        tines.rotation.y = creature.seconds*0.45;
+      }
       for (const p of state.players) {
+        const down = state.mission?.down.some(d => d.id === p.id);
         if (p.id === self) {
+          camera.position.y = T.MathUtils.lerp(camera.position.y,down ? 0.45 : 1.59,blend);
           camera.position.x = T.MathUtils.lerp(camera.position.x,p.x,blend);
           camera.position.z = T.MathUtils.lerp(camera.position.z,p.z,blend);
           camera.rotation.set(pitch,yaw,0,'YXZ');
         } else {
           let g = people.get(p.id);
           if (!g) { g = avatar(p.id); g.position.set(p.x,0,p.z); }
+          g.scale.y = down ? 0.35 : 1;
           g.position.x += (p.x-g.position.x)*blend; g.position.z += (p.z-g.position.z)*blend;
           g.rotation.y += Math.atan2(Math.sin(p.yaw-g.rotation.y),Math.cos(p.yaw-g.rotation.y))*blend;
         }

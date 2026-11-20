@@ -1,3 +1,5 @@
+import { assignment, finished } from './mission.ts';
+import { missionHud } from './mission-hud.ts';
 import { drawMap } from './layout-map.ts';
 import './style.css';
 import { blockers, footprint, generatorVersion, geometryFor, nearbyDoor, roomNames } from './layout.ts';
@@ -42,6 +44,9 @@ function start(render: ReturnType<typeof createScene>, admission?: () => Promise
   const map = element<HTMLCanvasElement>('layout-map');
   let doorState = '';
   const doorButton = element<HTMLButtonElement>('open-door');
+  const hud = missionHud();
+  const operate = element<HTMLButtonElement>('operate');
+  operate.onclick = () => { if (playing) connection.action('operate'); };
   let playing = false;
   const keys = new Set<string>();
   let touchMode = matchMedia('(pointer: coarse)').matches;
@@ -97,7 +102,8 @@ function start(render: ReturnType<typeof createScene>, admission?: () => Promise
     keys.clear(); playing = false; resetStick(); resetLook(); showControls(); reticle.hidden = true; input();
   }
   function control() {
-    if (!state) return;
+    if (!state || finished(state.mission?.stage)) return;
+    if (state.mission) hud.enableSound();
     brief.hidden = true; reticle.hidden = false; playing = true;
     // Arrow-key look remains available when pointer capture is unavailable.
     showControls();
@@ -128,6 +134,7 @@ function start(render: ReturnType<typeof createScene>, admission?: () => Promise
     if (e.code.startsWith('Arrow')) e.preventDefault();
     if (e.repeat) return;
     keys.add(e.code);
+    if (e.code === 'KeyQ') operate.click();
     if (e.code === 'KeyE') useFlashlight();
     if (e.code === 'KeyR') openDoor();
     if (e.code === 'KeyF') switchLight();
@@ -144,23 +151,38 @@ function start(render: ReturnType<typeof createScene>, admission?: () => Promise
     const holding = l.owner === id;
     const opened = s.opened ?? [];
     const door = geometry && nearbyDoor(p,geometry,opened);
-    doorButton.hidden = !door;
+    const down = s.mission?.down.some(d => d.id === id);
+    doorButton.hidden = !door || !!down;
+    const task = layout && obstacles && assignment(layout,s,p,obstacles);
+    operate.hidden = !task;
+    if (task) operate.textContent = task;
+    if (layout && s.mission) {
+      if (finished(s.mission.stage)) {
+        if (playing) pause();
+        brief.hidden = true;
+        if (document.pointerLockElement) document.exitPointerLock();
+      }
+      hud.update(layout,s,p,!brief.hidden);
+    }
     const reachable = canTake(p,l,obstacles);
     if (layout) {
       const current = layout.rooms.find(room => {
         const f = footprint(room);
         return Math.abs(f.x-p.x)<=f.w/2 && Math.abs(f.z-p.z)<=f.d/2;
       });
-      element('sector').textContent = current ? roomNames[current.kind] : 'Connecting corridor';
+      element('sector').textContent = current ? roomNames[current.kind]+' · '+current.id : 'Connecting corridor';
     }
     if (touchMode) {
-      take.disabled = !holding && !reachable;
+      take.disabled = !!down || (!holding && !reachable);
       take.textContent = holding ? 'Drop' : 'Pick up';
-      toggle.disabled = !holding;
+      toggle.disabled = !!down || !holding;
       toggle.textContent = l.on ? 'Light off' : 'Light on';
     }
     if (!brief.hidden) prompt.textContent = s.players.length === 2 ? 'Both seats occupied' : 'Waiting for a partner';
+    else if (finished(s.mission?.stage)) prompt.textContent = 'Shift ended';
     else if (!playing) prompt.textContent = touchMode ? 'Tap the room to resume' : 'Click the room to resume';
+    else if (task) prompt.textContent = touchMode ? task : 'Q  '+task;
+    else if (down) prompt.textContent = 'Waiting for rescue';
     else if (door) prompt.textContent = touchMode ? 'Bulkhead within reach' : 'R  Open bulkhead';
     else if (holding) prompt.textContent = touchMode ? 'You hold the flashlight' : 'E  Drop flashlight   ·   F  Switch ' + (l.on ? 'off' : 'on');
     else if (l.owner) prompt.textContent = 'Operator ' + l.owner + ' holds the flashlight';
@@ -174,6 +196,7 @@ function start(render: ReturnType<typeof createScene>, admission?: () => Promise
         'RX/TX   ' + Math.round(connection.metrics.downRate) + ' / ' + Math.round(connection.metrics.upRate) + ' B/s',
         'Recovery  ' + Math.round(connection.metrics.recovery) + ' ms',
         ...s.players.map(player => 'P' + player.id + '  x,z  ' + pos(player.x,player.z) + (player.connected ? '' : ' (reconnecting)')),
+        ...(s.mission ? ['Shift   '+s.mission.stage, ...s.mission.down.map(d => 'Down    P'+d.id)] : []),
         'Light   ' + (l.owner ? 'P' + l.owner : 'floor') + (l.on ? ' · on' : ' · off'),
         'Lamp x,z  ' + pos(l.x,l.z),
         ...(layout ? [
@@ -200,8 +223,8 @@ function start(render: ReturnType<typeof createScene>, admission?: () => Promise
         doorState = '';
         element('sector').hidden = false;
         element('floor-plan').hidden = false;
-        element('brief-type').textContent = 'Facility exploration';
-        element('brief-instructions').textContent = 'Carry the light from Intake to the relay station, then find the exit bay. Follow the signs above each passage.';
+        element('brief-type').textContent = 'Emergency callout';
+        element('brief-instructions').textContent = 'One of you stays at Intake. The other takes the lit flashlight to Relay. Work the center pads to restore the exit. If the ceiling knocks, clear the marked circle. Diagnostics shows the floor plan.';
       }
       id = seat;
       sessionStorage.setItem(key,JSON.stringify(ticket));
@@ -223,6 +246,8 @@ function start(render: ReturnType<typeof createScene>, admission?: () => Promise
     },
     offline(reason, ended) {
       state = undefined;
+      element('mission').hidden = true;
+      element('result').hidden = true;
       pause();
       if (document.pointerLockElement) document.exitPointerLock();
       status.textContent = ended ? reason : 'Reconnecting…';

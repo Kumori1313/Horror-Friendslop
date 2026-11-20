@@ -171,17 +171,18 @@ export async function mountLobby(launch: (authorize: () => Promise<Admission>, s
     });
   };
   el('hub-start').onclick = () => command(async () => { await rpc('start',{p_lobby:roomId}); await refresh(); });
-  function leave() {
+  function leave(destination = hubPath) {
     command(async () => {
       if (roomId) {
         try { await rpc('leave',{p_lobby:roomId}); }
         catch (failure) { if ((failure as {code?:string}).code !== '42501') throw failure; }
       }
-      location.assign(hubPath);
+      location.assign(destination);
     });
   }
-  el('hub-back').onclick = leave;
-  el('live-leave').onclick = leave;
+  el('hub-back').onclick = () => leave();
+  el('live-leave').onclick = () => leave();
+  el('replay').onclick = () => leave('/relay-room/');
   el('hub-refresh').onclick = () => command(roomId ? refresh : restore);
   if (query.has('ended')) error.textContent = 'The round has ended.';
   client.auth.onAuthStateChange((event,session) => {

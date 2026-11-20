@@ -1,4 +1,5 @@
 import type { Layout, Rect } from './layout.ts';
+import type { Mission } from './mission.ts';
 export const walls = [
   { x: -5, z: 0, w: 0.25, d: 14 }, { x: 5, z: 0, w: 0.25, d: 14 },
   { x: 0, z: -7, w: 10, d: 0.25 }, { x: 0, z: 7, w: 10, d: 0.25 },
@@ -8,8 +9,8 @@ export interface Point { x: number; z: number }
 export interface Input { forward: number; right: number; yaw: number; pitch: number }
 export interface Player extends Point { connected: boolean; id: number; yaw: number; pitch: number }
 export interface Lamp extends Point { owner: number | null; on: boolean; y: number; yaw: number; pitch: number }
-export interface Snapshot { round: string; update: number; players: Player[]; lamp: Lamp; opened?: string[] }
-export type Action = 'take' | 'drop' | 'toggle' | 'open-door';
+export interface Snapshot { round: string; update: number; players: Player[]; lamp: Lamp; opened?: string[]; mission?: Mission }
+export type Action = 'take' | 'drop' | 'toggle' | 'open-door' | 'operate';
 export interface Ticket { round: string; token: string }
 export interface Admission { lobby: string; round: number; token: string }
 export type ClientMessage =

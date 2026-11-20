@@ -5,6 +5,9 @@ import type { Action, Input, Player, Snapshot } from '../room.ts';
 import { blockers, geometryFor, nearbyDoor, playerRadius } from '../layout.ts';
 import type { Layout, Geometry, Rect } from '../layout.ts';
 
+import { assignment, finished, station } from '../mission.ts';
+import { advanceMission, newMission, warn } from './mission.ts';
+
 export class Simulation {
   readonly layout?: Layout;
   readonly geometry?: Geometry;
@@ -15,6 +18,7 @@ export class Simulation {
     if (layout) {
       this.geometry = geometryFor(layout);
       this.state.opened = [];
+      this.state.mission = newMission();
       this.obstacles = blockers(this.geometry,[]);
     }
   }
@@ -30,16 +34,22 @@ export class Simulation {
   }
 
   leave(id: number) {
-    this.act(id, 'drop');
+    if (this.state.lamp.owner === id) Object.assign(this.state.lamp,{owner:null,y:0.14,pitch:0});
+    const mission = this.state.mission;
+    if (mission && !finished(mission.stage)) mission.stage = 'lost';
     this.inputs.delete(id);
     this.state.players = this.state.players.filter(p => p.id !== id);
   }
 
   tick(dt: number) {
+    this.state.update++;
+    const mission = this.state.mission;
+    if (finished(mission?.stage)) return;
     for (const p of this.state.players) {
       const input = this.inputs.get(p.id)!;
       p.yaw = input.yaw;
       p.pitch = input.pitch;
+      if (mission?.down.some(d => d.id === p.id)) continue;
       const step = 3.3 * dt / Math.max(1, Math.hypot(input.forward, input.right));
       const x = p.x + (Math.cos(p.yaw) * input.right - Math.sin(p.yaw) * input.forward) * step;
       const z = p.z - (Math.cos(p.yaw) * input.forward + Math.sin(p.yaw) * input.right) * step;
@@ -47,7 +57,7 @@ export class Simulation {
       if (clearAt(p.x, z, playerRadius,this.obstacles)) p.z = z;
       if (this.state.lamp.owner === p.id) this.hold(p);
     }
-    this.state.update++;
+    if (mission && this.layout) advanceMission(this.layout,this.state,mission,dt);
   }
 
   hold(p: Player) {
@@ -60,7 +70,20 @@ export class Simulation {
 
   act(id: number, action: Action) {
     const p = this.state.players.find(player => player.id === id);
-    if (!p) return;
+    const mission = this.state.mission;
+    if (!p?.connected || finished(mission?.stage) || mission?.down.some(d => d.id === id)) return;
+    if (this.layout && mission && action === 'operate') {
+      switch (assignment(this.layout,this.state,p,this.obstacles)) {
+        case 'Send test tone': mission.stage = 'answer'; break;
+        case 'Answer relay':
+          mission.stage = 'extract';
+          warn(mission,station(this.layout,'relay').id);
+          break;
+        case 'Revive partner': mission.down = []; break;
+        case 'Extract crew': mission.stage = 'won'; break;
+      }
+      return;
+    }
     const lamp = this.state.lamp;
     if (action === 'open-door' && this.geometry && this.state.opened) {
       const door = nearbyDoor(p,this.geometry,this.state.opened);

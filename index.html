@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <meta name="theme-color" content="#141b1a">
-  <title>Relay Room · Co-op test</title>
+  <title>Relay Room</title>
 </head>
 <body>
   <section id="hub-lobby" hidden>
@@ -39,10 +39,17 @@
       <button id="enter" disabled>Enter room</button>
       <p class="hint" id="control-hint">WASD to walk · Mouse or arrows to look</p>
     </section>
+    <aside id="mission" hidden><strong id="orders"></strong><span id="warning" role="status"></span></aside>
+    <section id="result" hidden aria-labelledby="result-title">
+      <p class="eyebrow">Shift report</p>
+      <h2 id="result-title"></h2><p id="result-detail"></p>
+      <button id="replay">Return to lobbies</button>
+    </section>
     <div id="reticle" hidden></div>
     <div id="touch-controls" hidden>
       <div id="move-pad" role="group" aria-label="Movement joystick"><span id="thumb"></span></div>
       <div id="touch-actions">
+        <button id="operate" hidden></button>
         <button id="open-door" hidden>Open bulkhead</button>
         <button id="take" disabled>Pick up</button>
         <button id="toggle" disabled>Light off</button>

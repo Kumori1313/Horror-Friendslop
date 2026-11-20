@@ -48,6 +48,8 @@ Use TypeScript, Three.js, and Vite as the working stack. Start with two desktop 
 
 **Pass when** a fresh group can learn the objective, encounter the threat, win or lose, and start another run on a new layout. Watch where friends coordinate, panic, or laugh before committing to more content.
 
+**Implemented and verified locally on November 20, 2026.** One operator sends a test tone from Relay with the lit flashlight while the other answers at Intake. The Bell Diver knocks before dropping into a marked circle. A partner can revive a fallen operator within 75 seconds. Both operators must reach Exit to extract. The simulation tests cover rescue timeout and both operators falling. Two Game Hub browsers verified rescue after a refresh, successful extraction, and a fresh lobby. The two-device playtest with a fresh crew is pending.
+
 ## Phase 6 — Expand and playtest
 
 - Expand the room kit, objective variations, soundscape, creature behaviors, and original or appropriately licensed art around the interactions players enjoyed. Test navigation and creature pathfinding on the enlarged set of layouts.

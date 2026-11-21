@@ -199,7 +199,7 @@ function start(render: ReturnType<typeof createScene>, admission?: () => Promise
       if (layout) drawMap(map,layout,s);
       const pos = (x: number,z: number) => x.toFixed(2) + ', ' + z.toFixed(2);
       stats.textContent = [
-        'Round   ' + s.round, 'Update  ' + s.update, 'RTT     ' + Math.round(connection.metrics.rtt) + ' ms',
+        'Build   ' + import.meta.env.VITE_RELAY_BUILD, 'Round   ' + s.round, 'Update  ' + s.update, 'RTT     ' + Math.round(connection.metrics.rtt) + ' ms',
         'Frame p95  '+(frameP95 ? frameP95.toFixed(1)+' ms' : 'sampling'),
         'Scene ready  '+Math.round(readyMs)+' ms',
         'Delay   ' + delay + ' ms each way',

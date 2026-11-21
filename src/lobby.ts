@@ -18,6 +18,11 @@ export async function mountLobby(launch: (authorize: () => Promise<Admission>, s
   const info = el('hub-info'), error = el('hub-error');
   const hubPath = '/game-hub/';
   el('hub-back').onclick = () => location.assign(hubPath);
+  if (import.meta.env.MODE === 'pages' && !import.meta.env.VITE_RELAY_RUNTIME_ORIGIN) {
+    info.textContent = 'Public matches are offline while the multiplayer server is being set up.';
+    el('hub-refresh').hidden = true;
+    return;
+  }
   const url = import.meta.env.VITE_SUPABASE_URL, key = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY;
   if (!url || !key) {
     error.textContent = 'Configure the shared Supabase project to use Game Hub rooms.';

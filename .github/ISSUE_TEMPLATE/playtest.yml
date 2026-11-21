@@ -1,0 +1,25 @@
+name: Relay Room playtest report
+description: Report a gameplay, layout, or connection issue.
+title: "[Playtest] "
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: What happened?
+      description: Include what you expected and what each operator saw. Mention a refresh or disconnect if relevant.
+    validations:
+      required: true
+  - type: input
+    id: build
+    attributes:
+      label: Build, generator version, and seed
+      description: Copy these from Diagnostics if you can reach the game.
+  - type: input
+    id: crew
+    attributes:
+      label: Party size, devices, and browser versions
+  - type: textarea
+    id: steps
+    attributes:
+      label: How can we reproduce it?
+      description: Include the callout and the rooms or pads involved.

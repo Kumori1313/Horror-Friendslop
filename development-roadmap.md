@@ -63,6 +63,8 @@ Use TypeScript, Three.js, and Vite as the working stack. Start with two desktop 
 
 **Verified November 21, 2026.** Two independent Chromium sessions completed both callouts through Game Hub, including rescue after refresh, extraction, replay, and returning the remaining player to the lobby list after a departure. The 1,000-seed navigation check produced 993 distinct route graphs with zero fallbacks. Every tested bay had a connected route to Exit for the Bell Diver. The [playtest instructions](README.md#phase-6-playtest) cover both callouts and the device diagnostics. Physical Android frame times and observations from first-time crews are pending.
 
+**Manual playtest passed.** The project owner successfully completed both Line Test and Black Start.
+
 ## Phase 7 — Release and maintain
 
 - Run the hub suite against the release build, including existing games. Verify asset paths under the approved game route, source and asset licenses, and the live runtime's cost at the intended player count.

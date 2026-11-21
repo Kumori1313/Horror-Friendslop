@@ -1,5 +1,5 @@
 import * as T from 'three';
-import { footprint, geometryFor, opening, roomNames } from './layout.ts';
+import { footprint, geometryFor, opening, roomLabel } from './layout.ts';
 import type { Layout, Kind, Rect } from './layout.ts';
 
 const colors: Record<Kind,number> = {
@@ -84,7 +84,7 @@ export function buildFacility(layout: Layout, surface: T.Texture) {
       const ctx=c.getContext('2d')!;
       ctx.fillStyle='#203230'; ctx.fillRect(0,0,512,96);
       ctx.fillStyle='#efd493'; ctx.font='bold 51px monospace'; ctx.textAlign='center'; ctx.textBaseline='middle';
-      ctx.fillText(text.toUpperCase(),256,49);
+      ctx.fillText(text.toUpperCase(),256,49,492);
       const texture=new T.CanvasTexture(c); texture.colorSpace=T.SRGBColorSpace;
       mat=new T.MeshBasicMaterial({map:texture}); labels.set(text,mat);
     }
@@ -98,8 +98,23 @@ export function buildFacility(layout: Layout, surface: T.Texture) {
     const dx=Math.sign(b.x-a.x),dz=Math.sign(b.z-a.z);
     const x=(a.x+b.x)/2,z=(a.z+b.z)/2;
     box(0x314342,x,3.02,z,dx?0.28:opening,1.1,dz?0.28:opening);
-    label(roomNames[b.kind],x-dx*0.16,z-dz*0.16,Math.atan2(-dx,-dz));
-    label(roomNames[a.kind],x+dx*0.16,z+dz*0.16,Math.atan2(dx,dz));
+    label(roomLabel(b),x-dx*0.16,z-dz*0.16,Math.atan2(-dx,-dz));
+    label(roomLabel(a),x+dx*0.16,z+dz*0.16,Math.atan2(dx,dz));
+    // The amber jambs frame Intake even after its bulkhead opens. At Exit the
+    // three green lights sit above head height and read from either side.
+    if (a.kind === 'intake' || b.kind === 'intake') {
+      for (const side of [-1,1]) {
+        const offset = side*(opening/2-0.03);
+        for (let band=0;band<6;band++) {
+          box(colors.intake,x+dz*offset,0.26+band*0.4,z+dx*offset,dx?0.32:0.06,0.24,dz?0.32:0.06);
+        }
+      }
+    }
+    if (a.kind === 'exit' || b.kind === 'exit') {
+      for (const offset of [-0.65,0,0.65]) {
+        box(colors.exit,x+dz*offset,3.33,z+dx*offset,dx?0.34:0.36,0.16,dz?0.34:0.36);
+      }
+    }
     for (const side of [-1,1]) box(0xb69c60,x+dz*side*0.8,0.009,z+dx*side*0.8,dx?2.5:0.07,0.018,dz?2.5:0.07);
   }
   for (const [color,matrices] of batches) {

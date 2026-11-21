@@ -92,6 +92,8 @@ Phases 8–15 build on feedback from the public two-player release. Use the exis
 
 **Pass when** a first-time pair can explore, describe where they split up, and regroup using the environment. Check keyboard and touch layouts for routes that still reveal the floor plan or developer console.
 
+**Implemented and tested locally.** The player build uses numbered bay signs, amber-banded Intake doorways, and three green lights over Exit. Two private-lobby browsers completed Line Test with the map and orders absent, reconnected, and copied the matching shift reference. A separate developer build retained the floor plan and outage simulator. The remaining playtest is to observe a first-time pair split up and regroup by describing landmarks.
+
 ## Phase 9 — Generate larger, multi-floor facilities
 
 - Replace the flat grid and fixed rectangular bays with room templates that declare their footprint, height, walkable surfaces, and door or stair connections. Start with a small loot closet, a bent service tunnel, a large machinery hall, and a stairwell with landings on two floors. Support rooms above one another and sightlines between levels.

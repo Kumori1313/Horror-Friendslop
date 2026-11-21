@@ -1,9 +1,9 @@
 import { bindPreferences } from './preferences.ts';
-import { answerStation, assignment, finished } from './mission.ts';
+import { assignment, finished } from './mission.ts';
 import { missionHud } from './mission-hud.ts';
-import { drawMap } from './layout-map.ts';
+import { mountDiagnostics } from './diagnostics.ts';
 import './style.css';
-import { blockers, footprint, generatorVersion, geometryFor, nearbyDoor, roomNames } from './layout.ts';
+import { blockers, footprint, generatorVersion, geometryFor, nearbyDoor, roomLabel } from './layout.ts';
 import type { Layout, Geometry, Rect } from './layout.ts';
 import { canTake } from './room.ts';
 import { CreatorSession, type Crew } from './creator-session.ts';
@@ -20,9 +20,6 @@ const enter = element<HTMLButtonElement>('enter');
 const brief = element('brief');
 const status = element('connection');
 const prompt = element('action');
-const debug = element<HTMLButtonElement>('debug');
-const panel = element('diagnostics');
-const stats = element('stats');
 const reticle = element('reticle');
 
 function start(render: ReturnType<typeof createScene>, crew?: Crew, sceneStarted = performance.now()) {
@@ -39,14 +36,13 @@ function start(render: ReturnType<typeof createScene>, crew?: Crew, sceneStarted
   let state: Snapshot | undefined;
   let layout: Layout | undefined, geometry: Geometry | undefined;
   let obstacles: Rect[] | undefined;
-  const map = element<HTMLCanvasElement>('layout-map');
   let doorState = '';
   const doorButton = element<HTMLButtonElement>('open-door');
   const { preferences, open: openSettings } = bindPreferences(pause);
   const hud = missionHud(preferences);
-  let readyMs = 0, frameP95 = 0;
-  let sampleStart = performance.now();
-  const frameTimes: number[] = [];
+  const diagnostics = import.meta.env.DEV || import.meta.env.MODE === 'diagnostics'
+    ? mountDiagnostics(sceneStarted,() => { if (state) connection.interrupt(2000); })
+    : undefined;
   const operate = element<HTMLButtonElement>('operate');
   operate.onclick = () => { if (playing) connection.action('operate'); };
   let playing = false;
@@ -61,7 +57,7 @@ function start(render: ReturnType<typeof createScene>, crew?: Crew, sceneStarted
   function showControls() {
     touchControls.hidden = !playing || !touchMode;
     element('control-hint').textContent = touchMode ? 'Left pad to walk · Swipe the room to look' : 'WASD to walk · Mouse or arrows to look';
-    debug.textContent = touchMode ? 'Diagnostics' : 'Diagnostics · G';
+    diagnostics?.setTouch(touchMode);
   }
   function look(dx: number, dy: number, sensitivity: number) {
     sensitivity *= preferences.sensitivity;
@@ -112,13 +108,8 @@ function start(render: ReturnType<typeof createScene>, crew?: Crew, sceneStarted
     showControls();
     if (!touchMode) canvas.requestPointerLock?.()?.catch(() => {});
   }
-  function diagnostics() {
-    panel.hidden = !panel.hidden;
-    debug.setAttribute('aria-expanded',String(!panel.hidden));
-  }
   enter.onclick = control;
   canvas.onclick = () => { if (!playing || (!touchMode && !document.pointerLockElement)) control(); };
-  debug.onclick = diagnostics;
   window.addEventListener('blur',pause);
   document.addEventListener('visibilitychange',() => {
     if (document.hidden) pause();
@@ -134,7 +125,6 @@ function start(render: ReturnType<typeof createScene>, crew?: Crew, sceneStarted
     if (element<HTMLDialogElement>('preferences').open) return;
     if (e.ctrlKey || e.metaKey || e.altKey) return;
     if (e.code === 'KeyO' && !e.repeat) { e.preventDefault(); openSettings(); return; }
-    if (e.code === 'KeyG' && !e.repeat) diagnostics();
     if (!playing || !state) return;
     if (e.code.startsWith('Arrow')) e.preventDefault();
     if (e.repeat) return;
@@ -175,7 +165,7 @@ function start(render: ReturnType<typeof createScene>, crew?: Crew, sceneStarted
         const f = footprint(room);
         return Math.abs(f.x-p.x)<=f.w/2 && Math.abs(f.z-p.z)<=f.d/2;
       });
-      element('sector').textContent = current ? roomNames[current.kind]+' · '+current.id : 'Connecting corridor';
+      element('sector').textContent = current ? roomLabel(current) : 'Connecting corridor';
     }
     if (touchMode) {
       take.disabled = !!down || (!holding && !reachable);
@@ -191,29 +181,8 @@ function start(render: ReturnType<typeof createScene>, crew?: Crew, sceneStarted
     else if (door) prompt.textContent = touchMode ? 'Bulkhead within reach' : 'R  Open bulkhead';
     else if (holding) prompt.textContent = touchMode ? 'You hold the flashlight' : 'E  Drop flashlight   ·   F  Switch ' + (l.on ? 'off' : 'on');
     else if (l.owner) prompt.textContent = 'Operator ' + l.owner + ' holds the flashlight';
-    else prompt.textContent = reachable ? (touchMode ? 'Flashlight within reach' : 'E  Pick up flashlight') : 'Move closer to the flashlight';
-    if (!panel.hidden) {
-      if (layout) drawMap(map,layout,s);
-      const pos = (x: number,z: number) => x.toFixed(2) + ', ' + z.toFixed(2);
-      stats.textContent = [
-        'Build   ' + import.meta.env.VITE_RELAY_BUILD, 'Round   ' + s.round, 'Update  ' + s.update, 'RTT     ' + Math.round(connection.metrics.rtt) + ' ms',
-        'Frame p95  '+(frameP95 ? frameP95.toFixed(1)+' ms' : 'sampling'),
-        'Scene ready  '+Math.round(readyMs)+' ms',
-        crew ? 'Network   '+(crew.host ? 'Lobby creator (host)' : 'Guest')+' · Supabase Realtime' : 'Delay   ' + delay + ' ms each way',
-        'RX/TX   ' + Math.round(connection.metrics.downRate) + ' / ' + Math.round(connection.metrics.upRate) + ' B/s',
-        'Recovery  ' + Math.round(connection.metrics.recovery) + ' ms',
-        ...s.players.map(player => 'P' + player.id + '  x,z  ' + pos(player.x,player.z) + (player.connected ? '' : ' (reconnecting)')),
-        ...(s.mission ? ['Shift   '+s.mission.stage, ...s.mission.down.map(d => 'Down    P'+d.id)] : []),
-        'Light   ' + (l.owner ? 'P' + l.owner : 'floor') + (l.on ? ' · on' : ' · off'),
-        'Lamp x,z  ' + pos(l.x,l.z),
-        ...(layout ? [
-          'Layout v' + layout.version + ' · seed ' + layout.seed + (layout.fallback ? ' (fallback)' : ''),
-          'Rooms   ' + layout.rooms.length + ' · passages ' + layout.passages.length,
-          'Relay   ' + layout.objectiveId + ' · Exit ' + layout.exitId,
-          'Open doors  ' + (opened.join(', ') || 'none'),
-        ] : []),
-      ].join('\n');
-    }
+    else prompt.textContent = reachable ? (touchMode ? 'Flashlight within reach' : 'E  Pick up flashlight') : '';
+    diagnostics?.update(s,layout,connection.metrics,crew,delay);
   }
   const events: Events = {
     joined(seat,ticket,plan) {
@@ -229,10 +198,8 @@ function start(render: ReturnType<typeof createScene>, crew?: Crew, sceneStarted
         obstacles = blockers(geometry,[]);
         doorState = '';
         element('sector').hidden = false;
-        element('floor-plan').hidden = false;
         const backup = plan.callout === 'black-start';
         element('brief-type').textContent = backup ? 'Black start' : 'Line test';
-        element('brief-instructions').textContent = (backup ? 'Charge the Switchboard pad first. ' : '')+'One operator answers from '+roomNames[answerStation(plan).kind]+'. Another takes the lit flashlight to Relay. When the ceiling knocks, clear the circle. Diagnostics shows the floor plan.';
       }
       id = seat;
       if (!crew) sessionStorage.setItem(key,JSON.stringify(ticket));
@@ -274,7 +241,6 @@ function start(render: ReturnType<typeof createScene>, crew?: Crew, sceneStarted
   };
   const connection = crew ? new CreatorSession(crew,events) : new RoomConnection(url.href,saved,events,delay);
   connection.connect();
-  element('outage').onclick = () => { if (state) connection.interrupt(2000); };
   window.addEventListener('pagehide',() => connection.stop());
   window.addEventListener('pageshow',e => { if (e.persisted) location.reload(); });
   let previous = performance.now(), lastSent = 0;
@@ -282,25 +248,13 @@ function start(render: ReturnType<typeof createScene>, crew?: Crew, sceneStarted
     const elapsed = now-previous;
     previous = now;
     const dt = Math.min(elapsed/1000,0.1);
-    if (state && !document.hidden) {
-      frameTimes.push(elapsed);
-      if (now-sampleStart >= 2000) {
-        frameTimes.sort((a,b) => a-b);
-        frameP95 = frameTimes[Math.ceil(frameTimes.length*0.95)-1];
-        frameTimes.length = 0;
-        sampleStart = now;
-      }
-    } else {
-      sampleStart = now;
-      frameTimes.length = 0;
-    }
     if (playing) {
       yaw += (Number(keys.has('ArrowLeft'))-Number(keys.has('ArrowRight'))) * dt * 2 * preferences.sensitivity;
       pitch = Math.max(-1.35,Math.min(1.35,pitch + (Number(keys.has('ArrowUp'))-Number(keys.has('ArrowDown'))) * dt * 1.6 * preferences.sensitivity));
       if (now-lastSent >= 33) { input(); lastSent = now; }
     }
     render(state,id,yaw,pitch,dt,layout,preferences.reducedMotion);
-    if (state && !readyMs) readyMs = performance.now()-sceneStarted;
+    diagnostics?.frame(now,elapsed,!!state);
     requestAnimationFrame(frame);
   }
   requestAnimationFrame(frame);

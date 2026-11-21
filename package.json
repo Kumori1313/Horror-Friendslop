@@ -9,6 +9,7 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
+    "build:diagnostics": "tsc --noEmit && vite build --mode diagnostics",
     "build:pages": "tsc --noEmit && vite build --mode pages --base /relay-room/",
     "preview": "vite preview",
     "test": "node --experimental-strip-types --test tests/*.test.ts",

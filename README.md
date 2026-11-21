@@ -23,7 +23,7 @@ npm run dev
 | Mouse or arrow keys | Look around |
 | E | Pick up a nearby flashlight or drop the one you hold |
 | F | Toggle the flashlight you hold |
-| G | Show or hide room diagnostics |
+| G | Show or hide room diagnostics in developer builds |
 | Escape | Release controls. Click the scene to resume. |
 
 On a phone, tap **Enter room**, drag the lower-left pad to move, and swipe the room to look. Tap **Pick up** when the dropped light is within reach. Use **Light off/on** and **Drop** to test the handoff. Tap **Diagnostics** to see who holds it on each device.
@@ -35,6 +35,7 @@ A disconnected operator keeps their seat, position, and flashlight for 20 second
 - `npm test` runs the simulation and two-client WebSocket tests on a temporary local port.
 - `npm run test:network` repeats the delayed handoff and recovery scenarios and prints the measured action latency, view disagreement, recovery, and traffic.
 - `npm run build` type-checks the project and generates the static client in `dist/`.
+- `npm run build:diagnostics` builds a local developer client with the G shortcut, map, measurements, and outage simulator. The dev server also includes these tools. Use `npm run build` for a player playtest.
 - `npm run preview` serves that build **and** the local simulation at **http://127.0.0.1:4176/**.
 
 The dev and preview commands each host their own temporary room. Open the same URL in both windows. The [Phase 2 network playtest](network-playtest.md) covers this standalone prototype. In Game Hub matches, the lobby creator’s browser hosts the simulation.
@@ -66,15 +67,15 @@ In the hub checkout, `npm run test:relay` runs the browser acceptance test on po
 
 Start a **new Game Hub room** to get a new facility. Normal runs contain 12–15 rooms. The orange Switchboard and blue Chiller hall have distinct floor markers and equipment. Both operators spawn at Intake within reach of the flashlight. Explore the connected rooms and corridors, locate the **Relay station**, then find the **Exit bay**. Overhead signs name the room ahead. At a closed bulkhead, press **R** or tap **Open bulkhead** on a phone. The door opens for both players.
 
-Open **Diagnostics** for the shared floor plan, player positions, seed, generator version, objective and exit IDs, and opened bulkheads. Amber links mark closed bulkheads. Refresh while holding the light to check that your room, door state, and flashlight are restored. The map also marks the Bell Diver’s current bay in red and a downed operator with a white cross.
+The amber-banded doorway marks Intake. Three green lights above a doorway mark Exit. For developer checks, run `npm run build:diagnostics` in the game checkout and open **Diagnostics** for the shared floor plan, player positions, seed, generator version, objective and exit IDs, and opened bulkheads. Amber links mark closed bulkheads. Refresh while holding the light to check that your room, door state, and flashlight are restored. The map also marks the Bell Diver’s current bay in red and a downed operator with a white cross.
 
 Run `npm run test:layouts` to check seeds 0–999, graph variety, player clearance, authoritative door collision, and the fixed fallback. The generator tries at most eight candidates per seed. Batch validation writes any fallback or failing seeds to `test-results/layout-seeds.json`. To replay a reported seed with this generator version, run `VITE_RELAY_TEST_SEED=19 npm run build` in the **game** checkout and create a new room in the local hub. Rebuild without the override to restore random layouts. The plan is sent on admission and resume, with only live door and item state in the regular snapshots.
 
 ### Play the emergency callout
 
-The briefing names the callout. In **Line test** the answering operator waits at Intake. In **Black start** they first charge the orange Switchboard pad (S) and answer the tone from there. Both callouts use the following controls.
+The entry screen names the callout. In **Line test** the answering operator waits at Intake. In **Black start** they first charge the orange Switchboard pad (S) and answer the tone from there. Both callouts use the following controls.
 
-1. One operator takes the flashlight with **E** or **Pick up**. The other operates the center pad named in the briefing. Use the floor plan in **Diagnostics** to find the Relay station (R) and Exit bay (X).
+1. One operator takes the flashlight with **E** or **Pick up**. The other operates the answering pad at Intake or Switchboard. Overhead signs name the adjoining room.
 2. Stand on the Relay pad with the flashlight on and press **Q** to **Send test tone**. Stay there while the answering operator presses **Q** to **Answer relay**. On a phone, tap the named action.
 3. The Bell Diver wakes above Relay. Knocks, a warning naming the bay, and a glowing floor circle give four seconds to get clear. It drops inside the circle. On subsequent passes it targets the bay nearest the conscious operator carrying the lit lamp. It follows connected ceiling passages, scraping overhead at each bay. Without a lit carrier it follows a conscious operator.
 4. A struck operator drops the light. A teammate has 75 seconds to reach them and press **Q** or **Revive partner**. Both operators going down or a rescue timing out ends the shift.
@@ -86,9 +87,9 @@ The current playtest supports exactly two operators in WebGL 2 browsers. The bro
 
 Use **Settings** on either device (or press **O**) to adjust look sensitivity and game volume, toggle sound captions, or keep the camera level when downed. Preferences persist on that device. Knock warnings, the strike circle and rescue timers stay visible with sound muted.
 
-For repeatable runs, use `VITE_RELAY_TEST_SEED=19 npm run build` for Line test or seed 20 for Black start. With no seed override, create fresh rooms to draw new layouts. Try each callout with the crew reading the briefing, swap jobs, and try leaving mid-round and forming a new lobby. Record confusing signs, missed warnings, and the seed.
+For repeatable runs, use `VITE_RELAY_TEST_SEED=19 npm run build` for Line test or seed 20 for Black start. With no seed override, create fresh rooms to draw new layouts. Try each callout, swap jobs, and try leaving mid-round and forming a new lobby. Record confusing signs, missed warnings, and the seed.
 
-On the least powerful device, open **Diagnostics** while moving. Record the device, browser version, seed, scene-ready time, frame p95 and RX/TX. Scene-ready time runs from starting the 3D client to drawing the first room snapshot. Frame p95 is the 95th percentile of visible frame intervals over approximately two seconds. RX/TX measures WebSocket message bytes per second for that client.
+Using the developer build on the least powerful device, open **Diagnostics** while moving. Record the device, browser version, seed, scene-ready time, frame p95 and RX/TX. Scene-ready time runs from starting the 3D client to drawing the first room snapshot. Frame p95 is the 95th percentile of visible frame intervals over approximately two seconds. RX/TX measures WebSocket message bytes per second for that client.
 
 The November 21 local run used headless Chromium 159.0.8154.6 on an Intel Core i7-14650HX with two players. The table shows one diagnostics reading per callout from the 390 × 844 touch viewport just after the exit circuit engaged. Network figures exclude transport overhead.
 
@@ -112,4 +113,4 @@ The [Pages repository](https://github.com/Kumori1313/relay-room) builds the game
 3. With the hub listing still hidden, enable the two-player catalog row for a private smoke test. From the hub checkout run `E2E_BASE_URL=https://kumori1313.github.io RELAY_RELEASE_SMOKE=true npm run test:relay`. This signs in two anonymous guests, completes a private round, reconnects, extracts, replays, and leaves. Set the hub’s `VITE_ENABLE_RELAY_ROOM` Actions variable to `true` and rerun its Pages workflow after the smoke test passes. Verify **Open Relay Room** from the published hub.
 4. To suspend play, set `public.game_catalog.playable` to `false` for `id='relay-room'`. The adapter denies new starts and clients check active membership and the catalog flag every 2.5 seconds. The client offers **Return to Game Hub** after admission ends. Set the hub listing variable to `false` and redeploy to hide its link. To restore an earlier client, revert `SOURCE_REVISION`, then repeat the private smoke test.
 
-For a playtest report, copy the build, seed and generator version from **Diagnostics** into the [issue form](https://github.com/Kumori1313/Horror-Friendslop/issues/new?template=playtest.yml). Check out that revision and start a local run with the reported seed to reproduce the layout.
+For a playtest report, select **Copy reference** on the shift report and paste the build, generator version, and seed into the [issue form](https://github.com/Kumori1313/Horror-Friendslop/issues/new?template=playtest.yml). Check out that revision and start a local run with the reported seed to reproduce the layout.

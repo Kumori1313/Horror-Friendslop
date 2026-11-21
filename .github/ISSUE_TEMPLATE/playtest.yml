@@ -13,7 +13,7 @@ body:
     id: build
     attributes:
       label: Build, generator version, and seed
-      description: Copy these from Diagnostics if you can reach the game.
+      description: Choose Copy reference on the shift report if you reached the end of a round.
   - type: input
     id: crew
     attributes:

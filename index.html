@@ -34,7 +34,7 @@
     <canvas id="scene" aria-label="First-person view of the relay room"></canvas>
     <div id="top-hud">
     <header><div><span class="lamp-icon" aria-hidden="true">◈</span> RELAY ROOM <span id="sector" hidden></span></div><div class="session-controls"><span id="connection" role="status">Connecting…</span><button id="settings" aria-haspopup="dialog">Settings</button></div></header>
-    <aside id="mission" hidden><strong id="orders"></strong><span id="warning" role="status"></span><small id="sound-caption"></small></aside>
+    <aside id="mission" hidden><span id="warning" role="status"></span><small id="sound-caption"></small></aside>
     </div>
     <dialog id="preferences" aria-labelledby="preferences-title">
       <form method="dialog">
@@ -51,13 +51,15 @@
     <section id="brief">
       <p class="eyebrow" id="brief-type">Local co-op test</p>
       <h1>Relay Room</h1>
-      <p id="brief-instructions">Meet at the yellow line. Carry the inspection light through the doorway and pass it to your partner.</p>
       <button id="enter" disabled>Enter room</button>
       <p class="hint" id="control-hint">WASD to walk · Mouse or arrows to look</p>
     </section>
     <section id="result" hidden aria-labelledby="result-title">
       <p class="eyebrow">Shift report</p>
       <h2 id="result-title"></h2><p id="result-detail"></p>
+      <label class="report-label" for="report-reference">Playtest reference</label>
+      <input id="report-reference" readonly>
+      <button id="copy-reference" type="button">Copy reference</button>
       <button id="replay">Return to lobbies</button>
     </section>
     <div id="reticle" hidden></div>
@@ -70,8 +72,7 @@
         <button id="toggle" disabled>Light off</button>
       </div>
     </div>
-    <aside id="diagnostics" hidden><h2>Room diagnostics</h2><div id="floor-plan" hidden><canvas id="layout-map" width="300" height="175" aria-label="Facility floor plan"></canvas><small>I · Intake　S · Switchboard　C · Chiller　R · Relay　X · Exit</small></div><pre id="stats"></pre><button id="outage">Simulate 2 s outage</button></aside>
-    <footer><button id="live-leave" hidden>Leave to hub</button><span id="action">Waiting for room</span><button id="debug" aria-expanded="false">Diagnostics · G</button></footer>
+    <footer><button id="live-leave" hidden>Leave to hub</button><span id="action">Waiting for room</span></footer>
   </main>
   <script type="module" src="/src/main.ts"></script>
 </body>

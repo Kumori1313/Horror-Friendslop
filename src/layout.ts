@@ -22,6 +22,13 @@ export const roomNames: Record<Kind,string> = {
   intake:'Intake', pump:'Pump hall', stores:'Parts store', junction:'Service junction', relay:'Relay station', exit:'Exit bay', switchboard:'Switchboard', chiller:'Chiller hall',
 };
 
+// Repeated bays have a stencilled number crews can call out to each other.
+export function roomLabel(room: Module) {
+  const name = roomNames[room.kind];
+  if (room.kind !== 'pump' && room.kind !== 'stores' && room.kind !== 'junction') return name;
+  return name+' '+room.id.replace(/^bay-/,'').padStart(2,'0');
+}
+
 export function footprint(room: Module): Rect {
   const width = room.kind === 'stores' ? 6 : 8;
   const depth = (room.kind === 'pump' || room.kind === 'chiller') ? 6 : 8;

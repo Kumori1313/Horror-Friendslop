@@ -9,6 +9,7 @@
 <body>
   <section id="hub-lobby" hidden>
     <h1>Relay Room</h1>
+    <a id="play-solo" href="?solo=1">Play solo</a>
     <p id="hub-info" role="status">Checking guest session…</p>
     <form id="hub-guest" hidden>
       <label>Display name <input id="hub-name" maxlength="48" required></label>
@@ -52,6 +53,7 @@
       <p class="eyebrow" id="brief-type">Local co-op test</p>
       <h1>Relay Room</h1>
       <button id="enter" disabled>Enter room</button>
+      <a id="local-solo" href="?solo=1" hidden>Play solo</a>
       <p class="hint" id="control-hint">WASD to walk · Mouse or arrows to look</p>
     </section>
     <section id="result" hidden aria-labelledby="result-title">

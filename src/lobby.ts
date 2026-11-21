@@ -59,6 +59,7 @@ export async function mountLobby(launch: (crew: Crew) => (reason: string) => voi
     history.replaceState(null,'',dest);
   }
   function selection() {
+    el('play-solo').hidden = false;
     el('hub-select').hidden = false;
     el('hub-wait').hidden = true;
     info.textContent = 'Signed in as ' + name;
@@ -93,6 +94,7 @@ export async function mountLobby(launch: (crew: Crew) => (reason: string) => voi
     if (room.game_id !== game || room.contract_version !== 2) throw new Error('Incompatible room. Refresh the game.');
     roomId = room.id;
     updatePath(room);
+    el('play-solo').hidden = true;
     el('hub-select').hidden = true;
     el('hub-wait').hidden = false;
     el('hub-invite').textContent = room.join_code ? 'Room code: ' + room.join_code : 'Public room';

@@ -6,6 +6,7 @@ import './style.css';
 import { blockers, footprint, generatorVersion, geometryFor, nearbyDoor, roomLabel } from './layout.ts';
 import type { Layout, Geometry, Rect } from './layout.ts';
 import { canTake } from './room.ts';
+import { SoloSession } from './solo-session.ts';
 import { CreatorSession, type Crew } from './creator-session.ts';
 import { RoomConnection, type Events } from './connection.ts';
 import type { Ticket, Snapshot } from './room.ts';
@@ -22,11 +23,14 @@ const status = element('connection');
 const prompt = element('action');
 const reticle = element('reticle');
 
-function start(render: ReturnType<typeof createScene>, crew?: Crew, sceneStarted = performance.now()) {
+function start(render: ReturnType<typeof createScene>, mode?: Crew | 'solo', sceneStarted = performance.now()) {
+  const solo = mode === 'solo';
+  const crew = solo ? undefined : mode;
+  element('local-solo').hidden = !!mode;
   const key = 'relay-room-seat-v2';
   let saved: Ticket | null = null;
   const nav = performance.getEntriesByType('navigation')[0] as PerformanceNavigationTiming | undefined;
-  if (!crew && nav?.type !== 'navigate') {
+  if (!mode && nav?.type !== 'navigate') {
     try { saved = JSON.parse(sessionStorage.getItem(key) || 'null'); } catch { /* Fresh session */ }
   }
   const url = new URL('/live',location.href);
@@ -41,7 +45,7 @@ function start(render: ReturnType<typeof createScene>, crew?: Crew, sceneStarted
   const { preferences, open: openSettings } = bindPreferences(pause);
   const hud = missionHud(preferences);
   const diagnostics = import.meta.env.DEV || import.meta.env.MODE === 'diagnostics'
-    ? mountDiagnostics(sceneStarted,() => { if (state) connection.interrupt(2000); })
+    ? mountDiagnostics(sceneStarted,solo ? undefined : () => { if (state) network?.interrupt(2000); })
     : undefined;
   const operate = element<HTMLButtonElement>('operate');
   operate.onclick = () => { if (playing) connection.action('operate'); };
@@ -99,6 +103,7 @@ function start(render: ReturnType<typeof createScene>, crew?: Crew, sceneStarted
   }
   function pause() {
     keys.clear(); playing = false; resetStick(); resetLook(); showControls(); reticle.hidden = true; input();
+    if (solo && state && !finished(state.mission?.stage)) updateHud(state);
   }
   function control() {
     if (!state || finished(state.mission?.stage)) return;
@@ -113,7 +118,7 @@ function start(render: ReturnType<typeof createScene>, crew?: Crew, sceneStarted
   window.addEventListener('blur',pause);
   document.addEventListener('visibilitychange',() => {
     if (document.hidden) pause();
-    else if (state) connection.interrupt(0);
+    else if (state) network?.interrupt(0);
   });
   document.addEventListener('pointerlockchange',() => { if (!document.pointerLockElement) pause(); });
   window.addEventListener('mousemove',e => {
@@ -133,7 +138,10 @@ function start(render: ReturnType<typeof createScene>, crew?: Crew, sceneStarted
     if (e.code === 'KeyE') useFlashlight();
     if (e.code === 'KeyR') openDoor();
     if (e.code === 'KeyF') switchLight();
-    if (e.code === 'Escape') pause();
+    if (e.code === 'Escape') {
+      pause();
+      if (document.pointerLockElement) document.exitPointerLock();
+    }
     input();
   });
   window.addEventListener('keyup',e => { keys.delete(e.code); if (playing) input(); });
@@ -141,7 +149,7 @@ function start(render: ReturnType<typeof createScene>, crew?: Crew, sceneStarted
   function updateHud(s: Snapshot) {
     const p = s.players.find(player => player.id === id);
     if (!p) return;
-    status.textContent = 'Operator ' + id + '  ·  ' + s.players.filter(player => player.connected).length + '/2 online';
+    status.textContent = solo ? 'Solo operator' : 'Operator ' + id + '  ·  ' + s.players.filter(player => player.connected).length + '/2 online';
     const l = s.lamp;
     const holding = l.owner === id;
     const opened = s.opened ?? [];
@@ -173,7 +181,7 @@ function start(render: ReturnType<typeof createScene>, crew?: Crew, sceneStarted
       toggle.disabled = !!down || !holding;
       toggle.textContent = l.on ? 'Light off' : 'Light on';
     }
-    if (!brief.hidden) prompt.textContent = s.players.length === 2 ? 'Both seats occupied' : 'Waiting for a partner';
+    if (!brief.hidden) prompt.textContent = solo ? '' : s.players.length === 2 ? 'Both seats occupied' : 'Waiting for a partner';
     else if (finished(s.mission?.stage)) prompt.textContent = 'Shift ended';
     else if (!playing) prompt.textContent = touchMode ? 'Tap the room to resume' : 'Click the room to resume';
     else if (task) prompt.textContent = touchMode ? task : 'Q  '+task;
@@ -182,7 +190,7 @@ function start(render: ReturnType<typeof createScene>, crew?: Crew, sceneStarted
     else if (holding) prompt.textContent = touchMode ? 'You hold the flashlight' : 'E  Drop flashlight   ·   F  Switch ' + (l.on ? 'off' : 'on');
     else if (l.owner) prompt.textContent = 'Operator ' + l.owner + ' holds the flashlight';
     else prompt.textContent = reachable ? (touchMode ? 'Flashlight within reach' : 'E  Pick up flashlight') : '';
-    diagnostics?.update(s,layout,connection.metrics,crew,delay);
+    diagnostics?.update(s,layout,network?.metrics,crew,delay);
   }
   const events: Events = {
     joined(seat,ticket,plan) {
@@ -202,7 +210,7 @@ function start(render: ReturnType<typeof createScene>, crew?: Crew, sceneStarted
         element('brief-type').textContent = backup ? 'Black start' : 'Line test';
       }
       id = seat;
-      if (!crew) sessionStorage.setItem(key,JSON.stringify(ticket));
+      if (!mode) sessionStorage.setItem(key,JSON.stringify(ticket));
     },
     snapshot(snapshot, first) {
       state = snapshot;
@@ -228,7 +236,7 @@ function start(render: ReturnType<typeof createScene>, crew?: Crew, sceneStarted
       status.textContent = ended ? reason : 'Reconnecting…';
       prompt.textContent = ended ? 'Join a new session when ready.' : 'Waiting for a fresh room snapshot.';
       if (ended) {
-        if (!crew) sessionStorage.removeItem(key);
+        if (!mode) sessionStorage.removeItem(key);
         brief.hidden = false;
         enter.disabled = false;
         enter.textContent = crew ? 'Return to Game Hub' : 'Join again';
@@ -239,7 +247,19 @@ function start(render: ReturnType<typeof createScene>, crew?: Crew, sceneStarted
       }
     },
   };
-  const connection = crew ? new CreatorSession(crew,events) : new RoomConnection(url.href,saved,events,delay);
+  const connection = mode === 'solo' ? new SoloSession(events)
+    : crew ? new CreatorSession(crew,events) : new RoomConnection(url.href,saved,events,delay);
+  const soloSession = connection instanceof SoloSession ? connection : undefined;
+  const network = connection instanceof SoloSession ? undefined : connection;
+  if (soloSession) {
+    const leave = element<HTMLButtonElement>('live-leave');
+    leave.hidden = false;
+    leave.textContent = 'Leave solo';
+    leave.onclick = () => { soloSession.discard(); location.assign(location.pathname); };
+    const replay = element<HTMLButtonElement>('replay');
+    replay.textContent = 'New solo shift';
+    replay.onclick = () => { soloSession.discard(); location.reload(); };
+  }
   connection.connect();
   window.addEventListener('pagehide',() => connection.stop());
   window.addEventListener('pageshow',e => { if (e.persisted) location.reload(); });
@@ -253,6 +273,7 @@ function start(render: ReturnType<typeof createScene>, crew?: Crew, sceneStarted
       pitch = Math.max(-1.35,Math.min(1.35,pitch + (Number(keys.has('ArrowUp'))-Number(keys.has('ArrowDown'))) * dt * 1.6 * preferences.sensitivity));
       if (now-lastSent >= 33) { input(); lastSent = now; }
     }
+    if (playing && !document.hidden) soloSession?.tick(dt);
     render(state,id,yaw,pitch,dt,layout,preferences.reducedMotion);
     diagnostics?.frame(now,elapsed,!!state);
     requestAnimationFrame(frame);
@@ -262,7 +283,10 @@ function start(render: ReturnType<typeof createScene>, crew?: Crew, sceneStarted
 }
 
 try {
-  if (location.pathname.startsWith('/relay-room/')) {
+  const query = new URLSearchParams(location.search);
+  if (query.get('solo') === '1' && !query.has('room') && !query.has('lobby')) {
+    start(createScene(canvas,true),'solo');
+  } else if (location.pathname.startsWith('/relay-room/')) {
     const { mountLobby } = await import('./lobby.ts');
     await mountLobby(crew => {
       const started = performance.now();

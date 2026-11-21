@@ -112,3 +112,40 @@ test('diver advances along the ceiling before warning at the new target bay', ()
   assert.equal(mission.diver.bay,exit.id);
   assert.equal(mission.down.length,0);
 });
+
+for (const seed of [19,20]) {
+  test('one solo operator can power the facility and extract on seed '+seed, () => {
+    const layout = generateLayout(seed);
+    const sim = new Simulation(layout,'solo');
+    assert.equal(sim.join(),1);
+    assert.equal(sim.join(2),undefined);
+    const player = sim.state.players[0], mission = sim.state.mission!;
+    const move = (kind: Parameters<typeof station>[1]) => {
+      const {x,z} = station(layout,kind);
+      Object.assign(player,{x,z});
+    };
+    sim.act(1,'take');
+    if (layout.callout === 'black-start') {
+      move('relay'); sim.act(1,'operate'); assert.equal(mission.stage,'prime');
+      move('switchboard'); sim.act(1,'operate'); assert.equal(mission.stage,'trace');
+    }
+    move('exit'); sim.act(1,'operate'); assert.equal(mission.stage,'trace');
+    move('relay'); sim.act(1,'toggle'); sim.act(1,'operate'); assert.equal(mission.stage,'trace');
+    sim.act(1,'toggle'); sim.act(1,'operate');
+    assert.equal(mission.stage,'extract'); assert.equal(mission.diver.mode,'warning');
+    move('exit'); sim.act(1,'operate'); assert.equal(mission.stage,'won');
+  });
+}
+
+test('a solo strike ends immediately and a lone co-op seat still needs its partner',() => {
+  const layout = generateLayout(19);
+  for (const mode of ['solo','coop'] as const) {
+    const sim = new Simulation(layout,mode);
+    sim.join(1); sim.act(1,'take');
+    const relay = station(layout,'relay');
+    Object.assign(sim.state.players[0],{x:relay.x,z:relay.z});
+    sim.act(1,'operate');
+    for (let i=0;i<160;i++) sim.tick(1/30);
+    assert.equal(sim.state.mission!.stage,mode === 'solo' ? 'lost' : 'answer');
+  }
+});

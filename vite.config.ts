@@ -25,7 +25,7 @@ export default defineConfig(({mode, command}) => {
       generateBundle() {
         if (mode === 'pages') this.emitFile({
           type:'asset',fileName:'release.json',
-          source:JSON.stringify({revision,generatorVersion,players:2,game:'relay-room'})+'\n',
+          source:JSON.stringify({revision,generatorVersion,players:2,modes:['solo','co-op'],game:'relay-room'})+'\n',
         });
         this.emitFile({type:'asset',fileName:'LICENSE.txt',source:readFileSync(new URL('./LICENSE',import.meta.url),'utf8')});
       },

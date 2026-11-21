@@ -52,5 +52,5 @@ export function advanceMission(layout: Layout, state: Snapshot, mission: Mission
     mission.down.push({id:p.id,seconds:75});
     if (state.lamp.owner === p.id) Object.assign(state.lamp,{x:p.x,z:p.z,y:0.14,owner:null,pitch:0});
   }
-  if (mission.down.length === 2) mission.stage = 'lost';
+  if (mission.down.length === (mission.solo ? 1 : 2)) mission.stage = 'lost';
 }

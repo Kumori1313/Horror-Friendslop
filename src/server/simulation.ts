@@ -12,12 +12,13 @@ export class Simulation {
   readonly geometry?: Geometry;
   obstacles: Rect[] = walls;
 
-  constructor(layout?: Layout) {
+  constructor(layout?: Layout, mode: 'solo' | 'coop' = 'coop') {
     this.layout = layout;
     if (layout) {
       this.geometry = geometryFor(layout);
       this.state.opened = [];
       this.state.mission = newMission(layout);
+      if (mode === 'solo') this.state.mission.solo = true;
       this.obstacles = blockers(this.geometry,[]);
     }
   }
@@ -25,7 +26,8 @@ export class Simulation {
   inputs = new Map<number, Input>();
 
   join(assignedSeat?: number) {
-    const id = (assignedSeat ? [assignedSeat] : [1, 2]).find(seat => !this.inputs.has(seat));
+    const seats = this.state.mission?.solo ? [1] : [1,2];
+    const id = seats.find(seat => (!assignedSeat || seat === assignedSeat) && !this.inputs.has(seat));
     if (!id) return;
     this.state.players.push({ id, connected: true, x: id === 1 ? -0.7 : 0.7, z: 3, yaw: 0, pitch: -0.12 });
     this.inputs.set(id, { forward: 0, right: 0, yaw: 0, pitch: -0.12 });
@@ -75,11 +77,13 @@ export class Simulation {
       switch (assignment(this.layout,this.state,p,this.obstacles)) {
         case 'Charge switchboard': mission.stage = 'trace'; break;
         case 'Send test tone': mission.stage = 'answer'; break;
+        case 'Power exit circuit':
         case 'Answer relay':
           mission.stage = 'extract';
           warn(mission,station(this.layout,'relay').id);
           break;
         case 'Revive partner': mission.down = []; break;
+        case 'Extract':
         case 'Extract crew': mission.stage = 'won'; break;
       }
       return;

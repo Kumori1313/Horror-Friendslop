@@ -4,7 +4,7 @@ import type { Snapshot } from './room.ts';
 import type { RoomConnection } from './connection.ts';
 import type { Crew } from './creator-session.ts';
 
-export function mountDiagnostics(sceneStarted: number, interrupt: () => void) {
+export function mountDiagnostics(sceneStarted: number, interrupt?: () => void) {
   document.querySelector('main')!.insertAdjacentHTML('beforeend',`
     <aside id="diagnostics" hidden>
       <h2>Room diagnostics</h2>
@@ -28,12 +28,14 @@ export function mountDiagnostics(sceneStarted: number, interrupt: () => void) {
     debug.setAttribute('aria-expanded',String(!panel.hidden));
   }
   debug.onclick = toggle;
-  document.getElementById('outage')!.onclick = interrupt;
+  const outage = document.getElementById('outage')!;
+  outage.hidden = !interrupt;
+  outage.onclick = interrupt ?? null;
   window.addEventListener('keydown',e => {
     if (e.code === 'KeyG' && !e.repeat && !e.ctrlKey && !e.metaKey && !e.altKey &&
         !document.querySelector<HTMLDialogElement>('#preferences')!.open) toggle();
   });
-  function update(s: Snapshot, layout: Layout | undefined, metrics: RoomConnection['metrics'], crew: Crew | undefined, delay: number) {
+  function update(s: Snapshot, layout: Layout | undefined, metrics: RoomConnection['metrics'] | undefined, crew: Crew | undefined, delay: number) {
     if (panel.hidden) return;
     floorPlan.hidden = !layout;
     if (layout) drawMap(map,layout,s);
@@ -41,12 +43,15 @@ export function mountDiagnostics(sceneStarted: number, interrupt: () => void) {
     const l = s.lamp;
     const pos = (x: number,z: number) => x.toFixed(2) + ', ' + z.toFixed(2);
     stats.textContent = [
-      'Build   ' + import.meta.env.VITE_RELAY_BUILD, 'Round   ' + s.round, 'Update  ' + s.update, 'RTT     ' + Math.round(metrics.rtt) + ' ms',
+      'Build   ' + import.meta.env.VITE_RELAY_BUILD, 'Round   ' + s.round, 'Update  ' + s.update,
       'Frame p95  '+(frameP95 ? frameP95.toFixed(1)+' ms' : 'sampling'),
       'Scene ready  '+Math.round(readyMs)+' ms',
-      crew ? 'Network   '+(crew.host ? 'Lobby creator (host)' : 'Guest')+' · Supabase Realtime' : 'Delay   ' + delay + ' ms each way',
-      'RX/TX   ' + Math.round(metrics.downRate) + ' / ' + Math.round(metrics.upRate) + ' B/s',
-      'Recovery  ' + Math.round(metrics.recovery) + ' ms',
+      ...(metrics ? [
+        'RTT     ' + Math.round(metrics.rtt) + ' ms',
+        crew ? 'Network   '+(crew.host ? 'Lobby creator (host)' : 'Guest')+' · Supabase Realtime' : 'Delay   ' + delay + ' ms each way',
+        'RX/TX   ' + Math.round(metrics.downRate) + ' / ' + Math.round(metrics.upRate) + ' B/s',
+        'Recovery  ' + Math.round(metrics.recovery) + ' ms',
+      ] : ['Local solo simulation']),
       ...s.players.map(player => 'P' + player.id + '  x,z  ' + pos(player.x,player.z) + (player.connected ? '' : ' (reconnecting)')),
       ...(s.mission ? ['Shift   '+s.mission.stage, ...s.mission.down.map(d => 'Down    P'+d.id)] : []),
       'Light   ' + (l.owner ? 'P' + l.owner : 'floor') + (l.on ? ' · on' : ' · off'),

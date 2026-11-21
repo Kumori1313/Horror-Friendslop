@@ -72,3 +72,6 @@ pre { margin-bottom: 0; line-height: 1.5 }
 .report-label { display: block; font-size: .85rem }
 #report-reference { width: 100%; margin: .3rem 0 .8rem; font: .82rem monospace; padding: .45rem; color: #f2efe3; background: #18201e; border: 1px solid #717770 }
 #copy-reference { margin: 0 .25rem .4rem 0; background: transparent; color: #edc47d }
+
+#play-solo { display: inline-block; margin-top: 1rem; padding: .75rem 1.2rem; background: #e7b667; color: #151b17; font-weight: 700; text-decoration: none }
+#local-solo { color: #edc47d; padding: .75rem }

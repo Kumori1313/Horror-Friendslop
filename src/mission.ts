@@ -5,6 +5,7 @@ import type { Rect } from './layout.ts';
 
 export type Stage = 'prime' | 'trace' | 'answer' | 'extract' | 'won' | 'lost';
 export interface Mission {
+  solo?: boolean;
   stage: Stage;
   diver: { mode: 'dormant' | 'warning' | 'strike' | 'quiet' | 'tracking'; bay: string; seconds: number };
   down: { id: number; seconds: number }[];
@@ -31,8 +32,11 @@ export function assignment(layout: Layout, state: Snapshot, player: Player, obst
   const relay = station(layout,'relay');
   const carrier = state.players.find(p => p.id === state.lamp.owner && p.connected);
   const transmitting = carrier && state.lamp.on && onPad(carrier,relay);
-  if (mission.stage === 'trace' && transmitting && carrier.id === player.id) return 'Send test tone';
+  if (mission.stage === 'trace' && transmitting && carrier.id === player.id) return mission.solo ? 'Power exit circuit' : 'Send test tone';
   if (mission.stage === 'answer' && transmitting && onPad(player,receiver)) return 'Answer relay';
   const exit = station(layout,'exit');
-  if (mission.stage === 'extract' && partner && !mission.down.length && onPad(partner,exit) && onPad(player,exit)) return 'Extract crew';
+  if (mission.stage === 'extract' && !mission.down.length && onPad(player,exit)) {
+    if (mission.solo) return 'Extract';
+    if (partner && onPad(partner,exit)) return 'Extract crew';
+  }
 }

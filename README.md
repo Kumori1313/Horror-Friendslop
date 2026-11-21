@@ -2,6 +2,12 @@
 
 Two operators share one flashlight in a seeded industrial facility. Restore the exit circuit, survive the Bell Diver, and extract together. The standalone synchronization test uses a fixed maintenance room. A local TypeScript simulation owns movement, collision, and the light. Both browser windows send inputs and receive the same room state over WebSocket.
 
+## Play solo
+
+Open **Relay Room** from Game Hub and choose **Play solo**, or open the [solo playtest](https://kumori1313.github.io/relay-room/?solo=1) directly. The shift runs in your browser and pauses when you release controls or switch tabs. Refresh the same tab to resume. **Leave solo** ends the shift, and **New solo shift** on the results screen generates another facility.
+
+Carry the lit flashlight to Relay and use **Power exit circuit**. Black Start requires charging the Switchboard first. Once powered, avoid the Bell Diver and operate the Exit pad to extract. A strike ends a solo shift. The two-player callouts still use the paired stations and rescue rules.
+
 ## Start a local test
 
 Use Node.js 22.13 or newer and npm. From this repository, run:
@@ -83,7 +89,7 @@ The entry screen names the callout. In **Line test** the answering operator wait
 
 ### Phase 6 playtest
 
-The current playtest supports exactly two operators in WebGL 2 browsers. The browser acceptance run uses Chromium with desktop and touch controls. A physical Android phone hosted a match over cellular and stayed connected through a mid-game network switch.
+The Phase 6 co-op playtest supports two operators in WebGL 2 browsers. The browser acceptance run uses Chromium with desktop and touch controls. A physical Android phone hosted a match over cellular and stayed connected through a mid-game network switch.
 
 Use **Settings** on either device (or press **O**) to adjust look sensitivity and game volume, toggle sound captions, or keep the camera level when downed. Preferences persist on that device. Knock warnings, the strike circle and rescue timers stay visible with sound muted.
 

@@ -94,6 +94,8 @@ Phases 8–15 build on feedback from the public two-player release. Use the exis
 
 **Released on November 21, 2026.** Build `4a07263` uses numbered bay signs, amber-banded Intake doorways, and three green lights over Exit. Two private-lobby browsers completed Line Test locally and Black Start on the published site. The desktop and touch views passed checks for the absent map and orders, reconnect, rescue, extraction, matching shift references, and replay. The desktop player also copied the reference to the clipboard. A separate developer build passed the floor plan and simulated outage checks. The remaining playtest is to observe a first-time pair split up and regroup by describing landmarks.
 
+**Solo playtest mode.** One operator can enter a fresh generated facility from **Play solo**. The lit flashlight powers the exit circuit directly at Relay. Black Start also requires charging the Switchboard. The existing Bell Diver encounter, shift report, and seed apply to solo runs. Use solo to iterate on layouts and navigation, and two independent devices to verify shared state.
+
 ## Phase 9 — Generate larger, multi-floor facilities
 
 - Replace the flat grid and fixed rectangular bays with room templates that declare their footprint, height, walkable surfaces, and door or stair connections. Start with a small loot closet, a bent service tunnel, a large machinery hall, and a stairwell with landings on two floors. Support rooms above one another and sightlines between levels.

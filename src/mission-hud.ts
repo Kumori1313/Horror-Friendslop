@@ -56,7 +56,11 @@ export function missionHud(preferences: Preferences) {
         copy.textContent = 'Copy reference';
       }
       const won = m.stage === 'won';
-      el('result-title').textContent = won ? 'Crew extracted' : 'Signal lost';
+      el('result-title').textContent = won ? (m.solo ? 'Operator extracted' : 'Crew extracted') : 'Signal lost';
+      if (m.solo) {
+        el('result-detail').textContent = won ? 'You made it out.' : 'Your operator went down.';
+        return;
+      }
       el('result-detail').textContent = won ? 'Both operators made it out. Create a fresh lobby for another facility.' :
         'The crew could not complete the shift. Create a fresh lobby to try again.';
       return;

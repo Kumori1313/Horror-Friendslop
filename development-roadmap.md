@@ -80,3 +80,70 @@ Use TypeScript, Three.js, and Vite as the working stack. Start with two desktop 
 **Phase 7 complete.** A fresh guest clicked **Open Relay Room** on the public Game Hub and arrived in the game with the same guest identity. [Game Hub](https://kumori1313.github.io/game-hub/) · [Playtest feedback](https://github.com/Kumori1313/Horror-Friendslop/issues/new?template=playtest.yml)
 
 **Android playtest passed.** The project owner played in a private lobby and hosted a live match from an Android phone on cellular data. The phone stayed connected as host when the owner switched networks mid-game, and play continued in the same match.
+
+## Post-launch playtest roadmap
+
+Phases 8–15 build on feedback from the public two-player release. Use the existing creator-hosted private lobby for each playtest. Repeat changes that affect movement, sound, or shared state with a desktop guest and a physical Android host.
+
+## Phase 8 — Explore without a minimap or mission walkthrough
+
+- Remove the floor plan, enemy markers, Diagnostics button, G shortcut, network counters, and simulated outage control from the player build. Keep the seed viewer and outage tools in the developer build. Offer a copyable build and seed on the results screen for bug reports.
+- Remove the written mission briefing and step-by-step orders. Keep control bindings, touch actions, settings, and connection or health status. Give players landmarks they can recognize on the return trip, such as a distinctive intake door or a lit stair landing.
+
+**Pass when** a first-time pair can explore, describe where they split up, and regroup using the environment. Check keyboard and touch layouts for routes that still reveal the floor plan or developer console.
+
+## Phase 9 — Generate larger, multi-floor facilities
+
+- Replace the flat grid and fixed rectangular bays with room templates that declare their footprint, height, walkable surfaces, and door or stair connections. Start with a small loot closet, a bent service tunnel, a large machinery hall, and a stairwell with landings on two floors. Support rooms above one another and sightlines between levels.
+- Expand beyond the current 12–15 rooms. Build a pool of distinct destinations larger than a single facility needs. Draw each distinct room type at most once per seed. Reuse modular corridor pieces to connect them. Vary the choice of rooms, their sizes, and the branches worth exploring.
+- Ground players on ramps, stairs, and upper floors. Include elevation in host snapshots and checkpoints. Use actual door and stair connections for navigation, enemy movement, and hearing distance. Two rooms stacked above one another can be far apart by that measure.
+
+**Pass when** the 1,000-seed layout check covers floor transitions, unique room selection, clearance, overlaps, and a reachable route from every loot room to extraction. In two browsers, walk above and below one another, refresh on a landing, and meet at the same exit. Play several seeds and name the places that made each route different.
+
+## Phase 10 — Replace the relay assignment with a salvage quota
+
+- Prototype a crew contract spanning several expeditions. Both players can explore, carry salvage back to extraction, and choose between another haul and leaving. Sell recovered items for money. Show the target, credited earnings, and expeditions remaining on a terminal at base. Meeting quota wins the contract. Missing it by the deadline loses it.
+- Retire the requirement for one operator to wait at Intake or the Switchboard. Let players learn the loop by picking up an object, loading it, and seeing its sale value on the terminal. Make enough loot reachable for the quota to be achievable across the contract.
+- Let a surviving player deliberately extract while a partner is down. Prototype a **20% deduction from that expedition’s recovered value** for abandoning the partner. For example, 100 in recovered salvage credits 80 if one player leaves their downed partner, or 100 if they rescue and extract them. Show the deduction on the receipt. A brief disconnect or a tap on **Leave to hub** must never count as paid extraction.
+
+**Pass when** both players take part in the haul, a fresh crew can discover how to sell it without coaching, and tests cover quota success, a missed deadline, a crew wipe, rescue, and solo extraction with the penalty. Refreshing during settlement must credit the same sale exactly once.
+
+## Phase 11 — Make the Bell Diver a ceiling threat
+
+- Put a visible creature on the ceiling of the room it occupies. Give players time to look up and flee through a doorway. Remove the named attack warning, countdown beeps, and strike circle. The encounter should turn on noticing the creature and leaving its room.
+- Move one connected room per step. Chase a player only while their shortest path from the Diver is at most two room connections. Recheck after each step and break pursuit when they leave that range.
+- For each move, have the host randomly choose `audio/chain_1.wav` or `audio/chain_2.wav`. Use this as the Diver’s only sound. Only listeners **exactly one room connection from the destination** hear it. An optional caption follows the same hearing rule and describes the chain sound without naming a room. Record each clip’s Freesound source, creator, and license alongside the shipped asset.
+
+**Pass when** a test layout puts listeners at zero, one, and two connections from the destination and only the one-connection listener hears the chosen clip, once per move. Test pursuit at two and three connections, including a stairwell. In a playtest, one operator should be able to spot the Diver overhead and call the other out of the room.
+
+## Phase 12 — Give light, loot, and equipment a cost
+
+- Author genuinely dark tunnels and unpowered rooms. Keep some lit landmarks for orientation. Give the flashlight a finite battery that drains while switched on. Preserve the charge when players drop it, trade it, change floors, or reconnect.
+- Add useful field finds alongside saleable salvage, starting with spare cells. Stock the base shop with equipment bought from crew earnings, such as a replacement light or a defensive tool for the smaller enemies in Phase 13. For the first economy test, purchases reduce the shared wallet while the quota tracks credited salvage sales. Show both figures at the shop.
+
+**Pass when** two players can see the difference between lit and unlit routes on desktop and phone, exhaust a light, and recover using a found cell or purchased equipment. Simultaneous pickups, purchases, and refreshes must preserve one owner, one battery charge, and one debit.
+
+## Phase 13 — Expand the enemy roster and give players health
+
+- Introduce health that lasts across multiple hits as the roster grows. Show damage, remaining health, incapacitation, and revival consistently on both devices. Tune damage and recovery so an encounter can leave someone hurt but still able to help their partner.
+- Add enemies in batches with different behaviors and responses. Prototype a small scavenger players can drive off with a short-range tool and a larger roaming threat players must evade. Playtest each on its own before combining it with the Diver. Expand the roster around encounters crews can recognize and react to differently.
+
+**Pass when** players can survive a hit, use the defensive item against a smaller enemy, and distinguish at least three encounters through movement, silhouette, or sound. Test two enemies reaching one player together, revival after a refresh, and extraction with a downed partner.
+
+## Phase 14 — Animate the crew, equipment, and creatures
+
+- Animate idle, walk, stair travel, carrying, tool use, downed, and revive states. Give doors, pickups, flashlight use, and salvage loading visible transitions. Start creature animation in its encounter phase, then finish ceiling traversal, attacks, retreats, and hit reactions across the roster.
+- Drive animations from confirmed gameplay events so a guest sees what the host resolved. Reconnecting mid-action should restore the current pose. Retain reduced-motion controls and measure frame times on the physical Android host in a dark, multi-floor encounter.
+
+**Pass when** one player can tell what their partner picked up, whether a tool connected, and when a revive finished by watching the action. Run a full public-site contract with two fresh players, record their seed and device performance, and use their observations to tune the next release.
+
+## Phase 15 — Vote on what follows the crew into the next expedition
+
+After each expedition’s salvage sale, hold an intermission at the base terminal if the contract continues. Prototype two crew votes per intermission. One determines which threat gets worse. The other grants an advantage to both players. Each choice takes effect on the next expedition and lasts through the rest of that contract. A fresh contract starts with the baseline roster, abilities, and terrain.
+
+- **Threat vote.** Offer a new enemy species or an upgrade to one already active. Keep one individual of each chosen species per facility. For example, the crew might admit a scavenger or give the existing roaming enemy a follow-up lunge and higher damage. Once all species are active, offer distinct upgrades to the existing roster.
+- **Crew vote.** Offer benefits that change how the pair approaches the next haul. A salvage premium increases the sale value used for both wallet and quota credit, with any abandonment deduction applied afterward. A double jump lets both players cross a broken catwalk while carrying loot. Show the actual benefit on each ballot and retire a one-time ability from future offers once acquired.
+- **Terrain progression.** Introduce a basic jump on keyboard and touch. As expeditions advance, generate larger chambers with broken walkways, floor seams, and gaps that require consecutive jumps. Validate required loot and extraction routes against the crew’s current movement abilities. A crew that chose money can still make the crossing, while a crew that chose mobility can take a shorter route or reach a valuable cache.
+- **Two-player voting.** Show both ballots and selections to both players. For the prototype, alternate which seat breaks a split vote each intermission and identify that seat before voting. The host checkpoints the offers and votes for the expedition so refreshing or switching networks restores the same decision and each winner applies once.
+
+**Pass when** two crews play several expeditions on matched seeds, one favoring earnings and the other mobility. Both should face riskier crossings and more dangerous encounters in later rounds, and each should be able to point to a moment when its chosen buff helped. Compare falls, downs, salvage delivered, and extractions by round to tune the net difficulty increase. Exercise a split vote, reconnect during the ballot, and start a fresh contract to verify the reset.

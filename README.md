@@ -82,7 +82,7 @@ The briefing names the callout. In **Line test** the answering operator waits at
 
 ### Phase 6 playtest
 
-The current playtest supports exactly two operators in WebGL 2 browsers. The browser acceptance run uses Chromium with desktop and touch controls. Physical Android results for this version are still pending.
+The current playtest supports exactly two operators in WebGL 2 browsers. The browser acceptance run uses Chromium with desktop and touch controls. A physical Android phone hosted a match over cellular and stayed connected through a mid-game network switch.
 
 Use **Settings** on either device (or press **O**) to adjust look sensitivity and game volume, toggle sound captions, or keep the camera level when downed. Preferences persist on that device. Knock warnings, the strike circle and rescue timers stay visible with sound muted.
 

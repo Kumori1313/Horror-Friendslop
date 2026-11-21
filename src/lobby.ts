@@ -170,8 +170,16 @@ export async function mountLobby(launch: (crew: Crew) => (reason: string) => voi
   el<HTMLFormElement>('hub-guest').onsubmit = e => {
     e.preventDefault(); command(async () => { await guests.save(el<HTMLInputElement>('hub-name').value); await restore(); });
   };
+  const visibility = el<HTMLSelectElement>('hub-visibility');
+  const longCode = el<HTMLInputElement>('hub-long-code');
+  const longCodeOption = el('hub-long-code-option');
+  const showLongCodeOption = () => { longCodeOption.hidden = visibility.value !== 'private'; };
+  visibility.onchange = showLongCodeOption;
+  showLongCodeOption();
   el('hub-create').onclick = () => command(async () => {
-    roomId = await rpc<string>('create',{p_visibility:el<HTMLSelectElement>('hub-visibility').value,p_capacity:2,p_connection:tab});
+    const options: Record<string, unknown> = { p_visibility: visibility.value, p_capacity: 2, p_connection: tab };
+    if (visibility.value === 'private' && longCode.checked) options.p_long_code = true;
+    roomId = await rpc<string>('create', options);
     await refresh();
   });
   el<HTMLFormElement>('hub-code-form').onsubmit = e => {

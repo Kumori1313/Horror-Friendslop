@@ -1,6 +1,6 @@
 import { createClient } from '@supabase/supabase-js';
 import { createGuestService, displayName } from './guest.js';
-import type { Admission } from './room.ts';
+import type { Crew } from './creator-session.ts';
 
 const game = 'relay-room';
 interface Room {
@@ -10,7 +10,7 @@ interface Room {
 }
 const el = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as T;
 
-export async function mountLobby(launch: (authorize: () => Promise<Admission>, scope: string) => void) {
+export async function mountLobby(launch: (crew: Crew) => (reason: string) => void) {
   const main = document.querySelector('main')!;
   main.hidden = true;
   const lobby = el('hub-lobby');
@@ -18,18 +18,13 @@ export async function mountLobby(launch: (authorize: () => Promise<Admission>, s
   const info = el('hub-info'), error = el('hub-error');
   const hubPath = '/game-hub/';
   el('hub-back').onclick = () => location.assign(hubPath);
-  if (import.meta.env.MODE === 'pages' && !import.meta.env.VITE_RELAY_RUNTIME_ORIGIN) {
-    info.textContent = 'Public matches are offline while the multiplayer server is being set up.';
-    el('hub-refresh').hidden = true;
-    return;
-  }
   const url = import.meta.env.VITE_SUPABASE_URL, key = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY;
   if (!url || !key) {
     error.textContent = 'Configure the shared Supabase project to use Game Hub rooms.';
     el('hub-refresh').hidden = true;
     return;
   }
-  const client = createClient(url,key,{auth:{storageKey:'game-hub-auth',persistSession:true,autoRefreshToken:true,detectSessionInUrl:false}});
+  const client = createClient(url,key,{realtime:{vsn:'1.0.0'},auth:{storageKey:'game-hub-auth',persistSession:true,autoRefreshToken:true,detectSessionInUrl:false}});
   const guests = createGuestService(client);
   const tab = sessionStorage.getItem('relay-room-tab') || crypto.randomUUID();
   sessionStorage.setItem('relay-room-tab',tab);
@@ -37,6 +32,15 @@ export async function mountLobby(launch: (authorize: () => Promise<Admission>, s
   let requested = query.get('lobby') ?? query.get('room');
   let actor = '', name = '', roomId: string | null = null;
   let busy = false, launched = false, heartbeatAt = 0;
+  let verified = 0;
+  let hostCheckpoint = '';
+  let closing = false;
+  function forgetRound() {
+    if (!hostCheckpoint) return;
+    localStorage.removeItem(hostCheckpoint);
+    sessionStorage.removeItem(hostCheckpoint);
+  }
+  let halt: ((reason:string) => void) | undefined;
   async function rpc<T>(action: string, args: Record<string,unknown> = {}): Promise<T> {
     const result = await client.rpc('room_action',{p_action:action,p_game:game,...args}).abortSignal(AbortSignal.timeout(7000));
     if (result.status === 401) {
@@ -76,6 +80,8 @@ export async function mountLobby(launch: (authorize: () => Promise<Admission>, s
     if (!list.childElementCount) list.textContent = 'No public rooms waiting.';
   }
   function ended() {
+    halt?.('The round has ended');
+    forgetRound();
     roomId = null;
     updatePath(null);
     if (launched) { location.replace('/relay-room/?ended=1'); return; }
@@ -99,15 +105,15 @@ export async function mountLobby(launch: (authorize: () => Promise<Admission>, s
     start.hidden = actor !== room.host_id;
     start.disabled = !room.playable || room.members.filter(m => m.connected).length !== 2;
     info.textContent = !room.playable ? 'Gameplay is disabled for this deployment.' : 'Signed in as ' + name;
+    if (room.playable && room.status === 'playing') verified = performance.now();
+    else if (launched) halt?.('Gameplay disabled');
     if (room.status === 'playing' && !launched) {
       if (!room.playable) return;
       main.hidden = false; lobby.hidden = true; el('live-leave').hidden = false;
       try {
-        launch(async () => {
-          const {data:{session}} = await client.auth.getSession();
-          if (!session || session.user.id !== actor) throw Error('Guest session ended');
-          return {token:session.access_token,lobby:room.id,round:room.round};
-        },[room.id,room.round,actor].join('-'));
+        if (room.host_id === actor) hostCheckpoint = ['relay-host-v1',room.id,room.round,actor].join('/');
+        halt = launch({client,actor,host:actor===room.host_id,lobby:room.id,round:room.round,
+          lastVerified:() => verified,closeRound:() => { closing = true; leave('/relay-room/?ended=1'); }});
         launched = true;
       } catch (failure) { main.hidden = true; lobby.hidden = false; throw failure; }
     }
@@ -115,6 +121,7 @@ export async function mountLobby(launch: (authorize: () => Promise<Admission>, s
   async function refresh() {
     if (!actor) { await restore(); return; }
     if (!roomId) { await discover(); return; }
+    if (closing) { leave('/relay-room/?ended=1'); return; }
     const heartbeat = Date.now() - heartbeatAt > 14000;
     try {
       const r = await rpc<Room | null>(heartbeat ? 'heartbeat' : 'snapshot',{p_lobby:roomId,p_connection:tab});
@@ -182,6 +189,8 @@ export async function mountLobby(launch: (authorize: () => Promise<Admission>, s
         try { await rpc('leave',{p_lobby:roomId}); }
         catch (failure) { if ((failure as {code?:string}).code !== '42501') throw failure; }
       }
+      halt?.('The round has ended');
+      forgetRound();
       location.assign(destination);
     });
   }

@@ -20,7 +20,7 @@ export function validateClientConfig(url, key) {
 }
 
 /** @returns {import('vite').HtmlTagDescriptor[]} */
-export function securityMeta(html, backend, devPort, runtimeOrigin = '') {
+export function securityMeta(html, backend, devPort) {
   const hashes = [...html.matchAll(/<script(?![^>]*\bsrc=)[^>]*>([\s\S]*?)<\/script>/g)]
     .map(match => `'sha256-${createHash('sha256').update(match[1].replace(/\r\n?/g, '\n')).digest('base64')}'`);
   const connect = ["'self'"];
@@ -30,7 +30,6 @@ export function securityMeta(html, backend, devPort, runtimeOrigin = '') {
     socket.protocol = backend.protocol === 'https:' ? 'wss:' : 'ws:';
     connect.push(socket.origin);
   }
-  if (runtimeOrigin) connect.push(runtimeOrigin);
   if (devPort) connect.push(`ws://127.0.0.1:${devPort}`);
   const content = [
     "default-src 'self'", `script-src 'self' ${hashes.join(' ')}`,

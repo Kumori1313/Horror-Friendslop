@@ -68,7 +68,9 @@ Use TypeScript, Three.js, and Vite as the working stack. Start with two desktop 
 ## Phase 7 — Release and maintain
 
 - Run the hub suite against the release build, including existing games. Verify asset paths under the approved game route, source and asset licenses, and the live runtime's cost at the intended player count.
-- Release compatible backend changes first, deploy the runtime and static client, smoke-test a full round on the shared origin, then enable public lobbies. Rehearse disabling new starts and returning affected players to the hub if a release fails.
+- Release compatible backend changes first, publish the creator-hosted client, smoke-test a full round on the shared origin, then enable public lobbies. Rehearse disabling new starts and returning affected players to the hub if a release fails.
 - After launch, collect bug reports with the build, seed, generator version, party size, and reproduction steps. Turn failing layouts and desynchronization reports into repeatable tests before expanding the content pool.
 
 **Release when** two independent guests can finish a generated round on the deployed build, reconnect, replay, and leave cleanly, and maintainers can reproduce a reported seed and disable a faulty release.
+
+**Creator-hosted release candidate.** Each lobby creator runs the simulation for two operators. The November 21 local Black Start test covered the private code, a two-second guest interruption, duplicate host tabs, host refresh, rescue, extraction, and replay. The touch-viewport guest reported 3,892 B/s received and 671 B/s sent during the exit circuit. [Hosting and release procedure](README.md#creator-hosted-matches)

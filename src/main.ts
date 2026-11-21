@@ -6,8 +6,9 @@ import './style.css';
 import { blockers, footprint, generatorVersion, geometryFor, nearbyDoor, roomNames } from './layout.ts';
 import type { Layout, Geometry, Rect } from './layout.ts';
 import { canTake } from './room.ts';
-import { RoomConnection } from './connection.ts';
-import type { Admission, Ticket, Snapshot } from './room.ts';
+import { CreatorSession, type Crew } from './creator-session.ts';
+import { RoomConnection, type Events } from './connection.ts';
+import type { Ticket, Snapshot } from './room.ts';
 import { bindDrag } from './touch.ts';
 import { createScene } from './scene.ts';
 
@@ -24,19 +25,15 @@ const panel = element('diagnostics');
 const stats = element('stats');
 const reticle = element('reticle');
 
-function start(render: ReturnType<typeof createScene>, admission?: () => Promise<Admission>, scope = 'local', sceneStarted = performance.now()) {
-  const key = admission ? 'relay-room-seat-' + scope : 'relay-room-seat-v2';
+function start(render: ReturnType<typeof createScene>, crew?: Crew, sceneStarted = performance.now()) {
+  const key = 'relay-room-seat-v2';
   let saved: Ticket | null = null;
   const nav = performance.getEntriesByType('navigation')[0] as PerformanceNavigationTiming | undefined;
-  if (nav?.type !== 'navigate') {
+  if (!crew && nav?.type !== 'navigate') {
     try { saved = JSON.parse(sessionStorage.getItem(key) || 'null'); } catch { /* Fresh session */ }
   }
-  const url = new URL(admission ? '/relay-room/live' : '/live',location.href);
+  const url = new URL('/live',location.href);
   url.protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
-  if (admission && import.meta.env.VITE_RELAY_RUNTIME_ORIGIN) {
-    url.host = new URL(import.meta.env.VITE_RELAY_RUNTIME_ORIGIN).host;
-    url.protocol = 'wss:';
-  }
   const delay = Math.max(0,Math.min(500,Number(new URLSearchParams(location.search).get('delay')) || 0));
   let id = 0, yaw = 0, pitch = -0.12;
   let state: Snapshot | undefined;
@@ -202,7 +199,7 @@ function start(render: ReturnType<typeof createScene>, admission?: () => Promise
         'Build   ' + import.meta.env.VITE_RELAY_BUILD, 'Round   ' + s.round, 'Update  ' + s.update, 'RTT     ' + Math.round(connection.metrics.rtt) + ' ms',
         'Frame p95  '+(frameP95 ? frameP95.toFixed(1)+' ms' : 'sampling'),
         'Scene ready  '+Math.round(readyMs)+' ms',
-        'Delay   ' + delay + ' ms each way',
+        crew ? 'Network   '+(crew.host ? 'Lobby creator (host)' : 'Guest')+' · Supabase Realtime' : 'Delay   ' + delay + ' ms each way',
         'RX/TX   ' + Math.round(connection.metrics.downRate) + ' / ' + Math.round(connection.metrics.upRate) + ' B/s',
         'Recovery  ' + Math.round(connection.metrics.recovery) + ' ms',
         ...s.players.map(player => 'P' + player.id + '  x,z  ' + pos(player.x,player.z) + (player.connected ? '' : ' (reconnecting)')),
@@ -218,9 +215,9 @@ function start(render: ReturnType<typeof createScene>, admission?: () => Promise
       ].join('\n');
     }
   }
-  const connection = new RoomConnection(url.href,saved,{
+  const events: Events = {
     joined(seat,ticket,plan) {
-      if (admission && plan?.version !== generatorVersion) {
+      if (crew && plan?.version !== generatorVersion) {
         connection.stop();
         status.textContent = 'Incompatible layout version';
         prompt.textContent = 'Update the game and runtime, then refresh.';
@@ -238,7 +235,7 @@ function start(render: ReturnType<typeof createScene>, admission?: () => Promise
         element('brief-instructions').textContent = (backup ? 'Charge the Switchboard pad first. ' : '')+'One operator answers from '+roomNames[answerStation(plan).kind]+'. Another takes the lit flashlight to Relay. When the ceiling knocks, clear the circle. Diagnostics shows the floor plan.';
       }
       id = seat;
-      sessionStorage.setItem(key,JSON.stringify(ticket));
+      if (!crew) sessionStorage.setItem(key,JSON.stringify(ticket));
     },
     snapshot(snapshot, first) {
       state = snapshot;
@@ -264,14 +261,18 @@ function start(render: ReturnType<typeof createScene>, admission?: () => Promise
       status.textContent = ended ? reason : 'Reconnecting…';
       prompt.textContent = ended ? 'Join a new session when ready.' : 'Waiting for a fresh room snapshot.';
       if (ended) {
-        sessionStorage.removeItem(key);
+        if (!crew) sessionStorage.removeItem(key);
         brief.hidden = false;
         enter.disabled = false;
-        enter.textContent = admission ? 'Return to Game Hub' : 'Join again';
-        enter.onclick = admission ? () => element('live-leave').click() : () => location.reload();
+        enter.textContent = crew ? 'Return to Game Hub' : 'Join again';
+        if (reason === 'Already playing in another tab') {
+          element('live-leave').hidden = true;
+          enter.onclick = () => location.assign('/game-hub/');
+        } else enter.onclick = crew ? () => element('live-leave').click() : () => location.reload();
       }
     },
-  },delay,admission);
+  };
+  const connection = crew ? new CreatorSession(crew,events) : new RoomConnection(url.href,saved,events,delay);
   connection.connect();
   element('outage').onclick = () => { if (state) connection.interrupt(2000); };
   window.addEventListener('pagehide',() => connection.stop());
@@ -303,14 +304,15 @@ function start(render: ReturnType<typeof createScene>, admission?: () => Promise
     requestAnimationFrame(frame);
   }
   requestAnimationFrame(frame);
+  return (reason: string) => { connection.stop(); events.offline(reason,true); };
 }
 
 try {
   if (location.pathname.startsWith('/relay-room/')) {
     const { mountLobby } = await import('./lobby.ts');
-    await mountLobby((auth,scope) => {
+    await mountLobby(crew => {
       const started = performance.now();
-      start(createScene(canvas,true),auth,scope,started);
+      return start(createScene(canvas,true),crew,started);
     });
   } else start(createScene(canvas));
 }

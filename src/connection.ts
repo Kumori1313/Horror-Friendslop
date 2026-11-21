@@ -2,7 +2,7 @@ import { generatorVersion, type Layout } from './layout.ts';
 import { newerSnapshot } from './room.ts';
 import type { Action, Admission, ClientMessage, Input, ServerMessage, Snapshot, Ticket } from './room.ts';
 
-interface Events {
+export interface Events {
   joined(id: number, ticket: Ticket, layout?: Layout): void;
   snapshot(state: Snapshot, first: boolean): void;
   offline(reason: string, ended: boolean): void;

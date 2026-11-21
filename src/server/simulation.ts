@@ -1,4 +1,3 @@
-import { randomUUID } from 'node:crypto';
 import { canTake, clearAt, walls } from '../room.ts';
 import type { Action, Input, Player, Snapshot } from '../room.ts';
 
@@ -22,7 +21,7 @@ export class Simulation {
       this.obstacles = blockers(this.geometry,[]);
     }
   }
-  state: Snapshot = { round: randomUUID(), update: 0, players: [], lamp: { x: 0, y: 0.14, z: 2, yaw: 0, pitch: 0, on: true, owner: null } };
+  state: Snapshot = { round: crypto.randomUUID(), update: 0, players: [], lamp: { x: 0, y: 0.14, z: 2, yaw: 0, pitch: 0, on: true, owner: null } };
   inputs = new Map<number, Input>();
 
   join(assignedSeat?: number) {

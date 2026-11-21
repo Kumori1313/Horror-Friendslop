@@ -92,7 +92,7 @@ Phases 8–15 build on feedback from the public two-player release. Use the exis
 
 **Pass when** a first-time pair can explore, describe where they split up, and regroup using the environment. Check keyboard and touch layouts for routes that still reveal the floor plan or developer console.
 
-**Implemented and tested locally.** The player build uses numbered bay signs, amber-banded Intake doorways, and three green lights over Exit. Two private-lobby browsers completed Line Test with the map and orders absent, reconnected, and copied the matching shift reference. A separate developer build retained the floor plan and outage simulator. The remaining playtest is to observe a first-time pair split up and regroup by describing landmarks.
+**Released on November 21, 2026.** Build `4a07263` uses numbered bay signs, amber-banded Intake doorways, and three green lights over Exit. Two private-lobby browsers completed Line Test locally and Black Start on the published site. The desktop and touch views passed checks for the absent map and orders, reconnect, rescue, extraction, matching shift references, and replay. The desktop player also copied the reference to the clipboard. A separate developer build passed the floor plan and simulated outage checks. The remaining playtest is to observe a first-time pair split up and regroup by describing landmarks.
 
 ## Phase 9 — Generate larger, multi-floor facilities
 

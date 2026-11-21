@@ -1,10 +1,10 @@
-import type { Layout } from '../layout.ts';
+import { nextWiredBay, type Layout } from '../layout.ts';
 import { distance, strikeRadius } from '../mission.ts';
 import type { Mission } from '../mission.ts';
 import type { Snapshot } from '../room.ts';
 
-export function newMission(): Mission {
-  return { stage:'trace', down:[], diver:{mode:'dormant',bay:'',seconds:0} };
+export function newMission(layout: Layout): Mission {
+  return { stage:layout.callout === 'black-start' ? 'prime' : 'trace', down:[], diver:{mode:'dormant',bay:'',seconds:0} };
 }
 
 export function warn(mission: Mission, bay: string) {
@@ -28,12 +28,18 @@ export function advanceMission(layout: Layout, state: Snapshot, mission: Mission
       case 'strike':
         diver.mode = 'quiet'; diver.seconds = 9;
         break;
-      case 'quiet': {
+      case 'quiet':
+      case 'tracking': {
         const crew = state.players.filter(p => p.connected && !mission.down.some(d => d.id === p.id));
         const target = crew.find(p => p.id === state.lamp.owner && state.lamp.on) ?? crew[0];
         if (target) {
           const bay = layout.rooms.reduce((a,b) => distance(a,target) < distance(b,target) ? a : b);
-          warn(mission,bay.id);
+          if (bay.id === diver.bay) warn(mission,bay.id);
+          else {
+            diver.bay = nextWiredBay(layout,diver.bay,bay.id);
+            diver.mode = 'tracking';
+            diver.seconds = 1.1;
+          }
         }
         return;
       }

@@ -19,14 +19,14 @@ export function drawMap(canvas: HTMLCanvasElement, layout: Layout, state: Snapsh
     ctx.beginPath(); ctx.moveTo(x(a.x),z(a.z)); ctx.lineTo(x(b.x),z(b.z)); ctx.stroke();
   }
   for (const room of layout.rooms) {
-    const label = {intake:'I',relay:'R',exit:'X',junction:'',pump:'',stores:''}[room.kind];
+    const label = {intake:'I',relay:'R',exit:'X',junction:'',pump:'',stores:'',switchboard:'S',chiller:'C'}[room.kind];
     ctx.fillStyle = label ? '#dbce9b' : '#78938a';
     ctx.fillRect(x(room.x)-9,z(room.z)-9,18,18);
     ctx.fillStyle='#15201f'; ctx.font='bold 13px monospace'; ctx.textAlign='center'; ctx.textBaseline='middle';
     ctx.fillText(label,x(room.x),z(room.z));
   }
   const diver = state.mission?.diver;
-  if (diver && (diver.mode === 'warning' || diver.mode === 'strike')) {
+  if (diver && ['tracking','warning','strike'].includes(diver.mode)) {
     const bay = byId.get(diver.bay)!;
     ctx.strokeStyle = '#ff714d'; ctx.lineWidth = 2;
     ctx.strokeRect(x(bay.x)-10,z(bay.z)-10,20,20);

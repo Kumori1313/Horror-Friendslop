@@ -3,7 +3,7 @@ import { footprint, geometryFor, opening, roomNames } from './layout.ts';
 import type { Layout, Kind, Rect } from './layout.ts';
 
 const colors: Record<Kind,number> = {
-  intake:0xe0b258, pump:0x648d92, stores:0xb78155, junction:0x93a599, relay:0xe6a840, exit:0x70cfaf,
+  intake:0xe0b258, pump:0x648d92, stores:0xb78155, junction:0x93a599, relay:0xe6a840, exit:0x70cfaf, switchboard:0xe0894e, chiller:0x57b9da,
 };
 
 // Group repeated industrial geometry into instanced draws for phone GPUs.
@@ -47,6 +47,9 @@ export function buildFacility(layout: Layout, surface: T.Texture) {
       box(0x354744,r.x,3.49,r.z+side*1.6,f.w-0.2,0.16,0.14);
     }
     box(color,r.x,0.008,r.z,1.6,0.016,1.6);
+    if (['relay','exit','switchboard','intake'].includes(r.kind)) {
+      for (const side of [-1,1]) box(color,r.x+side*0.88,0.023,r.z,0.09,0.028,2.1);
+    }
     for (const sign of [-1,1]) {
       const offset = sign*1.15;
       box(0x9daaa1,r.x+offset,3.45,r.z,0.22,0.12,2.6);
@@ -56,7 +59,15 @@ export function buildFacility(layout: Layout, surface: T.Texture) {
     const p = geometry.equipment[propIndex++];
     slab(p,0x303e3e,0.65,1.3);
     slab({...p,w:1.28,d:1.28},color,1.31,0.12);
-    if (r.kind === 'pump') {
+    if (r.kind === 'switchboard') {
+      box(0x263331,p.x,1.99,p.z,1.15,1.35,0.7);
+      for (const x of [-0.33,0,0.33]) {
+        box(color,p.x+x,2.19,p.z,0.19,0.13,0.74);
+        box(0xa4a9a2,p.x+x,1.86,p.z,0.08,0.27,0.74);
+      }
+    } else if (r.kind === 'chiller') {
+      for (let fin=0;fin<6;fin++) box(color,p.x,1.49+fin*0.19,p.z,1.14,0.09,1.14);
+    } else if (r.kind === 'pump') {
       for (const offset of [-0.3,0,0.3]) box(0x829b98,p.x+offset,1.64,p.z,0.15,0.68,0.6);
     } else if (r.kind === 'stores') {
       box(0x806c50,p.x,1.62,p.z,1.05,0.5,1.05);
@@ -94,7 +105,7 @@ export function buildFacility(layout: Layout, surface: T.Texture) {
   for (const [color,matrices] of batches) {
     const mesh = new T.InstancedMesh(cube,new T.MeshStandardMaterial({
       color, map:[0x748078,0x515e59].includes(color) ? surface : null,
-      emissive:color===0xe4e7c9 ? 0xc0cfad : 0, roughness:0.86,
+      emissive:color===0xe4e7c9 ? 0xc0cfad : Object.values(colors).includes(color) ? color : 0, emissiveIntensity:0.55, roughness:0.86,
     }),matrices.length);
     matrices.forEach((matrix,i)=>mesh.setMatrixAt(i,matrix)); root.add(mesh);
   }

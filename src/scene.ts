@@ -146,7 +146,7 @@ export function createScene(canvas: HTMLCanvasElement, generated = false) {
   cone.position.z = -1.36; cone.rotation.x = Math.PI/2; torch.add(cone);
   camera.position.set(-0.7,1.59,3); camera.rotation.x = -0.12;
   let previousOwner: number | null | undefined;
-  function render(state: Snapshot | undefined, self: number, yaw: number, pitch: number, dt: number, layout?: Layout) {
+  function render(state: Snapshot | undefined, self: number, yaw: number, pitch: number, dt: number, layout?: Layout, reducedMotion = false) {
     if (layout && layout !== loaded) {
       facility?.dispose();
       facility = buildFacility(layout,painted('#c6ccc6','#8e9890'));
@@ -167,7 +167,7 @@ export function createScene(canvas: HTMLCanvasElement, generated = false) {
       for (const p of state.players) {
         const down = state.mission?.down.some(d => d.id === p.id);
         if (p.id === self) {
-          camera.position.y = T.MathUtils.lerp(camera.position.y,down ? 0.45 : 1.59,blend);
+          camera.position.y = reducedMotion ? 1.59 : T.MathUtils.lerp(camera.position.y,down ? 0.45 : 1.59,blend);
           camera.position.x = T.MathUtils.lerp(camera.position.x,p.x,blend);
           camera.position.z = T.MathUtils.lerp(camera.position.z,p.z,blend);
           camera.rotation.set(pitch,yaw,0,'YXZ');

@@ -27,8 +27,12 @@ function assemble(seed: number, cells: number[][], pairs: number[][], random: ()
   const objective = farthest(rooms[0].id,[rooms[0].id]);
   const exit = farthest(objective.id,[rooms[0].id,rooms[1].id,objective.id]);
   objective.kind = 'relay'; exit.kind = 'exit';
+  const spare = rooms.filter(r => r.kind !== 'intake' && r !== objective && r !== exit);
+  spare[0].kind = 'chiller';
+  spare[1+Math.floor(random()*(spare.length-1))].kind = 'switchboard';
   passages.find(edge => edge.a===exit.id || edge.b===exit.id)!.bulkhead = true;
-  return {version:generatorVersion,seed,fallback,rooms,passages,objectiveId:objective.id,exitId:exit.id,lampId:'inspection-light'};
+  const callout = seed % 2 === 0 ? 'black-start' : 'line-test';
+  return {callout,version:generatorVersion,seed,fallback,rooms,passages,objectiveId:objective.id,exitId:exit.id,lampId:'inspection-light'};
 }
 
 export function generateLayout(seed: number, attempts = 8): Layout {
@@ -37,7 +41,7 @@ export function generateLayout(seed: number, attempts = 8): Layout {
   const pick = <T>(values:T[]) => values[Math.floor(random()*values.length)];
   for (let attempt=0; attempt<attempts; attempt++) {
     const cells = [[0,0],[0,-1]], pairs = [[0,1]];
-    const count = 10+Math.floor(random()*3);
+    const count = 12+Math.floor(random()*4);
     while (cells.length < count) {
       const frontier: number[][] = [];
       cells.forEach(([x,z],i) => {
@@ -57,7 +61,9 @@ export function generateLayout(seed: number, attempts = 8): Layout {
           !pairs.some(([u,v])=>u===a && v===b)) shortcuts.push([a,b]);
     }
     if (!shortcuts.length) continue;
-    pairs.push(pick(shortcuts));
+    while (shortcuts.length && pairs.length < cells.length+1) {
+      pairs.push(shortcuts.splice(Math.floor(random()*shortcuts.length),1)[0]);
+    }
     const layout = assemble(seed,cells,pairs,random,false);
     if (validLayout(layout)) return layout;
   }

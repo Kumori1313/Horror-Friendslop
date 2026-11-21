@@ -59,6 +59,10 @@ Use TypeScript, Three.js, and Vite as the working stack. Start with two desktop 
 
 **Pass when** new groups can complete repeated runs without coaching, distinguish important cues, and recover when a teammate leaves. Record supported browsers, player limits, and measured performance on the target hardware.
 
+**Implemented locally for two operators.** Generator v2 adds the Switchboard and Chiller hall. Crews either run a line test from Intake or charge the Switchboard for a black start. After its first strike, the Bell Diver follows connected passages and scrapes the ceiling before knocking at its target. Both callouts use the existing rescue and extraction rules.
+
+**Verified November 21, 2026.** Two independent Chromium sessions completed both callouts through Game Hub, including rescue after refresh, extraction, replay, and returning the remaining player to the lobby list after a departure. The 1,000-seed navigation check produced 993 distinct route graphs with zero fallbacks. Every tested bay had a connected route to Exit for the Bell Diver. The [playtest instructions](README.md#phase-6-playtest) cover both callouts and the device diagnostics. Physical Android frame times and observations from first-time crews are pending.
+
 ## Phase 7 — Release and maintain
 
 - Run the hub suite against the release build, including existing games. Verify asset paths under the approved game route, source and asset licenses, and the live runtime's cost at the intended player count.

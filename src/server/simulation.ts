@@ -18,7 +18,7 @@ export class Simulation {
     if (layout) {
       this.geometry = geometryFor(layout);
       this.state.opened = [];
-      this.state.mission = newMission();
+      this.state.mission = newMission(layout);
       this.obstacles = blockers(this.geometry,[]);
     }
   }
@@ -74,6 +74,7 @@ export class Simulation {
     if (!p?.connected || finished(mission?.stage) || mission?.down.some(d => d.id === id)) return;
     if (this.layout && mission && action === 'operate') {
       switch (assignment(this.layout,this.state,p,this.obstacles)) {
+        case 'Charge switchboard': mission.stage = 'trace'; break;
         case 'Send test tone': mission.stage = 'answer'; break;
         case 'Answer relay':
           mission.stage = 'extract';

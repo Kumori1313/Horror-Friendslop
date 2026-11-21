@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { mkdirSync, writeFileSync } from 'node:fs';
-import { blockers, geometryFor, nearbyDoor, validLayout } from '../src/layout.ts';
+import { blockers, geometryFor, nearbyDoor, validLayout, generatorVersion, nextWiredBay, distances } from '../src/layout.ts';
 import { clearAt } from '../src/room.ts';
 import { generateLayout } from '../src/server/generate-layout.ts';
 import { Simulation } from '../src/server/simulation.ts';
@@ -11,13 +11,19 @@ test('1,000 repeatable seeds produce traversable, varied floor plans', t => {
   for (let seed=0;seed<1000;seed++) {
     const plan = generateLayout(seed);
     if (!validLayout(plan)) failures.push(seed);
+    const steps = distances(plan.rooms,plan.passages,plan.exitId);
+    for (const bay of plan.rooms.filter(r => r.id !== plan.exitId)) {
+      const next = nextWiredBay(plan,bay.id,plan.exitId);
+      assert.ok(plan.passages.some(e => (e.a === bay.id && e.b === next) || (e.b === bay.id && e.a === next)));
+      assert.equal(steps.get(next),steps.get(bay.id)!-1);
+    }
     if (plan.fallback) fallback.push(seed);
     const points = new Map(plan.rooms.map(r=>[r.id,r.x+','+r.z]));
     topologies.add(plan.passages.map(e=>[points.get(e.a),points.get(e.b)].sort().join('/')).sort().join(';'));
   }
   if (failures.length || fallback.length) {
     mkdirSync('test-results',{recursive:true});
-    writeFileSync('test-results/layout-seeds.json',JSON.stringify({version:1,failures,fallback},null,2)+'\n');
+    writeFileSync('test-results/layout-seeds.json',JSON.stringify({version:generatorVersion,failures,fallback},null,2)+'\n');
   }
   t.diagnostic(topologies.size+' unique route graphs; '+fallback.length+'/1000 fallbacks');
   assert.deepEqual(failures,[]);

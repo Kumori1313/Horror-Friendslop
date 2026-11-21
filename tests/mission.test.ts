@@ -4,8 +4,8 @@ import { station, strikeRadius } from '../src/mission.ts';
 import { generateLayout } from '../src/server/generate-layout.ts';
 import { Simulation } from '../src/server/simulation.ts';
 
-function shift() {
-  const layout = generateLayout(19);
+function shift(seed = 19) {
+  const layout = generateLayout(seed);
   const sim = new Simulation(layout);
   sim.join(); sim.join();
   const [carrier,partner] = sim.state.players;
@@ -76,4 +76,39 @@ test('missing a rescue or taking a strike together ends the round; a new facilit
   assert.notDeepEqual(next.layout?.rooms,second.sim.layout?.rooms);
   assert.equal(next.state.mission?.stage,'trace'); assert.deepEqual(next.state.mission?.down,[]);
   assert.equal(new Simulation().state.mission,undefined);
+});
+
+test('black start requires priming and answering at the switchboard with a live relay carrier', () => {
+  const {sim,mission,carrier,partner,relay,intake,exit,move} = shift(20);
+  const board = station(sim.layout!,'switchboard');
+  sim.act(carrier.id,'take');
+  move(carrier,relay); sim.act(carrier.id,'operate');
+  assert.equal(mission.stage,'prime');
+  move(partner,board); sim.act(partner.id,'operate');
+  assert.equal(mission.stage,'trace');
+  sim.act(carrier.id,'operate');
+  move(partner,intake); sim.act(partner.id,'operate');
+  assert.equal(mission.stage,'answer');
+  move(partner,board); sim.act(partner.id,'operate');
+  assert.equal(mission.stage,'extract');
+  move(partner,exit); move(carrier,exit); sim.act(partner.id,'operate');
+  assert.equal(mission.stage,'won');
+});
+
+test('diver advances along the ceiling before warning at the new target bay', () => {
+  const {sim,mission,carrier,exit,move,power,tick} = shift();
+  power(); move(carrier,exit); tick(6);
+  let previous = mission.diver.bay;
+  for (let frame=0; frame<1200 && mission.diver.mode !== 'warning'; frame++) {
+    sim.tick(1/30);
+    if (mission.diver.bay !== previous) {
+      const next = mission.diver.bay;
+      assert.ok(sim.layout!.passages.some(e => [e.a,e.b].includes(previous) && [e.a,e.b].includes(next)));
+      previous = next;
+      assert.equal(mission.diver.mode,'tracking');
+    }
+  }
+  assert.equal(mission.diver.mode,'warning');
+  assert.equal(mission.diver.bay,exit.id);
+  assert.equal(mission.down.length,0);
 });

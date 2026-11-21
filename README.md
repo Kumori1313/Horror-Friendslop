@@ -64,19 +64,38 @@ In the hub checkout, `npm run test:relay` runs the browser acceptance test on po
 
 ### Explore a generated facility
 
-Start a **new Game Hub room** to get a new facility. Both operators spawn at Intake within reach of the flashlight. Explore the connected rooms and corridors, locate the **Relay station**, then find the **Exit bay**. Overhead signs name the room ahead. At a closed bulkhead, press **R** or tap **Open bulkhead** on a phone. The door opens for both players.
+Start a **new Game Hub room** to get a new facility. Normal runs contain 12–15 rooms. The orange Switchboard and blue Chiller hall have distinct floor markers and equipment. Both operators spawn at Intake within reach of the flashlight. Explore the connected rooms and corridors, locate the **Relay station**, then find the **Exit bay**. Overhead signs name the room ahead. At a closed bulkhead, press **R** or tap **Open bulkhead** on a phone. The door opens for both players.
 
-Open **Diagnostics** for the shared floor plan, player positions, seed, generator version, objective and exit IDs, and opened bulkheads. Amber links mark closed bulkheads. Refresh while holding the light to check that your room, door state, and flashlight are restored. The map also marks the Bell Diver’s target bay in red and a downed operator with a white cross.
+Open **Diagnostics** for the shared floor plan, player positions, seed, generator version, objective and exit IDs, and opened bulkheads. Amber links mark closed bulkheads. Refresh while holding the light to check that your room, door state, and flashlight are restored. The map also marks the Bell Diver’s current bay in red and a downed operator with a white cross.
 
 Run `npm run test:layouts` to check seeds 0–999, graph variety, player clearance, authoritative door collision, and the fixed fallback. The generator tries at most eight candidates per seed. Batch validation writes any fallback or failing seeds to `test-results/layout-seeds.json`. To replay a reported seed with this generator version, stop the local shared server and run `RELAY_LAYOUT_SEED=19 npm run dev:relay` from the **hub** checkout. Omit the override to restore per-room generation. The plan is sent on admission and resume, with only live door and item state in the regular snapshots.
 
 ### Play the emergency callout
 
-1. One operator takes the flashlight with **E** or **Pick up**. The other waits on the center pad at Intake. Use the floor plan in **Diagnostics** to find the Relay station (R) and Exit bay (X).
-2. Stand on the Relay pad with the flashlight on and press **Q** to **Send test tone**. Stay there while the Intake operator presses **Q** to **Answer relay**. On a phone, tap the named action.
-3. The Bell Diver wakes above Relay. Knocks, a warning naming the bay, and a glowing floor circle give four seconds to get clear. It drops inside the circle. On subsequent passes it targets the bay nearest the conscious operator carrying the lit lamp. Without a lit carrier it follows a conscious operator.
+The briefing names the callout. In **Line test** the answering operator waits at Intake. In **Black start** they first charge the orange Switchboard pad (S) and answer the tone from there. Both callouts use the following controls.
+
+1. One operator takes the flashlight with **E** or **Pick up**. The other operates the center pad named in the briefing. Use the floor plan in **Diagnostics** to find the Relay station (R) and Exit bay (X).
+2. Stand on the Relay pad with the flashlight on and press **Q** to **Send test tone**. Stay there while the answering operator presses **Q** to **Answer relay**. On a phone, tap the named action.
+3. The Bell Diver wakes above Relay. Knocks, a warning naming the bay, and a glowing floor circle give four seconds to get clear. It drops inside the circle. On subsequent passes it targets the bay nearest the conscious operator carrying the lit lamp. It follows connected ceiling passages, scraping overhead at each bay. Without a lit carrier it follows a conscious operator.
 4. A struck operator drops the light. A teammate has 75 seconds to reach them and press **Q** or **Revive partner**. Both operators going down or a rescue timing out ends the shift.
 5. Meet on the green center pad at Exit and select **Extract crew**. Both players see the shift report. **Return to lobbies** releases the seats so one player can create a fresh match and share its new code.
+
+### Phase 6 playtest
+
+The current playtest supports exactly two operators in WebGL 2 browsers. The browser acceptance run uses Chromium with desktop and touch controls. Physical Android results for this version are still pending.
+
+Use **Settings** on either device (or press **O**) to adjust look sensitivity and game volume, toggle sound captions, or keep the camera level when downed. Preferences persist on that device. Knock warnings, the strike circle and rescue timers stay visible with sound muted.
+
+For repeatable runs, set `RELAY_LAYOUT_SEED=19` for Line test or `RELAY_LAYOUT_SEED=20` for Black start when starting the local hub preview. With no seed override, create fresh rooms to draw new layouts. Try each callout with the crew reading the briefing, swap jobs, and try leaving mid-round and forming a new lobby. Record confusing signs, missed warnings, and the seed.
+
+On the least powerful device, open **Diagnostics** while moving. Record the device, browser version, seed, scene-ready time, frame p95 and RX/TX. Scene-ready time runs from starting the 3D client to drawing the first room snapshot. Frame p95 is the 95th percentile of visible frame intervals over approximately two seconds. RX/TX measures WebSocket message bytes per second for that client.
+
+The November 21 local run used headless Chromium 159.0.8154.6 on an Intel Core i7-14650HX with two players. The table shows one diagnostics reading per callout from the 390 × 844 touch viewport just after the exit circuit engaged. Network figures exclude transport overhead.
+
+| Callout and seed | Frame p95 | Scene ready | Received / sent |
+| --- | ---: | ---: | ---: |
+| Black start · 20 | 50.1 ms | 1.50 s | 17,630 / 2,496 B/s |
+| Line test · 19 | 83.4 ms | 1.60 s | 18,019 / 2,319 B/s |
 
 ### Hosted runtime
 

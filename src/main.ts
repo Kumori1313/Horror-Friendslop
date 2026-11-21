@@ -1,4 +1,5 @@
-import { assignment, finished } from './mission.ts';
+import { bindPreferences } from './preferences.ts';
+import { answerStation, assignment, finished } from './mission.ts';
 import { missionHud } from './mission-hud.ts';
 import { drawMap } from './layout-map.ts';
 import './style.css';
@@ -23,7 +24,7 @@ const panel = element('diagnostics');
 const stats = element('stats');
 const reticle = element('reticle');
 
-function start(render: ReturnType<typeof createScene>, admission?: () => Promise<Admission>, scope = 'local') {
+function start(render: ReturnType<typeof createScene>, admission?: () => Promise<Admission>, scope = 'local', sceneStarted = performance.now()) {
   const key = admission ? 'relay-room-seat-' + scope : 'relay-room-seat-v2';
   let saved: Ticket | null = null;
   const nav = performance.getEntriesByType('navigation')[0] as PerformanceNavigationTiming | undefined;
@@ -44,7 +45,11 @@ function start(render: ReturnType<typeof createScene>, admission?: () => Promise
   const map = element<HTMLCanvasElement>('layout-map');
   let doorState = '';
   const doorButton = element<HTMLButtonElement>('open-door');
-  const hud = missionHud();
+  const { preferences, open: openSettings } = bindPreferences(pause);
+  const hud = missionHud(preferences);
+  let readyMs = 0, frameP95 = 0;
+  let sampleStart = performance.now();
+  const frameTimes: number[] = [];
   const operate = element<HTMLButtonElement>('operate');
   operate.onclick = () => { if (playing) connection.action('operate'); };
   let playing = false;
@@ -62,6 +67,7 @@ function start(render: ReturnType<typeof createScene>, admission?: () => Promise
     debug.textContent = touchMode ? 'Diagnostics' : 'Diagnostics · G';
   }
   function look(dx: number, dy: number, sensitivity: number) {
+    sensitivity *= preferences.sensitivity;
     yaw -= dx * sensitivity;
     pitch = Math.max(-1.35,Math.min(1.35,pitch-dy*sensitivity));
   }
@@ -128,7 +134,9 @@ function start(render: ReturnType<typeof createScene>, admission?: () => Promise
     }
   });
   window.addEventListener('keydown',e => {
+    if (element<HTMLDialogElement>('preferences').open) return;
     if (e.ctrlKey || e.metaKey || e.altKey) return;
+    if (e.code === 'KeyO' && !e.repeat) { e.preventDefault(); openSettings(); return; }
     if (e.code === 'KeyG' && !e.repeat) diagnostics();
     if (!playing || !state) return;
     if (e.code.startsWith('Arrow')) e.preventDefault();
@@ -192,6 +200,8 @@ function start(render: ReturnType<typeof createScene>, admission?: () => Promise
       const pos = (x: number,z: number) => x.toFixed(2) + ', ' + z.toFixed(2);
       stats.textContent = [
         'Round   ' + s.round, 'Update  ' + s.update, 'RTT     ' + Math.round(connection.metrics.rtt) + ' ms',
+        'Frame p95  '+(frameP95 ? frameP95.toFixed(1)+' ms' : 'sampling'),
+        'Scene ready  '+Math.round(readyMs)+' ms',
         'Delay   ' + delay + ' ms each way',
         'RX/TX   ' + Math.round(connection.metrics.downRate) + ' / ' + Math.round(connection.metrics.upRate) + ' B/s',
         'Recovery  ' + Math.round(connection.metrics.recovery) + ' ms',
@@ -223,8 +233,9 @@ function start(render: ReturnType<typeof createScene>, admission?: () => Promise
         doorState = '';
         element('sector').hidden = false;
         element('floor-plan').hidden = false;
-        element('brief-type').textContent = 'Emergency callout';
-        element('brief-instructions').textContent = 'One of you stays at Intake. The other takes the lit flashlight to Relay. Work the center pads to restore the exit. If the ceiling knocks, clear the marked circle. Diagnostics shows the floor plan.';
+        const backup = plan.callout === 'black-start';
+        element('brief-type').textContent = backup ? 'Black start' : 'Line test';
+        element('brief-instructions').textContent = (backup ? 'Charge the Switchboard pad first. ' : '')+'One operator answers from '+roomNames[answerStation(plan).kind]+'. Another takes the lit flashlight to Relay. When the ceiling knocks, clear the circle. Diagnostics shows the floor plan.';
       }
       id = seat;
       sessionStorage.setItem(key,JSON.stringify(ticket));
@@ -267,13 +278,28 @@ function start(render: ReturnType<typeof createScene>, admission?: () => Promise
   window.addEventListener('pageshow',e => { if (e.persisted) location.reload(); });
   let previous = performance.now(), lastSent = 0;
   function frame(now: number) {
-    const dt = Math.min((now-previous)/1000,0.1); previous = now;
+    const elapsed = now-previous;
+    previous = now;
+    const dt = Math.min(elapsed/1000,0.1);
+    if (state && !document.hidden) {
+      frameTimes.push(elapsed);
+      if (now-sampleStart >= 2000) {
+        frameTimes.sort((a,b) => a-b);
+        frameP95 = frameTimes[Math.ceil(frameTimes.length*0.95)-1];
+        frameTimes.length = 0;
+        sampleStart = now;
+      }
+    } else {
+      sampleStart = now;
+      frameTimes.length = 0;
+    }
     if (playing) {
-      yaw += (Number(keys.has('ArrowLeft'))-Number(keys.has('ArrowRight'))) * dt * 2;
-      pitch = Math.max(-1.35,Math.min(1.35,pitch + (Number(keys.has('ArrowUp'))-Number(keys.has('ArrowDown'))) * dt * 1.6));
+      yaw += (Number(keys.has('ArrowLeft'))-Number(keys.has('ArrowRight'))) * dt * 2 * preferences.sensitivity;
+      pitch = Math.max(-1.35,Math.min(1.35,pitch + (Number(keys.has('ArrowUp'))-Number(keys.has('ArrowDown'))) * dt * 1.6 * preferences.sensitivity));
       if (now-lastSent >= 33) { input(); lastSent = now; }
     }
-    render(state,id,yaw,pitch,dt,layout);
+    render(state,id,yaw,pitch,dt,layout,preferences.reducedMotion);
+    if (state && !readyMs) readyMs = performance.now()-sceneStarted;
     requestAnimationFrame(frame);
   }
   requestAnimationFrame(frame);
@@ -282,7 +308,10 @@ function start(render: ReturnType<typeof createScene>, admission?: () => Promise
 try {
   if (location.pathname.startsWith('/relay-room/')) {
     const { mountLobby } = await import('./lobby.ts');
-    await mountLobby((auth,scope) => start(createScene(canvas,true),auth,scope));
+    await mountLobby((auth,scope) => {
+      const started = performance.now();
+      start(createScene(canvas,true),auth,scope,started);
+    });
   } else start(createScene(canvas));
 }
 catch (error) {

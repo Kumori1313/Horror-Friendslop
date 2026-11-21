@@ -1,29 +1,30 @@
 import { clearAt } from './room.ts';
 import type { Point } from './room.ts';
 
-export const generatorVersion = 1;
+export const generatorVersion = 2;
 export const playerRadius = 0.25;
 export const pitch = 10;
 export const opening = 2.4;
 export interface Rect extends Point { w: number; d: number }
-export type Kind = 'intake' | 'pump' | 'stores' | 'junction' | 'relay' | 'exit';
+export type Kind = 'intake' | 'pump' | 'stores' | 'junction' | 'relay' | 'exit' | 'switchboard' | 'chiller';
 export interface Module extends Point { id: string; kind: Kind; rotation: number }
 export interface Passage { a: string; b: string; id: string; bulkhead: boolean }
 export interface Layout {
   seed: number; version: number; fallback: boolean;
   rooms: Module[]; passages: Passage[];
+  callout: 'line-test' | 'black-start';
   lampId: 'inspection-light'; objectiveId: string; exitId: string;
 }
 export interface Door extends Rect { id: string }
 export interface Geometry { floors: Rect[]; walls: Rect[]; equipment: Rect[]; doors: Door[] }
 
 export const roomNames: Record<Kind,string> = {
-  intake:'Intake', pump:'Pump hall', stores:'Parts store', junction:'Service junction', relay:'Relay station', exit:'Exit bay',
+  intake:'Intake', pump:'Pump hall', stores:'Parts store', junction:'Service junction', relay:'Relay station', exit:'Exit bay', switchboard:'Switchboard', chiller:'Chiller hall',
 };
 
 export function footprint(room: Module): Rect {
   const width = room.kind === 'stores' ? 6 : 8;
-  const depth = room.kind === 'pump' ? 6 : 8;
+  const depth = (room.kind === 'pump' || room.kind === 'chiller') ? 6 : 8;
   return { x: room.x, z: room.z, w: room.rotation % 2 ? depth : width, d: room.rotation % 2 ? width : depth };
 }
 
@@ -91,6 +92,17 @@ export function distances(rooms: Module[], passages: Passage[], start: string) {
   return steps;
 }
 
+// The Bell Diver follows ceiling wiring through the same passages as the crew.
+export function nextWiredBay(layout: Layout, from: string, target: string) {
+  if (from === target) return from;
+  const steps = distances(layout.rooms,layout.passages,target);
+  for (const {a,b} of layout.passages) {
+    const next = a === from ? b : b === from ? a : undefined;
+    if (next && steps.get(next)! < steps.get(from)!) return next;
+  }
+  return from;
+}
+
 export function validLayout(layout: Layout) {
   const {rooms,passages} = layout;
   const byId = new Map(rooms.map(r => [r.id,r]));
@@ -104,6 +116,7 @@ export function validLayout(layout: Layout) {
   const entrance = rooms.find(r => r.kind === 'intake');
   if (!entrance || entrance.x !== 0 || entrance.z !== 0 || byId.get(layout.objectiveId)?.kind !== 'relay' ||
       byId.get(layout.exitId)?.kind !== 'exit') return false;
+  if (!rooms.some(r => r.kind === 'switchboard') || !rooms.some(r => r.kind === 'chiller')) return false;
   const edges = new Set<string>();
   for (const {a,b} of passages) {
     const u = byId.get(a), v = byId.get(b);

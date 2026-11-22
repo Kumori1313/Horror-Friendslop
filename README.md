@@ -12,6 +12,8 @@ Carry the lit flashlight to Relay and use **Power exit circuit**. Black Start re
 
 Run `npm run dev` and open the [local stairwell walkthrough](http://127.0.0.1:5176/?solo=1&layout=stairwell). The layout is fixed so you can repeat the same route in either direction. Walk straight from Intake up the stairs, then turn right onto the catwalk. Look down into the machinery hall before crossing to the loot closet. Double back to the break in the railing and take the ramp down. The lower doorway beneath the closet leads into a bent tunnel that returns to Intake. Choose **Leave solo** when finished.
 
+Phase 9 passed on November 22, 2026. Two hub browsers walked above and below each other, refreshed on a landing, and extracted together. On a Pixel 8a running Vanadium 157 with JavaScript JIT blocked, the largest facility (seed `187`) held a frame p95 of 16.9 ms, one 60 Hz frame, at full resolution. The last pre-generator build read the same. Use `npm run build:diagnostics` and press **G** to read the frame time, render scale, and rooms drawn on your own device.
+
 ## Start a local test
 
 Use Node.js 22.13 or newer and npm. From this repository, run:

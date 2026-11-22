@@ -43,7 +43,7 @@ function start(render: ReturnType<typeof createScene>, mode?: Crew | 'solo', sce
   const { preferences, open: openSettings } = bindPreferences(pause);
   const hud = missionHud(preferences);
   const diagnostics = import.meta.env.DEV || import.meta.env.MODE === 'diagnostics'
-    ? mountDiagnostics(sceneStarted,solo ? undefined : () => { if (state) network?.interrupt(2000); })
+    ? mountDiagnostics(sceneStarted,solo ? undefined : () => { if (state) network?.interrupt(2000); },render.stats)
     : undefined;
   const operate = element<HTMLButtonElement>('operate');
   operate.onclick = () => { if (playing) connection.action('operate'); };

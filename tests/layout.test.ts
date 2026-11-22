@@ -118,6 +118,18 @@ test('every station has a centred walking route from the spawn', () => {
   }
 });
 
+test('a route can stop near a tight goal and keep its wide clearance', () => {
+  const plan = generateLayout(19), g = geometryFor(plan);
+  // A point hard against a doorway jamb only allows a cramped route.
+  const o = g.openings.find(o => o.side === 'north' && o.y === 0)!;
+  const tight = {x:o.x+0.9,y:o.y,z:o.z+0.4};
+  const exact = route(plan,{x:-0.7,y:0,z:3},tight)!, loose = route(plan,{x:-0.7,y:0,z:3},tight,undefined,1)!;
+  assert.ok(exact && loose);
+  const end = loose.at(-1)!;
+  assert.ok(Math.hypot(end.x-tight.x,end.z-tight.z) <= 1 && end.y === tight.y);
+  assert.ok(route(plan,{x:-0.7,y:0,z:3},tight,[0.85],1),'the wide margin reaches the neighbourhood');
+});
+
 test('an operator walks the planned route through doors and stairs to each station', () => {
   for (const seed of [19,20,715,4242]) {
     const plan = generateLayout(seed);

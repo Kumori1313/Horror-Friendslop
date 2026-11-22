@@ -1,7 +1,9 @@
 import * as T from 'three';
 import { strikeRadius } from './mission.ts';
 import { buildFacility } from './facility-scene.ts';
-import { anchor, type Layout } from './layout.ts';
+import { anchor, geometryFor, type Layout } from './layout.ts';
+import { surfaceAt } from './room-templates.ts';
+import { portalGraph, visibleRooms, type PortalGraph } from './visibility.ts';
 import { walls } from './room.ts';
 import type { Snapshot } from './room.ts';
 
@@ -28,12 +30,14 @@ function painted(color: string, seam: string) {
 
 export function createScene(canvas: HTMLCanvasElement, generated = false) {
   const renderer = new T.WebGLRenderer({ canvas, antialias: true });
-  renderer.setPixelRatio(Math.min(devicePixelRatio, 1.75));
+  const fullRatio = Math.min(devicePixelRatio, 1.75);
+  renderer.setPixelRatio(fullRatio);
   renderer.toneMapping = T.ACESFilmicToneMapping;
   const scene = new T.Scene();
   scene.background = new T.Color(0x263331);
   scene.fog = new T.FogExp2(0x273532, 0.043);
-  const camera = new T.PerspectiveCamera(72, 1, 0.055, 60);
+  // The fog leaves under 3% of a surface's colour past 44 m, so stop drawing at 48 m.
+  const camera = new T.PerspectiveCamera(72, 1, 0.055, 48);
   camera.rotation.order = 'YXZ';
   const material = (color: number) => new T.MeshStandardMaterial({ color, roughness: 0.84 });
   const steel = material(0x334342), dark = material(0x172021), yellow = material(0xc68b33);
@@ -146,13 +150,37 @@ export function createScene(canvas: HTMLCanvasElement, generated = false) {
   cone.position.z = -1.36; cone.rotation.x = Math.PI/2; torch.add(cone);
   camera.position.set(-0.7,1.59,3); camera.rotation.x = -0.12;
   let previousOwner: number | null | undefined;
+  let portals: PortalGraph | undefined;
+  const viewProjection = new T.Matrix4();
+  const stats = {scale:1, drawn:0, rooms:0, calls:0};
+  // Lower the render resolution while frames run slow, and restore it after a
+  // spell of quick frames. Each step down doubles the wait before stepping up,
+  // so a device near its limit settles instead of flickering between sizes.
+  let average = 1/60, slow = 0, quick = 0, patience = 3;
+  function adapt(dt: number) {
+    // Frame times alternate between vsync steps, so judge a moving average.
+    average += (dt-average)*0.1;
+    if (average > 0.026) { slow += dt; quick = 0; }
+    else if (average < 0.018) { quick += dt; slow = 0; }
+    else slow = quick = 0;
+    let scale = stats.scale;
+    if (slow > 1 && scale > 0.5) { scale = Math.max(0.5,scale*0.85); patience = Math.min(30,patience*2); }
+    else if (quick > patience && scale < 1) scale = Math.min(1,scale/0.85);
+    else return;
+    slow = quick = 0;
+    stats.scale = scale;
+    renderer.setPixelRatio(fullRatio*scale);
+    renderer.setSize(innerWidth,innerHeight,false);
+  }
   function render(state: Snapshot | undefined, self: number, yaw: number, pitch: number, dt: number, layout?: Layout, reducedMotion = false) {
     if (layout && layout !== loaded) {
       facility?.dispose();
       facility = buildFacility(layout,painted('#c6ccc6','#8e9890'));
       scene.add(facility.root);
+      portals = portalGraph(layout,geometryFor(layout));
       loaded = layout;
     }
+    if (!document.hidden) adapt(dt);
     if (facility && state) facility.update(state.opened ?? []);
     if (state) {
       const blend = 1 - Math.exp(-18 * dt);
@@ -190,13 +218,34 @@ export function createScene(canvas: HTMLCanvasElement, generated = false) {
       torch.rotation.x += (l.pitch-torch.rotation.x)*t;
       beam.visible = cone.visible = l.on; lensMat.color.setHex(l.on ? 0xffe7a6 : 0x646951);
       previousOwner = l.owner;
+      // Draw the camera's room and the rooms visible through its doorways.
+      if (facility && layout && portals) {
+        const g = geometryFor(layout), me = state.players.find(p => p.id === self);
+        const feet = me?.feetY ?? 0;
+        const start = surfaceAt(g,camera.position.x,camera.position.z,feet)?.room ?? (me && surfaceAt(g,me.x,me.z,feet)?.room);
+        let drawn: Set<string> | undefined;
+        if (start) {
+          camera.updateMatrixWorld();
+          viewProjection.multiplyMatrices(camera.projectionMatrix,camera.matrixWorldInverse);
+          drawn = visibleRooms(portals,start,viewProjection.elements,camera.position,state.opened ?? [],camera.far);
+        }
+        facility.show(drawn);
+        stats.drawn = drawn?.size ?? facility.rooms; stats.rooms = facility.rooms;
+        const shown = (x: number,z: number,y: number) => !drawn || drawn.has(surfaceAt(g,x,z,y)?.room ?? '');
+        for (const p of state.players) {
+          const g2 = people.get(p.id);
+          if (g2) g2.visible = shown(p.x,p.z,p.feetY ?? 0);
+        }
+        if (diver.visible && drawn && room) diver.visible = drawn.has(room.id);
+      }
     }
     renderer.render(scene,camera);
+    stats.calls = renderer.info.render.calls;
   }
   function resize() {
     renderer.setSize(innerWidth,innerHeight,false);
     camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix();
   }
   resize(); window.addEventListener('resize',resize);
-  return render;
+  return Object.assign(render,{stats});
 }

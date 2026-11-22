@@ -4,7 +4,8 @@ import type { Snapshot } from './room.ts';
 import type { RoomConnection } from './connection.ts';
 import type { Crew } from './creator-session.ts';
 
-export function mountDiagnostics(sceneStarted: number, interrupt?: () => void) {
+export interface RenderStats { scale: number; drawn: number; rooms: number; calls: number }
+export function mountDiagnostics(sceneStarted: number, interrupt?: () => void, render?: RenderStats) {
   document.querySelector('main')!.insertAdjacentHTML('beforeend',`
     <aside id="diagnostics" hidden>
       <h2>Room diagnostics</h2>
@@ -46,6 +47,7 @@ export function mountDiagnostics(sceneStarted: number, interrupt?: () => void) {
       'Build   ' + import.meta.env.VITE_RELAY_BUILD, 'Round   ' + s.round, 'Update  ' + s.update,
       'Frame p95  '+(frameP95 ? frameP95.toFixed(1)+' ms' : 'sampling'),
       'Scene ready  '+Math.round(readyMs)+' ms',
+      ...(render ? ['Render  '+Math.round(render.scale*100)+'% · rooms '+render.drawn+'/'+render.rooms+' · draws '+render.calls] : []),
       ...(metrics ? [
         'RTT     ' + Math.round(metrics.rtt) + ' ms',
         crew ? 'Network   '+(crew.host ? 'Lobby creator (host)' : 'Guest')+' · Supabase Realtime' : 'Delay   ' + delay + ' ms each way',

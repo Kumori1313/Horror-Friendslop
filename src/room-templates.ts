@@ -161,8 +161,9 @@ export function socketAt(room:Placement,name:string) {
 export interface Solid extends Patch { y:number; h:number }
 export interface PlacedSurface extends Surface { room:string }
 export interface Opening extends Point3 { side:Side; a:string; b:string; index:number }
+export interface RoomSolid extends Solid { room:string }
 export interface TemplateGeometry {
-  surfaces:PlacedSurface[]; walls:Solid[]; roofs:Solid[]; rails:Solid[];
+  surfaces:PlacedSurface[]; walls:RoomSolid[]; roofs:RoomSolid[]; rails:RoomSolid[];
   props:(Solid & {kind:PropKind; room:string})[]; doors:(Solid & {id:string})[]; openings:Opening[];
 }
 
@@ -204,7 +205,7 @@ export function assembleTemplates(rooms:Placement[],links:(TemplateLink & {door?
     for (const p of t.props ?? []) g.props.push({kind:p.kind,x:room.x+p.x,z:room.z+p.z,w:p.w,d:p.d,y:room.y+(p.y??0),h:p.h,room:room.id});
     const sockets = t.sockets.filter(s=>openAll || open.has(room.id+'/'+s.name));
     for (const f of t.footprint) {
-      g.roofs.push({...f,x:room.x+f.x,z:room.z+f.z,y:room.y+t.height,h:0.12});
+      g.roofs.push({...f,x:room.x+f.x,z:room.z+f.z,y:room.y+t.height,h:0.12,room:room.id});
       for (const side of sides) {
         const alongX = side==='north' || side==='south';
         const sign = side==='north' || side==='west' ? -1 : 1;
@@ -222,7 +223,7 @@ export function assembleTemplates(rooms:Placement[],links:(TemplateLink & {door?
           for (const [a,b] of subtract([f[axis]-f[length]/2,f[axis]+f[length]/2],[...seams,...holes])) {
             const mid = (a+b)/2;
             g.walls.push({x:room.x+(alongX?mid:face),z:room.z+(alongX?face:mid),
-              w:alongX?b-a:0.12,d:alongX?0.12:b-a,y:room.y+low,h:high-low});
+              w:alongX?b-a:0.12,d:alongX?0.12:b-a,y:room.y+low,h:high-low,room:room.id});
           }
         }
       }
@@ -240,7 +241,7 @@ export function assembleTemplates(rooms:Placement[],links:(TemplateLink & {door?
           .map(r=>[r[axis]-r[length]/2,r[axis]+r[length]/2]);
         for (const [a,b] of subtract([s[axis]-s[length]/2,s[axis]+s[length]/2],ramps)) {
           const mid = (a+b)/2;
-          g.rails.push({x:room.x+(alongX?mid:face),z:room.z+(alongX?face:mid),w:alongX?b-a:0.07,d:alongX?0.07:b-a,y:room.y+s.y,h:1});
+          g.rails.push({x:room.x+(alongX?mid:face),z:room.z+(alongX?face:mid),w:alongX?b-a:0.07,d:alongX?0.07:b-a,y:room.y+s.y,h:1,room:room.id});
         }
       }
     }

@@ -63,7 +63,7 @@ Seats are reserved for 20 s after disconnect (`grace`) and resumed with a `Ticke
 
 ### Rendering
 
-`src/scene.ts` (`createScene`) owns the Three.js renderer and camera. `template-scene.ts` draws the assembled structure and props; `facility-scene.ts` adds landmarks (signs over doorways, Intake jambs, Exit lights, floor markers) and bulkhead panels. The developer map (`layout-map.ts`) draws the ground storey left and the upper storey right. Textures, characters, and synthesized audio are generated in code. Do not add binary assets without license notes. The untracked `audio/` directory is not yet wired in.
+`src/scene.ts` (`createScene`) owns the Three.js renderer and camera, runs dynamic resolution, and culls rooms each frame. `template-scene.ts` draws the assembled structure and props, tagging every box with its room. `facility-scene.ts` merges each room into its own mesh group, with plate, matte and glow materials using vertex colours, and adds landmarks (signs over doorways, Intake jambs, Exit lights, floor markers) and bulkhead panels. `src/visibility.ts` is pure doorway culling: start in the camera's room and pass through doorways whose near-plane-clipped screen bounds overlap the window left by the doorways before them. Closed bulkheads and the 48 m far plane stop the search. `tests/visibility.test.ts` ray-casts from sampled poses to prove no visible room is culled; keep it passing when changing geometry or portals. The developer map (`layout-map.ts`) draws the ground storey left and the upper storey right. Textures, characters, and synthesized audio are generated in code. Do not add binary assets without license notes. The untracked `audio/` directory is not yet wired in.
 
 ### Game Hub integration
 

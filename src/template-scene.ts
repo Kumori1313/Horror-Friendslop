@@ -2,12 +2,17 @@ import { surfaceHeight } from './room-templates.ts';
 import type { TemplateGeometry } from './room-templates.ts';
 
 type Box = (color:number,x:number,y:number,z:number,w:number,h:number,d:number,angle?:number,axis?:'x'|'z')=>void;
+export type RoomBox = (room:string,...box:Parameters<Box>)=>void;
 
 // Draw the same shell, openings and walkable surfaces used by the simulation.
+// Every box is tagged with the room that owns it so rooms can be culled.
 // `accent` gives the colour of the room that owns a prop.
-export function drawTemplates(g:TemplateGeometry, box:Box, accent:(room:string)=>number) {
+export function drawTemplates(g:TemplateGeometry, emit:RoomBox, accent:(room:string)=>number) {
   const deck=0x515e59, steel=0x354641, amber=0xb0975f, dark=0x263331;
+  let room='';
+  const box:Box=(...args)=>emit(room,...args);
   for (const s of g.surfaces) {
+    room=s.room;
     const rise=s.rise??0;
     if (s.stairs) {
       const run=s.along ? s.w : s.d;
@@ -26,15 +31,18 @@ export function drawTemplates(g:TemplateGeometry, box:Box, accent:(room:string)=
     }
   }
   for (const w of g.walls) {
+    room=w.room;
     box(0x748078,w.x,w.y+w.h/2,w.z,w.w,w.h,w.d);
     if (w.h>1.2) box(steel,w.x,w.y+0.42,w.z,w.w+0.025,0.1,w.d+0.025);
   }
   for (const r of g.roofs) {
+    room=r.room;
     box(steel,r.x,r.y+r.h/2,r.z,r.w,r.h,r.d);
     if (Math.min(r.w,r.d)>=2) box(0xe4e7c9,r.x,r.y-0.06,r.z,r.w>=r.d?Math.min(r.w/2,2.6):0.22,0.08,r.w>=r.d?0.22:Math.min(r.d/2,2.6));
   }
   // Open rails keep the view between storeys.
   for (const rail of g.rails) {
+    room=rail.room;
     for (const height of [0.48,0.94]) box(amber,rail.x,rail.y+height,rail.z,rail.w,0.06,rail.d);
     const length=Math.max(rail.w,rail.d), count=Math.ceil(length/2), alongX=rail.w>rail.d;
     for (let i=0;i<=count;i++) {
@@ -43,6 +51,7 @@ export function drawTemplates(g:TemplateGeometry, box:Box, accent:(room:string)=
     }
   }
   for (const e of g.props) {
+    room=e.room;
     const {x,y,z,w,d,h}=e, color=accent(e.room), wide=w>=d, long=Math.max(w,d);
     const across=(offset:number) => wide ? [x+offset,z] : [x,z+offset];
     switch (e.kind) {

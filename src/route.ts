@@ -8,9 +8,11 @@ import type { Point3 } from './room-templates.ts';
 // keyboard tests can walk one axis at a time. It keeps the widest clearance
 // that still reaches the goal: 0.85 m holds the centre line of every doorway
 // and corridor and absorbs a laggy walker overshooting a corner.
-export function route(layout: Layout, from: Point3, to: Point3, margins = [0.85,0.65,0.45,0.25,0]): Point3[] | undefined {
+// With `near`, any point on the goal's storey within that distance will do,
+// so a tight goal does not force a tight route all the way there.
+export function route(layout: Layout, from: Point3, to: Point3, margins = [0.85,0.65,0.45,0.25,0], near = 0): Point3[] | undefined {
   for (const margin of margins) {
-    const legs = plan(layout,from,to,margin);
+    const legs = plan(layout,from,to,margin,near);
     if (legs) return legs;
   }
 }
@@ -19,7 +21,7 @@ const directions = [[1,0],[-1,0],[0,1],[0,-1]];
 
 // Dijkstra over lattice points and headings; each turn costs as much as 3 m
 // of walking, so routes keep long straight legs.
-function plan(layout: Layout, from: Point3, to: Point3, margin: number): Point3[] | undefined {
+function plan(layout: Layout, from: Point3, to: Point3, margin: number, near: number): Point3[] | undefined {
   const g = geometryFor(layout), step = 0.5, turn = 6;
   const index = collisionIndex(g,g.doors.map(d => d.id),playerRadius+margin+0.05);
   // Keep a margin from floor edges too. Beside the heading the floor must stay
@@ -63,7 +65,7 @@ function plan(layout: Layout, from: Point3, to: Point3, margin: number): Point3[
     const n = pop();
     const here = key(n.ix,n.iz,n.feet);
     if ((best.get(here*4+n.heading+1) ?? Infinity) < n.cost) continue;
-    if (here === goal) {
+    if (here === goal || (near > 0 && Math.abs(n.feet-to.y) < 1 && Math.hypot(n.ix*step-to.x,n.iz*step-to.z) <= near)) {
       const path: Point3[] = [];
       for (let at: Node | undefined = n; at; at = at.previous) path.unshift({x:at.ix*step,y:at.feet,z:at.iz*step});
       // Keep only the corners of each straight run.

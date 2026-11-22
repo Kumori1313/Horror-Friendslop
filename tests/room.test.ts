@@ -4,7 +4,8 @@ import { once } from 'node:events';
 import { test } from 'node:test';
 import { WebSocket } from 'ws';
 import { attachRoom } from '../src/server/socket.ts';
-import { Simulation } from '../src/server/simulation.ts';
+import { Simulation, heldLamp } from '../src/server/simulation.ts';
+import { clearAt, walls } from '../src/room.ts';
 import type { Action, Input, ServerMessage, Snapshot } from '../src/room.ts';
 
 test('the partition blocks movement except at the doorway', () => {
@@ -88,4 +89,18 @@ test('two live clients agree on pickup, movement, toggle, handoff and disconnect
   await holder.wait(s => s.lamp.owner === other.id);
   other.ws.close();
   await holder.wait(s => s.players.length === 1 && s.lamp.owner === null);
+});
+
+test('a held flashlight slides back toward the operator as a wall closes in, never into it', () => {
+  let previous = Infinity;
+  for (let z=2; z>=-0.55; z-=0.05) {
+    const lamp = heldLamp({id:1,connected:true,x:-3,z,yaw:0,pitch:0},walls);
+    assert.ok(clearAt(lamp.x,lamp.z,0.14,walls),'lamp inside the partition at z='+z.toFixed(2));
+    const reach = Math.hypot(lamp.x+3,lamp.z-z);
+    assert.ok(reach <= previous+1e-9,'the lamp only moves back as the wall nears');
+    previous = reach;
+  }
+  assert.ok(previous < 0.45,'pulled in against the wall');
+  const open = heldLamp({id:1,connected:true,x:-3,z:3,yaw:0,pitch:0},walls);
+  assert.deepEqual([open.x,open.z],[-3+0.24,3-0.38],'full reach in open space');
 });

@@ -33,13 +33,13 @@ function stepTo(p: Player, x: number, z: number, g: Geometry | undefined, opened
   p.z = z;
 }
 
-// Where a carried flashlight sits: ahead and to the right, pulled back to the
-// operator if a wall is in the way.
+// Where a carried flashlight sits: ahead and to the right, slid back toward
+// the operator in steps until it and the arm to it are clear of walls.
 export function heldLamp(p: Player, solids: readonly Rect[]) {
-  const x = p.x + 0.24 * Math.cos(p.yaw) - 0.38 * Math.sin(p.yaw);
-  const z = p.z - 0.24 * Math.sin(p.yaw) - 0.38 * Math.cos(p.yaw);
-  const clear = clearAt(x, z, 0.14,solids) && clearAt((x + p.x) / 2, (z + p.z) / 2, 0.14,solids);
-  return { x: clear ? x : p.x, z: clear ? z : p.z, y: (p.feetY ?? 0)+1.28, yaw: p.yaw, pitch: p.pitch };
+  const dx = 0.24 * Math.cos(p.yaw) - 0.38 * Math.sin(p.yaw);
+  const dz = -0.24 * Math.sin(p.yaw) - 0.38 * Math.cos(p.yaw);
+  const reach = [1,0.75,0.5,0.25].find(t => clearAt(p.x+dx*t,p.z+dz*t,0.14,solids) && clearAt(p.x+dx*t/2,p.z+dz*t/2,0.14,solids)) ?? 0;
+  return { x: p.x+dx*reach, z: p.z+dz*reach, y: (p.feetY ?? 0)+1.28, yaw: p.yaw, pitch: p.pitch };
 }
 
 export class Simulation {

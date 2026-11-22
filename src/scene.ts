@@ -142,7 +142,9 @@ export function createScene(canvas: HTMLCanvasElement, generated = false) {
   const lens = new T.Mesh(new T.CircleGeometry(0.105,16),lensMat);
   lens.rotation.y = Math.PI; lens.position.z = -0.252; torch.add(lens);
   const beam = new T.SpotLight(0xffe2a3,85,17,0.43,0.55,1.4);
-  beam.position.z = -0.26; beam.target.position.z = -4; torch.add(beam,beam.target);
+  // A SpotLight starts at (0, 1, 0). Put it at the flashlight itself, which the
+  // simulation keeps clear of walls, so the beam never starts inside one.
+  beam.position.set(0,0,0); beam.target.position.set(0,0,-4); torch.add(beam,beam.target);
   // A faint visible cone makes the direction readable to the other observer.
   const cone = new T.Mesh(new T.ConeGeometry(0.47,2.2,24,1,true),new T.MeshBasicMaterial({
     color: 0xffdd98, transparent: true, opacity: 0.045, depthWrite: false, side: T.DoubleSide,

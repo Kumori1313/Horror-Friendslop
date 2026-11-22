@@ -1,6 +1,6 @@
 import type { RealtimeChannel, SupabaseClient } from '@supabase/supabase-js';
 import type { Events } from './connection.ts';
-import { blockers, generatorVersion, type Layout } from './layout.ts';
+import { generatorVersion, type Layout } from './layout.ts';
 import { generateLayout } from './server/generate-layout.ts';
 import { Simulation } from './server/simulation.ts';
 import type { Action, Input, Snapshot } from './room.ts';
@@ -56,6 +56,7 @@ export class CreatorSession {
   private lastSignature = '';
   private lastCheckpoint = 0;
   private pausedUntil = 0;
+  private lastTick = 0;
   private downSince = 0;
   private lastSample = performance.now();
   private bytesIn = 0;
@@ -100,7 +101,6 @@ export class CreatorSession {
       sim.state = saved.state;
       const self = sim.state.players.find(p => p.id === 1)!;
       this.inputState = {...idle(),yaw:self.yaw,pitch:self.pitch};
-      sim.obstacles = blockers(sim.geometry!,sim.state.opened ?? []);
       this.ack = saved.ack; this.remotePeer = saved.peer;
       for (const p of sim.state.players) sim.inputs.set(p.id,{...idle(),yaw:p.yaw,pitch:p.pitch});
     }
@@ -196,7 +196,7 @@ export class CreatorSession {
       this.metrics.upRate=(this.metrics.sent-this.bytesOut)/seconds;
       this.bytesIn=this.metrics.received; this.bytesOut=this.metrics.sent; this.lastSample=now;
     }
-    if (now<this.pausedUntil) return;
+    if (now<this.pausedUntil) { this.lastTick=now; return; }
     const sim=this.sim;
     if (sim) {
       if (this.downSince && this.subscribed.size===2) {
@@ -207,7 +207,11 @@ export class CreatorSession {
       if (guest && now-this.lastPeer>450) {
         const old=sim.inputs.get(2)!; old.forward=old.right=0;
       }
-      sim.tick(1/30);
+      // Catch up in fixed steps when the page's timers lag behind slow frames,
+      // so warnings and rescue timers stay in real seconds.
+      const steps=this.lastTick ? Math.max(1,Math.min(4,Math.round((now-this.lastTick)*30/1000))) : 1;
+      this.lastTick=now;
+      for (let i=0;i<steps;i++) sim.tick(1/30);
       this.events.snapshot(sim.state,false);
       if (now-this.lastCheckpoint>=500) { this.checkpoint(); this.lastCheckpoint=now; }
       if (guest && now-this.lastSend>=100) {

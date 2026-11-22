@@ -1,4 +1,4 @@
-import { roomLabel } from './layout.ts';
+import { distances, roomLabel } from './layout.ts';
 import type { Layout } from './layout.ts';
 import type { Player, Snapshot } from './room.ts';
 import type { Preferences } from './preferences.ts';
@@ -44,7 +44,9 @@ export function missionHud(preferences: Preferences) {
     source.connect(gain).connect(audio.destination);
     source.start(now); source.stop(now+duration+0.01);
   }
-  function update(layout: Layout, state: Snapshot, self: Player, briefing: boolean) {
+  // Scraping carries through doors and stairs, fading over four connections.
+  const hearing = [1,0.6,0.35,0.2];
+  function update(layout: Layout, state: Snapshot, self: Player, room: string | undefined, briefing: boolean) {
     const m = state.mission!;
     const end = finished(m.stage);
     el('result').hidden = !end;
@@ -78,9 +80,10 @@ export function missionHud(preferences: Preferences) {
     const bay = layout.rooms.find(r => r.id === diver.bay);
     if (bay && diver.mode === 'tracking') {
       const beat = 'wire/'+bay.id;
-      if (beat !== lastBeat) {
-        tone(250,75,0.42,0.17);
-        subtitle('Scraping in the wiring above '+roomLabel(bay));
+      const hops = beat !== lastBeat && room ? distances(layout.rooms,layout.passages,bay.id).get(room) : undefined;
+      if (hops !== undefined && hops < hearing.length) {
+        tone(250,75,0.42,0.17*hearing[hops]);
+        subtitle(hops <= 1 ? 'Scraping in the wiring above '+roomLabel(bay) : 'Scraping in the wiring nearby');
       }
       lastBeat = beat;
     } else if (bay && (diver.mode === 'warning' || diver.mode === 'strike')) {

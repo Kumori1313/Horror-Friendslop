@@ -1,113 +1,83 @@
 import { clearAt } from './room.ts';
 import type { Point } from './room.ts';
 
-import { assembleTemplates, bayTemplates, roomTemplates, stairwellLinks, stairwellRooms } from './room-templates.ts';
-import type { Placement, TemplateGeometry, TemplateKind, TemplateLink } from './room-templates.ts';
+import { assembleTemplates, cell, corridorKinds, destinationPool, isCorridor, missionKinds, orient, roomTemplates, socketAt, storey, surfaceAt, surfaceHeight, obstaclesAt } from './room-templates.ts';
+import type { PlacedSurface, Placement, Point3, Solid, TemplateGeometry, TemplateKind, TemplateLink } from './room-templates.ts';
 
-export const generatorVersion = 2;
+export const generatorVersion = 3;
 export const playerRadius = 0.25;
-export const pitch = 10;
-export const opening = 2.4;
 export interface Rect extends Point { w: number; d: number }
-export type Kind = 'intake' | 'pump' | 'stores' | 'junction' | 'relay' | 'exit' | 'switchboard' | 'chiller';
-export interface Module extends Point { id: string; kind: Kind; rotation: number; template?: TemplateKind }
-export interface Passage { a: string; b: string; id: string; bulkhead: boolean }
+export type Kind = Exclude<TemplateKind,typeof corridorKinds[number]> | 'corridor';
+export interface Module extends Placement { kind: Kind }
+export interface Passage extends TemplateLink { id: string; bulkhead: boolean }
 export interface Layout {
-  seed: number; version: number; fallback: boolean;
+  seed: number; version: number; fallback: boolean; tour?: boolean;
   rooms: Module[]; passages: Passage[];
-  templatePlan?: { rooms:Placement[]; links:TemplateLink[] };
   callout: 'line-test' | 'black-start';
   lampId: 'inspection-light'; objectiveId: string; exitId: string;
 }
-export interface Door extends Rect { id: string }
-export interface Geometry { floors: Rect[]; walls: Rect[]; equipment: Rect[]; doors: Door[]; templates?:TemplateGeometry }
+export type Geometry = TemplateGeometry;
 
-// Repeated bays have a stencilled number crews can call out to each other.
+export const kindOf = (template: TemplateKind): Kind => isCorridor(template) ? 'corridor' : template as Kind;
+
+// Destinations are unique per facility; repeated stairwells carry a letter.
 export function roomLabel(room: Module) {
-  if (room.template) return roomTemplates[room.template].name;
-  const name = bayTemplates[room.kind].name;
-  if (room.kind !== 'pump' && room.kind !== 'stores' && room.kind !== 'junction') return name;
-  return name+' '+room.id.replace(/^bay-/,'').padStart(2,'0');
+  if (room.kind === 'stairwell') return 'Stairwell '+room.id.replace(/^stairwell-?/,'').toUpperCase();
+  return roomTemplates[room.template].name;
 }
 
-export function footprint(room: Module): Rect {
-  if (room.template) {
-    const patches=roomTemplates[room.template].footprint;
-    const left=Math.min(...patches.map(p=>p.x-p.w/2)), right=Math.max(...patches.map(p=>p.x+p.w/2));
-    const north=Math.min(...patches.map(p=>p.z-p.d/2)), south=Math.max(...patches.map(p=>p.z+p.d/2));
-    return {x:room.x+(left+right)/2,z:room.z+(north+south)/2,w:right-left,d:south-north};
-  }
-  const {w:width,d:depth} = bayTemplates[room.kind].footprint[0];
-  return { x: room.x, z: room.z, w: room.rotation % 2 ? depth : width, d: room.rotation % 2 ? width : depth };
+// The floor point that stands for the room: its station pad, diver drop and map marker.
+export function anchor(room: Module): Point3 {
+  const pad = orient(room.template,room.turn).pad ?? {x:0,y:0,z:0};
+  return {x:room.x+pad.x,y:room.y+pad.y,z:room.z+pad.z};
 }
 
-// A repeatable solo walkthrough while the seeded generator is in development.
-export function stairwellLayout():Layout {
-  const kinds:Record<TemplateKind,Kind> = {intake:'intake',closet:'stores',hall:'relay',tunnel:'junction',stairwell:'junction'};
-  return {version:generatorVersion,seed:0,fallback:false,callout:'line-test',lampId:'inspection-light',
-    objectiveId:'hall',exitId:'intake',templatePlan:{rooms:stairwellRooms,links:stairwellLinks},
-    rooms:stairwellRooms.map(r=>({...r,kind:kinds[r.template],rotation:0})),
-    passages:stairwellLinks.map(e=>({a:e.a,b:e.b,id:e.a+'-'+e.b,bulkhead:false}))};
+// A repeatable two-storey walkthrough: up the stairs, across the hall gallery to
+// the closet, down the ramp, and back to Intake through the tunnel beneath it.
+export function stairwellLayout(): Layout {
+  const rooms: Module[] = ([
+    {id:'intake',template:'intake',x:-4,y:0,z:0,turn:0}, {id:'stairwell-a',template:'stairwell',x:0,y:0,z:-16,turn:0},
+    {id:'hall',template:'hall',x:8,y:0,z:-12,turn:0}, {id:'closet',template:'closet',x:16,y:4,z:-16,turn:0},
+    {id:'tunnel',template:'tunnel',x:8,y:0,z:0,turn:0},
+  ] as Placement[]).map(r=>({...r,kind:kindOf(r.template)}));
+  const passages: Passage[] = ([
+    {a:'intake',from:'north1',b:'stairwell-a',to:'lower-south'},
+    {a:'stairwell-a',from:'upper-east',b:'hall',to:'gallery-west'},
+    {a:'hall',from:'gallery-east',b:'closet',to:'west0'},
+    {a:'hall',from:'floor-east-4',b:'tunnel',to:'side'},
+    {a:'tunnel',from:'mouth',b:'intake',to:'east0'},
+  ] as TemplateLink[]).map(e=>({...e,id:e.a+'-'+e.b,bulkhead:false}));
+  return {version:generatorVersion,seed:0,fallback:false,tour:true,callout:'line-test',lampId:'inspection-light',
+    objectiveId:'hall',exitId:'intake',rooms,passages};
 }
 
-// Both collision and rendering use these exact slabs. Corridors bridge the
-// gap between differently sized modules and meet both sockets at full width.
+// Both collision and rendering use these exact slabs.
+const geometries = new WeakMap<Layout,Geometry>();
 export function geometryFor(layout: Layout): Geometry {
-  const result: Geometry = {floors:[], walls:[], equipment:[], doors:[]};
-  if (layout.templatePlan) {
-    result.templates = assembleTemplates(layout.templatePlan.rooms,layout.templatePlan.links);
-    result.floors = result.templates.surfaces;
-    return result;
+  let g = geometries.get(layout);
+  if (!g) {
+    g = assembleTemplates(layout.rooms,layout.passages.map(p=>p.bulkhead ? {...p,door:p.id} : p));
+    geometries.set(layout,g);
   }
-  const sides = new Map(layout.rooms.map(room => [room.id,new Set<string>()]));
-  const footprints = new Map(layout.rooms.map(room => [room.id,footprint(room)]));
-  for (const link of layout.passages) {
-    const a = footprints.get(link.a)!, b = footprints.get(link.b)!;
-    const dx = Math.sign(b.x-a.x), dz = Math.sign(b.z-a.z);
-    sides.get(link.a)!.add(dx+','+dz);
-    sides.get(link.b)!.add(-dx+','+-dz);
-    const startX = a.x + dx*a.w/2, startZ = a.z + dz*a.d/2;
-    const endX = b.x - dx*b.w/2, endZ = b.z - dz*b.d/2;
-    const x = (startX+endX)/2, z = (startZ+endZ)/2;
-    const w = dx ? Math.abs(endX-startX) : opening;
-    const d = dz ? Math.abs(endZ-startZ) : opening;
-    result.floors.push({x,z,w,d});
-    for (const side of [-1,1]) result.walls.push({
-      x:x+side*dz*opening/2, z:z+side*dx*opening/2, w:dx ? w+0.2 : 0.2, d:dz ? d+0.2 : 0.2,
-    });
-    if (link.bulkhead) result.doors.push({id:link.id,x,z,w:dx ? 0.18 : opening,d:dz ? 0.18 : opening});
-  }
-  for (const room of layout.rooms) {
-    const f = footprints.get(room.id)!;
-    result.floors.push(f);
-    for (const [dx,dz] of [[1,0],[-1,0],[0,1],[0,-1]]) {
-      const x = f.x+dx*f.w/2, z = f.z+dz*f.d/2;
-      const length = dx ? f.d : f.w;
-      const gap = sides.get(room.id)!.has(dx+','+dz) ? opening : 0;
-      const piece = gap ? (length-gap)/2 : length;
-      for (const offset of gap ? [-(gap+piece)/2,(gap+piece)/2] : [0]) {
-        result.walls.push({x:x+dz*offset,z:z+dx*offset,w:dx ? 0.2 : piece,d:dz ? 0.2 : piece});
-      }
-    }
-    // Place the equipment in one rotated corner, leaving the cross-aisles clear.
-    if (room.kind !== 'intake' && room.kind !== 'junction') {
-      const xSign = [1,-1,-1,1][room.rotation], zSign = [1,1,-1,-1][room.rotation];
-      result.equipment.push({x:f.x+xSign*(f.w/2-1.1),z:f.z+zSign*(f.d/2-1.1),w:1.25,d:1.25});
-    }
-  }
-  return result;
+  return g;
 }
 
-export function blockers(geometry: Geometry, opened: readonly string[]) {
-  return [...geometry.walls,...geometry.equipment,...geometry.doors.filter(d => !opened.includes(d.id))];
+export function solidsAt(geometry: Geometry, feet: number, opened: readonly string[] = []) {
+  return obstaclesAt(geometry,feet,opened);
 }
 
-export function nearbyDoor(p: Point, geometry: Geometry, opened: readonly string[]) {
-  return geometry.doors.find(d => !opened.includes(d.id) && Math.hypot(d.x-p.x,d.z-p.z) < 1.9 &&
-    clearAt((d.x+p.x)/2,(d.z+p.z)/2,0.1,geometry.walls));
+export function roomAt(layout: Layout, geometry: Geometry, p: Point & {feetY?: number}) {
+  const id = surfaceAt(geometry,p.x,p.z,p.feetY ?? 0)?.room;
+  return layout.rooms.find(r => r.id === id);
 }
 
-export function distances(rooms: Module[], passages: Passage[], start: string) {
+export function nearbyDoor(p: Point & {feetY?: number}, geometry: Geometry, opened: readonly string[]) {
+  const feet = p.feetY ?? 0;
+  return geometry.doors.find(d => !opened.includes(d.id) && Math.abs(d.y-feet) < 1 && Math.hypot(d.x-p.x,d.z-p.z) < 1.9 &&
+    clearAt((d.x+p.x)/2,(d.z+p.z)/2,0.1,geometry.walls.filter(w => w.y+w.h>feet+0.01 && w.y<feet+1.75)));
+}
+
+export function distances(rooms: {id: string}[], passages: {a: string; b: string}[], start: string) {
   const neighbors = new Map(rooms.map(room => [room.id,[] as string[]]));
   for (const {a,b} of passages) { neighbors.get(a)!.push(b); neighbors.get(b)!.push(a); }
   const steps = new Map([[start,0]]), queue = [start];
@@ -119,7 +89,7 @@ export function distances(rooms: Module[], passages: Passage[], start: string) {
   return steps;
 }
 
-// The Bell Diver follows ceiling wiring through the same passages as the crew.
+// The Bell Diver follows ceiling wiring through the same doors and stairs as the crew.
 export function nextWiredBay(layout: Layout, from: string, target: string) {
   if (from === target) return from;
   const steps = distances(layout.rooms,layout.passages,target);
@@ -130,38 +100,197 @@ export function nextWiredBay(layout: Layout, from: string, target: string) {
   return from;
 }
 
+// Grid cells a placed room fills, one key per cell and storey.
+export function cellsOf(room: Placement) {
+  const t = orient(room.template,room.turn);
+  const storeys = Math.max(1,Math.ceil(t.height/storey));
+  const keys = new Set<string>();
+  for (const f of t.footprint) {
+    for (let x=Math.ceil((room.x+f.x-f.w/2)/cell); x*cell<room.x+f.x+f.w/2; x++) {
+      for (let z=Math.ceil((room.z+f.z-f.d/2)/cell); z*cell<room.z+f.z+f.d/2; z++) {
+        for (let level=0; level<storeys; level++) keys.add(x+','+z+','+(room.y/storey+level));
+      }
+    }
+  }
+  return [...keys];
+}
+
+// Which sockets of a template an operator can walk between, ignoring other rooms.
+const reachCache = new Map<TemplateKind,Map<string,number>>();
+export function socketGroups(kind: TemplateKind) {
+  let groups = reachCache.get(kind);
+  if (groups) return groups;
+  groups = new Map();
+  const room: Placement = {id:'probe',template:kind,x:0,y:0,z:0,turn:0};
+  const g = assembleTemplates([room],[],true);
+  const t = roomTemplates[kind];
+  let component = 0;
+  for (const s of t.sockets) {
+    if (groups.has(s.name)) continue;
+    const reached = walkable(g,inward(s));
+    for (const other of t.sockets) if (!groups.has(other.name) && reached(inward(other))) groups.set(other.name,component);
+    if (!groups.has(s.name)) groups.set(s.name,-1-component);
+    component++;
+  }
+  reachCache.set(kind,groups);
+  return groups;
+}
+function inward(s: {x:number; y:number; z:number; side:string}) {
+  const [dx,dz] = ({north:[0,1],east:[-1,0],south:[0,-1],west:[1,0]} as Record<string,number[]>)[s.side];
+  return {x:s.x+dx*0.5,y:s.y,z:s.z+dz*0.5};
+}
+
+// Surfaces and solids bucketed by grid cell, for searches that probe thousands
+// of points. It applies the same support and clearance rules as `surfaceAt`
+// and `clearAt` for any radius up to `reach`.
+export function collisionIndex(g: Geometry, opened: readonly string[] = [], reach = 0.6) {
+  const cellKey = (x: number, z: number) => (Math.floor(x/cell)+512)*1024+Math.floor(z/cell)+512;
+  function bucket<T extends Rect>(items: T[], pad: number) {
+    const map = new Map<number,T[]>();
+    for (const item of items) {
+      for (let x=Math.floor((item.x-item.w/2-pad)/cell); x<=Math.floor((item.x+item.w/2+pad)/cell); x++) {
+        for (let z=Math.floor((item.z-item.d/2-pad)/cell); z<=Math.floor((item.z+item.d/2+pad)/cell); z++) {
+          const key = (x+512)*1024+z+512;
+          let list = map.get(key);
+          if (!list) map.set(key,list = []);
+          list.push(item);
+        }
+      }
+    }
+    return (x: number, z: number) => map.get(cellKey(x,z)) ?? [];
+  }
+  const surfaces = bucket(g.surfaces,0.01);
+  const solids = new Map<number,ReturnType<typeof bucket<Solid>>>();
+  return {
+    // Same rule as `surfaceAt`, over the nearby surfaces only. A wider step
+    // probes for support further along a slope.
+    surface(x: number, z: number, feet: number, step = 0.32) {
+      let best: PlacedSurface | undefined, difference = Infinity;
+      for (const s of surfaces(x,z)) {
+        if (Math.abs(x-s.x)>s.w/2+1e-6 || Math.abs(z-s.z)>s.d/2+1e-6) continue;
+        const delta = Math.abs(surfaceHeight(s,x,z)-feet);
+        if (delta<=step && delta<difference) { best = s; difference = delta; }
+      }
+      return best;
+    },
+    clear(x: number, z: number, feet: number, radius = playerRadius) {
+      const key = Math.round(feet*8);
+      let near = solids.get(key);
+      if (!near) solids.set(key,near = bucket(obstaclesAt(g,feet,opened),reach));
+      return clearAt(x,z,radius,near(x,z));
+    },
+  };
+}
+
+// Flood fill on a 0.25 m lattice with the simulation's own support and clearance
+// rules. Points closer than a wall's clearance cannot straddle it at this spacing.
+export function walkable(g: Geometry, from: Point3, opened: readonly string[] = []) {
+  const step = 0.25, seen = new Set<number>();
+  const node = (ix: number, iz: number, feet: number) => ((ix+4096)*8192+iz+4096)*128+Math.round(feet*4);
+  const index = collisionIndex(g,opened);
+  if (index.surface(from.x,from.z,from.y)) {
+    const queue: [number,number,number][] = [[Math.round(from.x/step),Math.round(from.z/step),from.y]];
+    seen.add(node(...queue[0]));
+    for (let i=0;i<queue.length;i++) {
+      const [ix,iz,feet] = queue[i];
+      for (const [dx,dz] of [[1,0],[-1,0],[0,1],[0,-1]]) {
+        const x = (ix+dx)*step, z = (iz+dz)*step;
+        const s = index.surface(x,z,feet);
+        if (!s) continue;
+        const nextFeet = surfaceHeight(s,x,z);
+        const key = node(ix+dx,iz+dz,nextFeet);
+        if (seen.has(key) || !index.clear(x,z,nextFeet)) continue;
+        seen.add(key);
+        queue.push([ix+dx,iz+dz,nextFeet]);
+      }
+    }
+  }
+  return (p: Point3) => {
+    const s = surfaceAt(g,p.x,p.z,p.y);
+    return seen.has(node(Math.round(p.x/step),Math.round(p.z/step),s ? surfaceHeight(s,p.x,p.z) : p.y));
+  };
+}
+
+export const spawnPoints = [{x:-0.7,z:3},{x:0.7,z:3}];
+export const lampSpawn = {x:0,z:2};
+
+// Structural checks for a generated facility. Room interiors are checked once
+// per template by `socketGroups`, so walking routes follow from the link graph.
 export function validLayout(layout: Layout) {
   const {rooms,passages} = layout;
   const byId = new Map(rooms.map(r => [r.id,r]));
-  const occupied = new Set(rooms.map(r => r.x+','+r.z));
-  if (byId.size !== rooms.length || occupied.size !== rooms.length || rooms.length < 5) return false;
-  if (rooms.some(r => !Number.isInteger(r.x/pitch) || !Number.isInteger(r.z/pitch) ||
-      !Number.isInteger(r.rotation) || r.rotation<0 || r.rotation>3)) return false;
-  const footprints = rooms.map(footprint);
-  if (footprints.some((a,i) => footprints.slice(i+1).some(b =>
-    Math.abs(a.x-b.x)<(a.w+b.w)/2 && Math.abs(a.z-b.z)<(a.d+b.d)/2))) return false;
-  const entrance = rooms.find(r => r.kind === 'intake');
-  if (!entrance || entrance.x !== 0 || entrance.z !== 0 || byId.get(layout.objectiveId)?.kind !== 'relay' ||
-      byId.get(layout.exitId)?.kind !== 'exit') return false;
-  if (!rooms.some(r => r.kind === 'switchboard') || !rooms.some(r => r.kind === 'chiller')) return false;
-  const edges = new Set<string>();
-  for (const {a,b} of passages) {
-    const u = byId.get(a), v = byId.get(b);
-    const key = [a,b].sort().join('/');
-    if (!u || !v || edges.has(key) || Math.hypot(u.x-v.x,u.z-v.z) !== pitch) return false;
-    edges.add(key);
+  if (byId.size !== rooms.length || rooms.length < 5) return false;
+  if (rooms.some(r => !(r.template in roomTemplates) || r.kind !== kindOf(r.template) || ![0,1,2,3].includes(r.turn) ||
+      ![0,storey].includes(r.y) || !Number.isInteger(r.x/cell) || !Number.isInteger(r.z/cell))) return false;
+  const intake = rooms.find(r => r.kind === 'intake');
+  if (!intake || intake.x !== -4 || intake.y !== 0 || intake.z !== 0 || intake.turn !== 0) return false;
+  if (byId.get(layout.objectiveId)?.kind !== 'relay' || byId.get(layout.exitId)?.kind !== 'exit') return false;
+  const destinations = rooms.filter(r => r.kind !== 'corridor' && r.kind !== 'stairwell');
+  if (new Set(destinations.map(r => r.kind)).size !== destinations.length) return false;
+  if (!missionKinds.every(k => destinations.some(r => r.kind === k))) return false;
+  if (destinations.some(r => r.kind !== 'intake' && !(missionKinds as readonly string[]).includes(r.kind) && !destinationPool.includes(r.template))) return false;
+  const filled = new Set<string>();
+  for (const r of rooms) for (const key of cellsOf(r)) {
+    if (filled.has(key) || +key.split(',')[2] > 1) return false;
+    filled.add(key);
   }
-  if (edges.size < rooms.length || distances(rooms,passages,entrance.id).size !== rooms.length) return false;
-  const g = geometryFor(layout);
-  const walls = [...g.walls,...g.equipment];
-  if (![-0.7,0.7].every(x => clearAt(x,3,playerRadius,walls)) || !clearAt(0,2,0.14,walls)) return false;
-  for (const {a,b} of passages) {
-    const u = byId.get(a)!, v = byId.get(b)!;
-    for (let step=0; step<=40; step++) {
-      const x = u.x+(v.x-u.x)*step/40, z = u.z+(v.z-u.z)*step/40;
-      if (!g.floors.some(f => Math.abs(x-f.x)<=f.w/2 && Math.abs(z-f.z)<=f.d/2) ||
-          !clearAt(x,z,playerRadius,walls)) return false;
+  let g: Geometry;
+  try { g = assembleTemplates(rooms,passages); } catch { return false; }
+  if (overlapping(rooms)) return false;
+  // Every corridor piece is a junction or a run; a stairwell joins both storeys.
+  const linked = new Map(rooms.map(r => [r.id,[] as string[]]));
+  for (const p of passages) { linked.get(p.a)!.push(p.from); linked.get(p.b)!.push(p.to); }
+  for (const r of rooms) {
+    const ends = linked.get(r.id)!;
+    if (r.kind === 'corridor' && ends.length !== roomTemplates[r.template].sockets.length) return false;
+    if (r.kind === 'stairwell' && !(ends.some(e => e.startsWith('upper')) && ends.some(e => e.startsWith('lower')))) return false;
+    if (!ends.length) return false;
+  }
+  if (!rooms.some(r => r.kind === 'stairwell') || !destinations.some(r => r.y === storey)) return false;
+  // Walk the socket graph: enter a room at one socket, leave by any socket in the same group.
+  const reach = routeReach(layout,intake.id,'north1');
+  if (rooms.some(r => !reach.has(r.id))) return false;
+  const solids = obstaclesAt(g,0);
+  return [...spawnPoints,lampSpawn].every((p,i) => clearAt(p.x,p.z,i<2 ? playerRadius : 0.14,solids));
+}
+
+// Rooms reachable on foot from a socket, following template interiors and links.
+export function routeReach(layout: Layout, room: string, socket: string) {
+  const byId = new Map(layout.rooms.map(r => [r.id,r]));
+  const ends = new Map<string,string[]>();
+  for (const p of layout.passages) {
+    ends.set(p.a+'/'+p.from,[p.b,p.to]);
+    ends.set(p.b+'/'+p.to,[p.a,p.from]);
+  }
+  const seen = new Set<string>(), rooms = new Set<string>();
+  const queue = [[room,socket]];
+  for (const [id,name] of queue) {
+    if (seen.has(id+'/'+name)) continue;
+    seen.add(id+'/'+name);
+    rooms.add(id);
+    const groups = socketGroups(byId.get(id)!.template);
+    for (const [other,group] of groups) if (group === groups.get(name) && group >= 0) {
+      if (!seen.has(id+'/'+other)) queue.push([id,other]);
+      const through = ends.get(id+'/'+other);
+      if (through) queue.push(through);
     }
   }
-  return true;
+  return rooms;
 }
+
+// No two rooms may share volume, whatever their footprint shapes.
+function overlapping(rooms: Module[]) {
+  const boxes = rooms.map(r => {
+    const t = orient(r.template,r.turn);
+    return t.footprint.map(f => ({x:r.x+f.x,z:r.z+f.z,w:f.w,d:f.d,y:r.y,h:t.height}));
+  });
+  for (let i=0;i<boxes.length;i++) for (let j=i+1;j<boxes.length;j++) {
+    for (const a of boxes[i]) for (const b of boxes[j]) {
+      if (Math.abs(a.x-b.x) < (a.w+b.w)/2-1e-6 && Math.abs(a.z-b.z) < (a.d+b.d)/2-1e-6 &&
+          a.y < b.y+b.h-1e-6 && b.y < a.y+a.h-1e-6) return true;
+    }
+  }
+  return false;
+}
+
+export { socketAt };

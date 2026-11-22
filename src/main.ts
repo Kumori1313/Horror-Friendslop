@@ -3,10 +3,9 @@ import { assignment, finished } from './mission.ts';
 import { missionHud } from './mission-hud.ts';
 import { mountDiagnostics } from './diagnostics.ts';
 import './style.css';
-import { blockers, footprint, generatorVersion, geometryFor, nearbyDoor, roomLabel } from './layout.ts';
-import type { Layout, Geometry, Rect } from './layout.ts';
-import { surfaceAt, obstaclesAt } from './room-templates.ts';
-import { canTake } from './room.ts';
+import { generatorVersion, geometryFor, nearbyDoor, roomAt, roomLabel, solidsAt } from './layout.ts';
+import type { Layout, Geometry } from './layout.ts';
+import { canTake, walls } from './room.ts';
 import { SoloSession } from './solo-session.ts';
 import { CreatorSession, type Crew } from './creator-session.ts';
 import { RoomConnection, type Events } from './connection.ts';
@@ -40,8 +39,6 @@ function start(render: ReturnType<typeof createScene>, mode?: Crew | 'solo', sce
   let id = 0, yaw = 0, pitch = -0.12;
   let state: Snapshot | undefined;
   let layout: Layout | undefined, geometry: Geometry | undefined;
-  let obstacles: Rect[] | undefined;
-  let doorState = '';
   const doorButton = element<HTMLButtonElement>('open-door');
   const { preferences, open: openSettings } = bindPreferences(pause);
   const hud = missionHud(preferences);
@@ -157,7 +154,9 @@ function start(render: ReturnType<typeof createScene>, mode?: Crew | 'solo', sce
     const door = geometry && nearbyDoor(p,geometry,opened);
     const down = s.mission?.down.some(d => d.id === id);
     doorButton.hidden = !door || !!down;
-    const task = layout && obstacles && assignment(layout,s,p,obstacles);
+    const solids = geometry ? solidsAt(geometry,p.feetY ?? 0,opened) : walls;
+    const here = layout && geometry ? roomAt(layout,geometry,p) : undefined;
+    const task = layout && assignment(layout,s,p,solids);
     operate.hidden = !task;
     if (task) operate.textContent = task;
     if (layout && s.mission) {
@@ -166,18 +165,10 @@ function start(render: ReturnType<typeof createScene>, mode?: Crew | 'solo', sce
         brief.hidden = true;
         if (document.pointerLockElement) document.exitPointerLock();
       }
-      hud.update(layout,s,p,!brief.hidden);
+      hud.update(layout,s,p,here?.id,!brief.hidden);
     }
-    const templates=geometry?.templates;
-    const reachable = canTake(p,l,templates ? obstaclesAt(templates,p.feetY??0) : obstacles);
-    if (layout) {
-      const roomId=templates && surfaceAt(templates,p.x,p.z,p.feetY??0)?.room;
-      const current = templates ? layout.rooms.find(room=>room.id===roomId) : layout.rooms.find(room => {
-        const f = footprint(room);
-        return Math.abs(f.x-p.x)<=f.w/2 && Math.abs(f.z-p.z)<=f.d/2;
-      });
-      element('sector').textContent = current ? roomLabel(current) : 'Connecting corridor';
-    }
+    const reachable = canTake(p,l,solids);
+    if (layout) element('sector').textContent = here ? roomLabel(here) : 'Corridor';
     if (touchMode) {
       take.disabled = !!down || (!holding && !reachable);
       take.textContent = holding ? 'Drop' : 'Pick up';
@@ -206,22 +197,15 @@ function start(render: ReturnType<typeof createScene>, mode?: Crew | 'solo', sce
       if (plan && (!layout || plan.seed !== layout.seed || plan.version !== layout.version)) {
         layout = plan;
         geometry = geometryFor(plan);
-        obstacles = blockers(geometry,[]);
-        doorState = '';
         element('sector').hidden = false;
         const backup = plan.callout === 'black-start';
-        element('brief-type').textContent = plan.templatePlan ? 'Stairwell playtest' : backup ? 'Black start' : 'Line test';
+        element('brief-type').textContent = plan.tour ? 'Stairwell playtest' : backup ? 'Black start' : 'Line test';
       }
       id = seat;
       if (!mode) sessionStorage.setItem(key,JSON.stringify(ticket));
     },
     snapshot(snapshot, first) {
       state = snapshot;
-      const opened = snapshot.opened ?? [];
-      if (geometry && doorState !== opened.join(',')) {
-        doorState = opened.join(',');
-        obstacles = blockers(geometry,opened);
-      }
       if (first) {
         const self = state.players.find(p => p.id === id)!;
         yaw = self.yaw;

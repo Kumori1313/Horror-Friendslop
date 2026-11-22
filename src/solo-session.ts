@@ -1,5 +1,5 @@
 import type { Events } from './connection.ts';
-import { blockers, generatorVersion, stairwellLayout } from './layout.ts';
+import { generatorVersion, stairwellLayout } from './layout.ts';
 import type { Action, Input, Snapshot } from './room.ts';
 import { generateLayout } from './server/generate-layout.ts';
 import { Simulation } from './server/simulation.ts';
@@ -20,7 +20,6 @@ function resume(checkpointKey:string,stairwell:boolean): Simulation | undefined 
     sim.state = state;
     const player = state.players[0];
     sim.inputs.set(1,{forward:0,right:0,yaw:player.yaw,pitch:player.pitch});
-    sim.obstacles = blockers(sim.geometry!,state.opened ?? []);
     return sim;
   } catch { /* A missing or incompatible checkpoint starts a new shift. */ }
 }

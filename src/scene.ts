@@ -1,7 +1,7 @@
 import * as T from 'three';
 import { strikeRadius } from './mission.ts';
 import { buildFacility } from './facility-scene.ts';
-import type { Layout } from './layout.ts';
+import { anchor, type Layout } from './layout.ts';
 import { walls } from './room.ts';
 import type { Snapshot } from './room.ts';
 
@@ -157,10 +157,11 @@ export function createScene(canvas: HTMLCanvasElement, generated = false) {
     if (state) {
       const blend = 1 - Math.exp(-18 * dt);
       const creature = state.mission?.diver;
-      const target = layout?.rooms.find(r => r.id === creature?.bay);
+      const room = layout?.rooms.find(r => r.id === creature?.bay);
+      const target = room && anchor(room);
       diver.visible = !!target && (creature?.mode === 'warning' || creature?.mode === 'strike');
       if (target && creature && diver.visible) {
-        diver.position.set(target.x,0,target.z);
+        diver.position.set(target.x,target.y,target.z);
         tines.position.y = creature.mode === 'strike' ? 0.75 : 2.8+Math.cos(creature.seconds*7)*0.12;
         tines.rotation.y = creature.seconds*0.45;
       }
@@ -174,9 +175,10 @@ export function createScene(canvas: HTMLCanvasElement, generated = false) {
           camera.rotation.set(pitch,yaw,0,'YXZ');
         } else {
           let g = people.get(p.id);
-          if (!g) { g = avatar(p.id); g.position.set(p.x,0,p.z); }
+          if (!g) { g = avatar(p.id); g.position.set(p.x,p.feetY ?? 0,p.z); }
           g.scale.y = down ? 0.35 : 1;
           g.position.x += (p.x-g.position.x)*blend; g.position.z += (p.z-g.position.z)*blend;
+          g.position.y += ((p.feetY ?? 0)-g.position.y)*blend;
           g.rotation.y += Math.atan2(Math.sin(p.yaw-g.rotation.y),Math.cos(p.yaw-g.rotation.y))*blend;
         }
       }

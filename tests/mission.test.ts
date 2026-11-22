@@ -11,7 +11,7 @@ function shift(seed = 19) {
   const [carrier,partner] = sim.state.players;
   const mission = sim.state.mission!;
   const relay = station(layout,'relay'), intake = station(layout,'intake'), exit = station(layout,'exit');
-  const move = (p: typeof carrier, to: {x:number;z:number}) => { p.x = to.x; p.z = to.z; };
+  const move = (p: typeof carrier, to: {x:number;y?:number;z:number}) => { p.x = to.x; p.z = to.z; p.feetY = to.y ?? p.feetY; };
   function power() {
     sim.act(carrier.id,'take');
     move(carrier,relay); move(partner,intake);
@@ -121,8 +121,8 @@ for (const seed of [19,20]) {
     assert.equal(sim.join(2),undefined);
     const player = sim.state.players[0], mission = sim.state.mission!;
     const move = (kind: Parameters<typeof station>[1]) => {
-      const {x,z} = station(layout,kind);
-      Object.assign(player,{x,z});
+      const {x,y,z} = station(layout,kind);
+      Object.assign(player,{x,z,feetY:y});
     };
     sim.act(1,'take');
     if (layout.callout === 'black-start') {
@@ -143,7 +143,7 @@ test('a solo strike ends immediately and a lone co-op seat still needs its partn
     const sim = new Simulation(layout,mode);
     sim.join(1); sim.act(1,'take');
     const relay = station(layout,'relay');
-    Object.assign(sim.state.players[0],{x:relay.x,z:relay.z});
+    Object.assign(sim.state.players[0],{x:relay.x,z:relay.z,feetY:relay.y});
     sim.act(1,'operate');
     for (let i=0;i<160;i++) sim.tick(1/30);
     assert.equal(sim.state.mission!.stage,mode === 'solo' ? 'lost' : 'answer');

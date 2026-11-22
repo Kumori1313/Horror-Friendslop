@@ -1,22 +1,21 @@
 import type { Events } from './connection.ts';
-import { blockers, generatorVersion } from './layout.ts';
+import { blockers, generatorVersion, stairwellLayout } from './layout.ts';
 import type { Action, Input, Snapshot } from './room.ts';
 import { generateLayout } from './server/generate-layout.ts';
 import { Simulation } from './server/simulation.ts';
 
-const checkpointKey = 'relay-room-solo-v1';
 interface Checkpoint { version: number; seed: number; state: Snapshot }
 
-function resume(): Simulation | undefined {
+function resume(checkpointKey:string,stairwell:boolean): Simulation | undefined {
   try {
     const nav = performance.getEntriesByType('navigation')[0] as PerformanceNavigationTiming | undefined;
     if (nav?.type !== 'reload') return;
     const raw = sessionStorage.getItem(checkpointKey);
     if (!raw) return;
     const {version,seed,state}: Checkpoint = JSON.parse(raw);
-    if (version !== generatorVersion || !Number.isInteger(seed) || !state.mission?.solo ||
+    if (version !== generatorVersion || !Number.isInteger(seed) || (stairwell ? !!state.mission : !state.mission?.solo) ||
         state.players.length !== 1 || state.players[0].id !== 1) return;
-    const sim = new Simulation(generateLayout(seed),'solo');
+    const sim = new Simulation(stairwell ? stairwellLayout() : generateLayout(seed),'solo');
     sim.join(1);
     sim.state = state;
     const player = state.players[0];
@@ -31,10 +30,12 @@ export class SoloSession {
   private readonly events: Events;
   private savedAt = 0;
   private discarded = false;
-  constructor(events: Events) {
+  private readonly checkpointKey:string;
+  constructor(events: Events, stairwell=false) {
+    this.checkpointKey = stairwell ? 'relay-room-stairwell-v1' : 'relay-room-solo-v1';
     const override = import.meta.env.MODE !== 'pages' && import.meta.env.VITE_RELAY_TEST_SEED;
     const seed = override ? Number(override) : crypto.getRandomValues(new Uint32Array(1))[0];
-    this.sim = resume() ?? new Simulation(generateLayout(seed),'solo');
+    this.sim = resume(this.checkpointKey,stairwell) ?? new Simulation(stairwell ? stairwellLayout() : generateLayout(seed),'solo');
     if (!this.sim.state.players.length) this.sim.join(1);
     this.events = events;
   }
@@ -59,12 +60,12 @@ export class SoloSession {
     if (this.discarded) return;
     try {
       const layout = this.sim.layout!;
-      sessionStorage.setItem(checkpointKey,JSON.stringify({version:layout.version,seed:layout.seed,state:this.sim.state}));
+      sessionStorage.setItem(this.checkpointKey,JSON.stringify({version:layout.version,seed:layout.seed,state:this.sim.state}));
     } catch { /* Play can continue when browser storage is unavailable. */ }
   }
   discard() {
     this.discarded = true;
-    try { sessionStorage.removeItem(checkpointKey); } catch { /* Storage unavailable */ }
+    try { sessionStorage.removeItem(this.checkpointKey); } catch { /* Storage unavailable */ }
   }
   stop() { this.save(); }
 }

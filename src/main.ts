@@ -5,6 +5,7 @@ import { mountDiagnostics } from './diagnostics.ts';
 import './style.css';
 import { blockers, footprint, generatorVersion, geometryFor, nearbyDoor, roomLabel } from './layout.ts';
 import type { Layout, Geometry, Rect } from './layout.ts';
+import { surfaceAt, obstaclesAt } from './room-templates.ts';
 import { canTake } from './room.ts';
 import { SoloSession } from './solo-session.ts';
 import { CreatorSession, type Crew } from './creator-session.ts';
@@ -167,9 +168,11 @@ function start(render: ReturnType<typeof createScene>, mode?: Crew | 'solo', sce
       }
       hud.update(layout,s,p,!brief.hidden);
     }
-    const reachable = canTake(p,l,obstacles);
+    const templates=geometry?.templates;
+    const reachable = canTake(p,l,templates ? obstaclesAt(templates,p.feetY??0) : obstacles);
     if (layout) {
-      const current = layout.rooms.find(room => {
+      const roomId=templates && surfaceAt(templates,p.x,p.z,p.feetY??0)?.room;
+      const current = templates ? layout.rooms.find(room=>room.id===roomId) : layout.rooms.find(room => {
         const f = footprint(room);
         return Math.abs(f.x-p.x)<=f.w/2 && Math.abs(f.z-p.z)<=f.d/2;
       });
@@ -207,7 +210,7 @@ function start(render: ReturnType<typeof createScene>, mode?: Crew | 'solo', sce
         doorState = '';
         element('sector').hidden = false;
         const backup = plan.callout === 'black-start';
-        element('brief-type').textContent = backup ? 'Black start' : 'Line test';
+        element('brief-type').textContent = plan.templatePlan ? 'Stairwell playtest' : backup ? 'Black start' : 'Line test';
       }
       id = seat;
       if (!mode) sessionStorage.setItem(key,JSON.stringify(ticket));
@@ -247,7 +250,7 @@ function start(render: ReturnType<typeof createScene>, mode?: Crew | 'solo', sce
       }
     },
   };
-  const connection = mode === 'solo' ? new SoloSession(events)
+  const connection = mode === 'solo' ? new SoloSession(events,new URLSearchParams(location.search).get('layout')==='stairwell')
     : crew ? new CreatorSession(crew,events) : new RoomConnection(url.href,saved,events,delay);
   const soloSession = connection instanceof SoloSession ? connection : undefined;
   const network = connection instanceof SoloSession ? undefined : connection;

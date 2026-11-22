@@ -8,6 +8,10 @@ Open **Relay Room** from Game Hub and choose **Play solo**, or open the [solo pl
 
 Carry the lit flashlight to Relay and use **Power exit circuit**. Black Start requires charging the Switchboard first. Once powered, avoid the Bell Diver and operate the Exit pad to extract. A strike ends a solo shift. The two-player callouts still use the paired stations and rescue rules.
 
+### Phase 9 stairwell playtest
+
+Run `npm run dev` and open the [local stairwell walkthrough](http://127.0.0.1:5176/?solo=1&layout=stairwell). The layout is fixed so you can repeat the same route in either direction. Walk straight from Intake up the stairs, then turn right onto the catwalk. Look down into the machinery hall before crossing to the loot closet. Double back to the break in the railing and take the ramp down. The lower doorway beneath the closet leads into a bent tunnel that returns to Intake. Choose **Leave solo** when finished.
+
 ## Start a local test
 
 Use Node.js 22.13 or newer and npm. From this repository, run:

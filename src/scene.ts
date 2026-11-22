@@ -167,7 +167,8 @@ export function createScene(canvas: HTMLCanvasElement, generated = false) {
       for (const p of state.players) {
         const down = state.mission?.down.some(d => d.id === p.id);
         if (p.id === self) {
-          camera.position.y = reducedMotion ? 1.59 : T.MathUtils.lerp(camera.position.y,down ? 0.45 : 1.59,blend);
+          const eyeHeight=(p.feetY??0)+(down && !reducedMotion ? 0.45 : 1.59);
+          camera.position.y = reducedMotion ? eyeHeight : T.MathUtils.lerp(camera.position.y,eyeHeight,blend);
           camera.position.x = T.MathUtils.lerp(camera.position.x,p.x,blend);
           camera.position.z = T.MathUtils.lerp(camera.position.z,p.z,blend);
           camera.rotation.set(pitch,yaw,0,'YXZ');

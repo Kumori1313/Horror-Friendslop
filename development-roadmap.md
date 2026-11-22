@@ -101,6 +101,7 @@ Phases 8–15 build on feedback from the public two-player release. Use the exis
 ## Phase 9 — Generate larger, multi-floor facilities
 
 - Replace the flat grid and fixed rectangular bays with room templates that declare their footprint, height, walkable surfaces, and door or stair connections. Start with a small loot closet, a bent service tunnel, a large machinery hall, and a stairwell with landings on two floors. Support rooms above one another and sightlines between levels.
+  - **Ready for solo review.** The fixed stairwell walkthrough connects Intake, both landings, the machinery hall, the upper closet, and the service tunnel beneath it. Automated movement tests traverse the loop in both directions and check that the closet floor blocks flashlight pickup from below. [Local walkthrough instructions](README.md#phase-9-stairwell-playtest)
 - Expand beyond the current 12–15 rooms. Build a pool of distinct destinations larger than a single facility needs. Draw each distinct room type at most once per seed. Reuse modular corridor pieces to connect them. Vary the choice of rooms, their sizes, and the branches worth exploring.
 - Ground players on ramps, stairs, and upper floors. Include elevation in host snapshots and checkpoints. Use actual door and stair connections for navigation, enemy movement, and hearing distance. Two rooms stacked above one another can be far apart by that measure.
 

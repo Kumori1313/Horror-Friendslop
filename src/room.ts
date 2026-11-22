@@ -7,7 +7,7 @@ export const walls = [
 ];
 export interface Point { x: number; z: number }
 export interface Input { forward: number; right: number; yaw: number; pitch: number }
-export interface Player extends Point { connected: boolean; id: number; yaw: number; pitch: number }
+export interface Player extends Point { feetY?: number; connected: boolean; id: number; yaw: number; pitch: number }
 export interface Lamp extends Point { owner: number | null; on: boolean; y: number; yaw: number; pitch: number }
 export interface Snapshot { round: string; update: number; players: Player[]; lamp: Lamp; opened?: string[]; mission?: Mission }
 export type Action = 'take' | 'drop' | 'toggle' | 'open-door' | 'operate';
@@ -32,6 +32,7 @@ export function clearAt(x: number, z: number, radius: number, obstacles: readonl
 }
 
 export function canTake(p: Player, lamp: Lamp, obstacles: readonly Rect[] = walls) {
+  if (p.feetY !== undefined && Math.abs(lamp.y-0.14-p.feetY)>1) return false;
   if (lamp.owner !== null || Math.hypot(p.x - lamp.x, p.z - lamp.z) > 2) return false;
   for (let i = 1; i <= 12; i++) {
     if (!clearAt(p.x + (lamp.x - p.x) * i / 12, p.z + (lamp.z - p.z) * i / 12, 0.04, obstacles)) return false;

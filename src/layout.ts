@@ -1,44 +1,64 @@
 import { clearAt } from './room.ts';
 import type { Point } from './room.ts';
 
+import { assembleTemplates, bayTemplates, roomTemplates, stairwellLinks, stairwellRooms } from './room-templates.ts';
+import type { Placement, TemplateGeometry, TemplateKind, TemplateLink } from './room-templates.ts';
+
 export const generatorVersion = 2;
 export const playerRadius = 0.25;
 export const pitch = 10;
 export const opening = 2.4;
 export interface Rect extends Point { w: number; d: number }
 export type Kind = 'intake' | 'pump' | 'stores' | 'junction' | 'relay' | 'exit' | 'switchboard' | 'chiller';
-export interface Module extends Point { id: string; kind: Kind; rotation: number }
+export interface Module extends Point { id: string; kind: Kind; rotation: number; template?: TemplateKind }
 export interface Passage { a: string; b: string; id: string; bulkhead: boolean }
 export interface Layout {
   seed: number; version: number; fallback: boolean;
   rooms: Module[]; passages: Passage[];
+  templatePlan?: { rooms:Placement[]; links:TemplateLink[] };
   callout: 'line-test' | 'black-start';
   lampId: 'inspection-light'; objectiveId: string; exitId: string;
 }
 export interface Door extends Rect { id: string }
-export interface Geometry { floors: Rect[]; walls: Rect[]; equipment: Rect[]; doors: Door[] }
-
-export const roomNames: Record<Kind,string> = {
-  intake:'Intake', pump:'Pump hall', stores:'Parts store', junction:'Service junction', relay:'Relay station', exit:'Exit bay', switchboard:'Switchboard', chiller:'Chiller hall',
-};
+export interface Geometry { floors: Rect[]; walls: Rect[]; equipment: Rect[]; doors: Door[]; templates?:TemplateGeometry }
 
 // Repeated bays have a stencilled number crews can call out to each other.
 export function roomLabel(room: Module) {
-  const name = roomNames[room.kind];
+  if (room.template) return roomTemplates[room.template].name;
+  const name = bayTemplates[room.kind].name;
   if (room.kind !== 'pump' && room.kind !== 'stores' && room.kind !== 'junction') return name;
   return name+' '+room.id.replace(/^bay-/,'').padStart(2,'0');
 }
 
 export function footprint(room: Module): Rect {
-  const width = room.kind === 'stores' ? 6 : 8;
-  const depth = (room.kind === 'pump' || room.kind === 'chiller') ? 6 : 8;
+  if (room.template) {
+    const patches=roomTemplates[room.template].footprint;
+    const left=Math.min(...patches.map(p=>p.x-p.w/2)), right=Math.max(...patches.map(p=>p.x+p.w/2));
+    const north=Math.min(...patches.map(p=>p.z-p.d/2)), south=Math.max(...patches.map(p=>p.z+p.d/2));
+    return {x:room.x+(left+right)/2,z:room.z+(north+south)/2,w:right-left,d:south-north};
+  }
+  const {w:width,d:depth} = bayTemplates[room.kind].footprint[0];
   return { x: room.x, z: room.z, w: room.rotation % 2 ? depth : width, d: room.rotation % 2 ? width : depth };
+}
+
+// A repeatable solo walkthrough while the seeded generator is in development.
+export function stairwellLayout():Layout {
+  const kinds:Record<TemplateKind,Kind> = {intake:'intake',closet:'stores',hall:'relay',tunnel:'junction',stairwell:'junction'};
+  return {version:generatorVersion,seed:0,fallback:false,callout:'line-test',lampId:'inspection-light',
+    objectiveId:'hall',exitId:'intake',templatePlan:{rooms:stairwellRooms,links:stairwellLinks},
+    rooms:stairwellRooms.map(r=>({...r,kind:kinds[r.template],rotation:0})),
+    passages:stairwellLinks.map(e=>({a:e.a,b:e.b,id:e.a+'-'+e.b,bulkhead:false}))};
 }
 
 // Both collision and rendering use these exact slabs. Corridors bridge the
 // gap between differently sized modules and meet both sockets at full width.
 export function geometryFor(layout: Layout): Geometry {
   const result: Geometry = {floors:[], walls:[], equipment:[], doors:[]};
+  if (layout.templatePlan) {
+    result.templates = assembleTemplates(layout.templatePlan.rooms,layout.templatePlan.links);
+    result.floors = result.templates.surfaces;
+    return result;
+  }
   const sides = new Map(layout.rooms.map(room => [room.id,new Set<string>()]));
   const footprints = new Map(layout.rooms.map(room => [room.id,footprint(room)]));
   for (const link of layout.passages) {

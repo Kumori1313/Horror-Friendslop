@@ -151,6 +151,24 @@ export function createScene(canvas: HTMLCanvasElement, generated = false) {
   camera.position.set(-0.7,1.59,3); camera.rotation.x = -0.12;
   let previousOwner: number | null | undefined;
   let portals: PortalGraph | undefined;
+  // Remote operators and a flashlight they carry move once per snapshot, up
+  // to 100 ms apart for a guest. Glide from where each was drawn to its new
+  // position over one snapshot interval instead of jumping.
+  interface Track { from: T.Vector3; to: T.Vector3; at: number; span: number; update: number }
+  const tracks = new Map<string,Track>();
+  function glide(key: string, update: number, x: number, y: number, z: number, now: number, shown?: T.Vector3) {
+    let track = tracks.get(key);
+    const target = new T.Vector3(x,y,z);
+    if (!track || track.to.distanceTo(target) > 3) {
+      track = {from:target.clone(),to:target,at:now,span:100,update};
+      tracks.set(key,track);
+    } else if (update !== track.update && !track.to.equals(target)) {
+      track.span = Math.max(16,Math.min(250,now-track.at));
+      track.from = shown ? shown.clone() : track.to.clone();
+      track.to = target; track.at = now; track.update = update;
+    } else track.update = update;
+    return track.from.clone().lerp(track.to,Math.min(1,(now-track.at)/track.span));
+  }
   const viewProjection = new T.Matrix4();
   const stats = {scale:1, drawn:0, rooms:0, calls:0};
   // Lower the render resolution while frames run slow, and restore it after a
@@ -205,15 +223,19 @@ export function createScene(canvas: HTMLCanvasElement, generated = false) {
           let g = people.get(p.id);
           if (!g) { g = avatar(p.id); g.position.set(p.x,p.feetY ?? 0,p.z); }
           g.scale.y = down ? 0.35 : 1;
-          g.position.x += (p.x-g.position.x)*blend; g.position.z += (p.z-g.position.z)*blend;
-          g.position.y += ((p.feetY ?? 0)-g.position.y)*blend;
+          g.position.copy(glide('p'+p.id,state.update,p.x,p.feetY ?? 0,p.z,performance.now(),g.position));
           g.rotation.y += Math.atan2(Math.sin(p.yaw-g.rotation.y),Math.cos(p.yaw-g.rotation.y))*blend;
         }
       }
       for (const [id,g] of people) if (!state.players.some(p => p.id === id)) { scene.remove(g); people.delete(id); }
       const l = state.lamp;
       const t = previousOwner === l.owner ? blend : 1;
-      torch.position.lerp(new T.Vector3(l.x,l.y,l.z),t);
+      if (l.owner !== null && l.owner !== self && previousOwner === l.owner) {
+        torch.position.copy(glide('lamp',state.update,l.x,l.y,l.z,performance.now(),torch.position));
+      } else {
+        tracks.delete('lamp');
+        torch.position.lerp(new T.Vector3(l.x,l.y,l.z),t);
+      }
       torch.rotation.y += Math.atan2(Math.sin(l.yaw-torch.rotation.y),Math.cos(l.yaw-torch.rotation.y))*t;
       torch.rotation.x += (l.pitch-torch.rotation.x)*t;
       beam.visible = cone.visible = l.on; lensMat.color.setHex(l.on ? 0xffe7a6 : 0x646951);

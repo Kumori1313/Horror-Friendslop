@@ -47,6 +47,8 @@ Type-checking is the only static check. There is no linter or formatter.
 
 All three sessions implement the same `Events` interface from `connection.ts` (`joined`, `snapshot`, `offline`). `src/main.ts` picks the session by URL and drives input, rendering, and HUD identically. Keep this seam: rendering and input should not know which host is authoritative.
 
+Clients without a local simulation (the Game Hub guest and both standalone-room clients) predict their own operator with `src/prediction.ts`. It moves with `moveOperator`, the same function `Simulation.tick` uses, and matches each snapshot against its recent history to correct. Keep movement rules inside `moveOperator`/`heldLamp` so host and prediction cannot drift. `scene.ts` glides remote avatars and a remotely held lamp between snapshots.
+
 ### Shared protocol and state
 
 `src/room.ts` defines the wire types (`Snapshot`, `Input`, `Action`, `ClientMessage`/`ServerMessage`, `Ticket`, `Admission`) and shared collision helpers (`clearAt`, `canTake`) used by both client prediction/prompts and the simulation. Actions carry a `seq` for de-duplication of stale or replayed actions. Snapshots are ordered by `round` + `update` (`newerSnapshot`). The full `Layout` is sent only on join or resume. Regular snapshots carry live state (players, lamp, `opened` doors, `mission`).

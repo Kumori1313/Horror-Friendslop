@@ -8,6 +8,40 @@ import { obstaclesAt, surfaceAt, surfaceHeight } from '../room-templates.ts';
 import { assignment, finished, station } from '../mission.ts';
 import { advanceMission, newMission, warn } from './mission.ts';
 
+// Operator movement shared by the host and by clients predicting their own
+// operator, so both agree on walls, stairs and closed bulkheads.
+export function moveOperator(p: Player, input: Input, dt: number, geometry: Geometry | undefined, opened: readonly string[] = []) {
+  p.yaw = input.yaw;
+  p.pitch = input.pitch;
+  const step = 3.3 * dt / Math.max(1, Math.hypot(input.forward, input.right));
+  const x = p.x + (Math.cos(p.yaw) * input.right - Math.sin(p.yaw) * input.forward) * step;
+  const z = p.z - (Math.cos(p.yaw) * input.forward + Math.sin(p.yaw) * input.right) * step;
+  stepTo(p,x,p.z,geometry,opened);
+  stepTo(p,p.x,z,geometry,opened);
+}
+
+function stepTo(p: Player, x: number, z: number, g: Geometry | undefined, opened: readonly string[]) {
+  if (x === p.x && z === p.z) return;
+  if (g) {
+    const support = surfaceAt(g,x,z,p.feetY ?? 0);
+    if (!support) return;
+    const feet = surfaceHeight(support,x,z);
+    if (!clearAt(x,z,playerRadius,obstaclesAt(g,feet,opened))) return;
+    p.feetY = feet;
+  } else if (!clearAt(x,z,playerRadius,walls)) return;
+  p.x = x;
+  p.z = z;
+}
+
+// Where a carried flashlight sits: ahead and to the right, pulled back to the
+// operator if a wall is in the way.
+export function heldLamp(p: Player, solids: readonly Rect[]) {
+  const x = p.x + 0.24 * Math.cos(p.yaw) - 0.38 * Math.sin(p.yaw);
+  const z = p.z - 0.24 * Math.sin(p.yaw) - 0.38 * Math.cos(p.yaw);
+  const clear = clearAt(x, z, 0.14,solids) && clearAt((x + p.x) / 2, (z + p.z) / 2, 0.14,solids);
+  return { x: clear ? x : p.x, z: clear ? z : p.z, y: (p.feetY ?? 0)+1.28, yaw: p.yaw, pitch: p.pitch };
+}
+
 export class Simulation {
   readonly layout?: Layout;
   readonly geometry?: Geometry;
@@ -48,14 +82,12 @@ export class Simulation {
     if (finished(mission?.stage)) return;
     for (const p of this.state.players) {
       const input = this.inputs.get(p.id)!;
-      p.yaw = input.yaw;
-      p.pitch = input.pitch;
-      if (mission?.down.some(d => d.id === p.id)) continue;
-      const step = 3.3 * dt / Math.max(1, Math.hypot(input.forward, input.right));
-      const x = p.x + (Math.cos(p.yaw) * input.right - Math.sin(p.yaw) * input.forward) * step;
-      const z = p.z - (Math.cos(p.yaw) * input.forward + Math.sin(p.yaw) * input.right) * step;
-      this.step(p,x,p.z);
-      this.step(p,p.x,z);
+      if (mission?.down.some(d => d.id === p.id)) {
+        p.yaw = input.yaw;
+        p.pitch = input.pitch;
+        continue;
+      }
+      moveOperator(p,input,dt,this.geometry,this.state.opened);
       if (this.state.lamp.owner === p.id) this.hold(p);
     }
     if (mission && this.layout) advanceMission(this.layout,this.state,mission,dt,p => this.roomOf(p));
@@ -70,27 +102,8 @@ export class Simulation {
     return this.geometry ? obstaclesAt(this.geometry,p.feetY ?? 0,this.state.opened) : walls;
   }
 
-  private step(p: Player, x: number, z: number) {
-    if (x === p.x && z === p.z) return;
-    const g = this.geometry;
-    if (g) {
-      const support = surfaceAt(g,x,z,p.feetY ?? 0);
-      if (!support) return;
-      const feet = surfaceHeight(support,x,z);
-      if (!clearAt(x,z,playerRadius,obstaclesAt(g,feet,this.state.opened))) return;
-      p.feetY = feet;
-    } else if (!clearAt(x,z,playerRadius,walls)) return;
-    p.x = x;
-    p.z = z;
-  }
-
   hold(p: Player) {
-    const lamp = this.state.lamp;
-    const x = p.x + 0.24 * Math.cos(p.yaw) - 0.38 * Math.sin(p.yaw);
-    const z = p.z - 0.24 * Math.sin(p.yaw) - 0.38 * Math.cos(p.yaw);
-    const nearby = this.solids(p);
-    const clear = clearAt(x, z, 0.14,nearby) && clearAt((x + p.x) / 2, (z + p.z) / 2, 0.14,nearby);
-    Object.assign(lamp, { x: clear ? x : p.x, z: clear ? z : p.z, y: (p.feetY ?? 0)+1.28, yaw: p.yaw, pitch: p.pitch });
+    Object.assign(this.state.lamp,heldLamp(p,this.solids(p)));
   }
 
   act(id: number, action: Action) {

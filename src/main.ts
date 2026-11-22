@@ -9,9 +9,10 @@ import { canTake, walls } from './room.ts';
 import { SoloSession } from './solo-session.ts';
 import { CreatorSession, type Crew } from './creator-session.ts';
 import { RoomConnection, type Events } from './connection.ts';
-import type { Ticket, Snapshot } from './room.ts';
+import type { Input, Ticket, Snapshot } from './room.ts';
 import { bindDrag } from './touch.ts';
 import { createScene } from './scene.ts';
+import { Prediction } from './prediction.ts';
 
 function element<T extends HTMLElement>(id: string) {
   return document.getElementById(id) as T;
@@ -38,6 +39,9 @@ function start(render: ReturnType<typeof createScene>, mode?: Crew | 'solo', sce
   const delay = Math.max(0,Math.min(500,Number(new URLSearchParams(location.search).get('delay')) || 0));
   let id = 0, yaw = 0, pitch = -0.12;
   let state: Snapshot | undefined;
+  // Clients without the simulation on hand predict their own operator.
+  let prediction: Prediction | undefined;
+  const frozen = (s: Snapshot) => !!s.mission && (finished(s.mission.stage) || s.mission.down.some(d => d.id === id));
   let layout: Layout | undefined, geometry: Geometry | undefined;
   const doorButton = element<HTMLButtonElement>('open-door');
   const { preferences, open: openSettings } = bindPreferences(pause);
@@ -93,12 +97,14 @@ function start(render: ReturnType<typeof createScene>, mode?: Crew | 'solo', sce
   take.onclick = useFlashlight;
   toggle.onclick = switchLight;
   showControls();
-  function input() {
-    connection.input({
+  function controls(): Input {
+    if (!playing) return {forward:0,right:0,yaw,pitch};
+    return {
       forward: Math.max(-1,Math.min(1,Number(keys.has('KeyW')) - Number(keys.has('KeyS')) - stickY)),
       right: Math.max(-1,Math.min(1,Number(keys.has('KeyD')) - Number(keys.has('KeyA')) + stickX)), yaw, pitch,
-    });
+    };
   }
+  function input() { connection.input(controls()); }
   function pause() {
     keys.clear(); playing = false; resetStick(); resetLook(); showControls(); reticle.hidden = true; input();
     if (solo && state && !finished(state.mission?.stage)) updateHud(state);
@@ -206,6 +212,11 @@ function start(render: ReturnType<typeof createScene>, mode?: Crew | 'solo', sce
     },
     snapshot(snapshot, first) {
       state = snapshot;
+      const auth = snapshot.players.find(p => p.id === id);
+      if (prediction && auth) {
+        if (first || !prediction.self) prediction.reset(auth,performance.now());
+        else prediction.correct(auth,performance.now(),frozen(snapshot),geometry);
+      }
       if (first) {
         const self = state.players.find(p => p.id === id)!;
         yaw = self.yaw;
@@ -238,6 +249,7 @@ function start(render: ReturnType<typeof createScene>, mode?: Crew | 'solo', sce
     : crew ? new CreatorSession(crew,events) : new RoomConnection(url.href,saved,events,delay);
   const soloSession = connection instanceof SoloSession ? connection : undefined;
   const network = connection instanceof SoloSession ? undefined : connection;
+  if (network && !crew?.host) prediction = new Prediction();
   if (soloSession) {
     const leave = element<HTMLButtonElement>('live-leave');
     leave.hidden = false;
@@ -261,7 +273,8 @@ function start(render: ReturnType<typeof createScene>, mode?: Crew | 'solo', sce
       if (now-lastSent >= 33) { input(); lastSent = now; }
     }
     if (playing && !document.hidden) soloSession?.tick(dt);
-    render(state,id,yaw,pitch,dt,layout,preferences.reducedMotion);
+    if (prediction && state) prediction.step(now,dt,controls(),geometry,state.opened ?? [],frozen(state));
+    render(prediction && state ? prediction.view(state,id,geometry) : state,id,yaw,pitch,dt,layout,preferences.reducedMotion);
     diagnostics?.frame(now,elapsed,!!state);
     requestAnimationFrame(frame);
   }

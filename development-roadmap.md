@@ -96,6 +96,8 @@ Phases 8–15 build on feedback from the public two-player release. Use the exis
 
 **Solo playtest mode.** One operator can enter a fresh generated facility from **Play solo**. The lit flashlight powers the exit circuit directly at Relay. Black Start also requires charging the Switchboard. The existing Bell Diver encounter, shift report, and seed apply to solo runs. Use solo to iterate on layouts and navigation, and two independent devices to verify shared state.
 
+**Solo release verified.** On the published build `0010fce`, one operator completed Line Test on seed `695203597`, refreshed the extraction report, and started a new shift. The run opened no multiplayer socket. A separate emulated phone test verified touch pickup, flashlight toggling, same-tab refresh, and leaving the shift.
+
 ## Phase 9 — Generate larger, multi-floor facilities
 
 - Replace the flat grid and fixed rectangular bays with room templates that declare their footprint, height, walkable surfaces, and door or stair connections. Start with a small loot closet, a bent service tunnel, a large machinery hall, and a stairwell with landings on two floors. Support rooms above one another and sightlines between levels.

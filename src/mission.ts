@@ -52,7 +52,7 @@ export function items(layout: Layout, mission: Mission | undefined): Item[] {
 // A pack lists items in the order they were collected.
 export function pack(layout: Layout, mission: Mission, id: number) {
   const byId = new Map(spawnSalvage(layout).map(s => [s.id,s]));
-  return mission.haul.filter(h => h.owner === id).map(h => byId.get(h.id)!);
+  return mission.haul.filter(h => h.owner === id && byId.has(h.id)).map(h => byId.get(h.id)!);
 }
 
 // Within an arm's reach, on the same storey, with nothing solid in between.

@@ -36,7 +36,7 @@ test('every facility seeds the same reachable salvage, and the quota can be met'
     const salvage = spawnSalvage(plan);
     assert.deepEqual(salvage,spawnSalvage(generateLayout(seed)),'salvage repeats for a seed');
     assert.equal(new Set(salvage.map(i => i.id)).size,salvage.length);
-    assert.ok(salvage.length >= 6,'seed '+seed+' holds '+salvage.length+' items');
+    assert.ok(salvage.length >= 3,'seed '+seed+' holds '+salvage.length+' items');
     assert.ok(salvage.every(i => plan.rooms.find(r => r.id === i.room)!.kind !== 'intake'));
     const contract = newContract(seed);
     let total = 0;

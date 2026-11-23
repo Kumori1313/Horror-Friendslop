@@ -4,7 +4,7 @@ import { mkdirSync, writeFileSync } from 'node:fs';
 import { anchor, distances, generatorVersion, geometryFor, nearbyDoor, nextWiredBay, routeReach, validLayout, walkable } from '../src/layout.ts';
 import type { Layout } from '../src/layout.ts';
 import { obstaclesAt, roomTemplates, storey } from '../src/room-templates.ts';
-import { spawnSalvage } from '../src/salvage.ts';
+import { maxPerRoom, spawnSalvage } from '../src/salvage.ts';
 import { clearAt } from '../src/room.ts';
 import { generateLayout } from '../src/server/generate-layout.ts';
 import { Simulation } from '../src/server/simulation.ts';
@@ -62,18 +62,35 @@ test('1,000 repeatable seeds build traversable two-storey facilities from unique
   for (const seed of [0,19,715,0xffffffff]) assert.deepEqual(generateLayout(seed),generateLayout(seed));
 });
 
-test('every facility can be walked on the real geometry from the spawn to each room, and from loot to the exit', () => {
+test('every facility can be walked on the real geometry from the spawn to each room, and from loot to the exit', t => {
+  // Per room: never more than two items, and two only rarely.
+  const loot = [0,0,0], other = [0,0,0];
+  t.after(() => {
+    const share = (a: number[]) => a[2]/(a[0]+a[1]+a[2]);
+    t.diagnostic('two-item rooms: loot '+(100*share(loot)).toFixed(1)+'%, other '+(100*share(other)).toFixed(1)+'%');
+  });
   for (let seed=0;seed<1000;seed++) {
     const plan = generateLayout(seed), g = geometryFor(plan);
     const reached = walkable(g,{x:-0.7,y:0,z:3},g.doors.map(d => d.id));
     for (const room of plan.rooms) assert.ok(reached(anchor(room)),'seed '+seed+': cannot walk to '+room.id);
     // Every salvage spot shares the spawn's walkable region, so it can be hauled back to base.
-    for (const item of spawnSalvage(plan)) assert.ok(reached(item),'seed '+seed+': cannot walk to '+item.id);
+    const salvage = spawnSalvage(plan);
+    for (const item of salvage) assert.ok(reached(item),'seed '+seed+': cannot walk to '+item.id);
+    for (const room of plan.rooms) {
+      if (['intake','corridor','stairwell'].includes(room.kind)) continue;
+      const count = salvage.filter(i => i.room === room.id).length;
+      assert.ok(count <= maxPerRoom,'seed '+seed+': '+room.id+' holds '+count);
+      if (roomTemplates[room.template].loot) { assert.ok(count >= 1,'seed '+seed+': empty loot room '+room.id); loot[count]++; }
+      else other[count]++;
+    }
     if (seed % 40) continue;
     // Intake's closed bulkhead holds the crew in base until someone opens it.
     const sealed = walkable(g,{x:-0.7,y:0,z:3});
     assert.ok(plan.rooms.filter(r => r.id !== 'intake').every(r => !sealed(anchor(r))));
   }
+  const share = (a: number[]) => a[2]/(a[0]+a[1]+a[2]);
+  assert.ok(share(loot) > 0.2 && share(loot) < 0.4,'loot rooms hold two items about 30% of the time');
+  assert.ok(share(other) < 0.1,'other rooms rarely hold two items');
 });
 
 test('the fallback is playable, and overlapping or disconnected plans are rejected', () => {

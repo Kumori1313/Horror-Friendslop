@@ -56,8 +56,11 @@ function spots(kind: TemplateKind) {
 }
 
 const spawned = new WeakMap<Layout,Salvage[]>();
-// Loot rooms hold two to four items, other destinations up to one. Intake,
+// No room holds more than two items, and two is rare: a loot room always
+// holds one and holds two 30% of the time; any other destination is empty
+// 65% of the time, holds one 30% of the time, and two only 5%. Intake,
 // corridors and stairwells stay clear.
+export const maxPerRoom = 2;
 export function spawnSalvage(layout: Layout): Salvage[] {
   let items = spawned.get(layout);
   if (items) return items;
@@ -69,7 +72,8 @@ export function spawnSalvage(layout: Layout): Salvage[] {
     for (const room of layout.rooms) {
       if (room.kind === 'intake' || room.kind === 'corridor' || room.kind === 'stairwell') continue;
       const loot = !!roomTemplates[room.template].loot;
-      const count = loot ? 2+Math.floor(next()*3) : next() < 0.55 ? 1 : 0;
+      const roll = next();
+      const count = loot ? (roll < 0.3 ? 2 : 1) : roll < 0.05 ? 2 : roll < 0.35 ? 1 : 0;
       const taken: Point3[] = [];
       const pool = [...spots(room.template)];
       for (let i=0; i<count && pool.length; ) {

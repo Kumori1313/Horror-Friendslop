@@ -4,6 +4,7 @@ import { anchor, geometryFor, roomLabel } from './layout.ts';
 import type { Layout, Kind } from './layout.ts';
 import { doorWidth, orient, outward } from './room-templates.ts';
 import { itemKinds, spawnSalvage, type ItemKind } from './salvage.ts';
+import { shellFinish, surfaceFor, worldUV, type Finish, type Library } from './materials.ts';
 
 export const colors: Record<Kind,number> = {
   intake:0xe0b258, relay:0xe6a840, switchboard:0xe0894e, chiller:0x57b9da, pump:0x648d92,
@@ -12,20 +13,21 @@ export const colors: Record<Kind,number> = {
   hall:0x8fa3a0, stairwell:0xd9d2b4, corridor:0x93a599,
 };
 const stations: Kind[] = ['intake'];
-const textured = new Set([0x748078,0x515e59]);
 const lamp = 0xe4e7c9;
 
 // Box vertices for one material within one room, merged into a single draw.
 class Batch {
   static unit = new T.BoxGeometry();
   position: number[] = []; normal: number[] = []; uv: number[] = []; color: number[] = []; index: number[] = [];
+  // Texture coordinates come from world position in metres, so a texture
+  // keeps its scale on any length of wall, floor or ramp.
   add(matrix: T.Matrix4, normals: T.Matrix3, color: T.Color) {
-    const u = Batch.unit, p = u.attributes.position, n = u.attributes.normal, t = u.attributes.uv;
-    const base = this.position.length/3, v = new T.Vector3();
+    const u = Batch.unit, p = u.attributes.position, n = u.attributes.normal;
+    const base = this.position.length/3, v = new T.Vector3(), w = new T.Vector3();
     for (let i=0;i<p.count;i++) {
       v.fromBufferAttribute(p,i).applyMatrix4(matrix); this.position.push(v.x,v.y,v.z);
-      v.fromBufferAttribute(n,i).applyMatrix3(normals).normalize(); this.normal.push(v.x,v.y,v.z);
-      this.uv.push(t.getX(i),t.getY(i)); this.color.push(color.r,color.g,color.b);
+      w.fromBufferAttribute(n,i).applyMatrix3(normals).normalize(); this.normal.push(w.x,w.y,w.z);
+      this.uv.push(...worldUV(v.x,v.y,v.z,w.x,w.y,w.z)); this.color.push(color.r,color.g,color.b);
     }
     const index = u.index!;
     for (let i=0;i<index.count;i++) this.index.push(base+index.getX(i));
@@ -43,8 +45,10 @@ class Batch {
 }
 
 // Each room is one group of merged meshes, so whole rooms can be hidden at
-// once. Walls and decks carry the plate texture; markers and lamps glow.
-export function buildFacility(layout: Layout, surface: T.Texture) {
+// once. Shell surfaces come from the room's palette, props keep their colour
+// over metal, rust, paint or wood, and markers and lamps glow. Materials are
+// shared from `library` and outlive the facility.
+export function buildFacility(layout: Layout, library: Library) {
   const root = new T.Group();
   const geometry = geometryFor(layout);
   const byId = new Map(layout.rooms.map(r => [r.id,r]));
@@ -52,33 +56,32 @@ export function buildFacility(layout: Layout, surface: T.Texture) {
     const g = new T.Group(); g.name = r.id; root.add(g);
     return [r.id,g];
   }));
-  const plate = new T.MeshStandardMaterial({vertexColors:true,map:surface,roughness:0.86});
-  const matte = new T.MeshStandardMaterial({vertexColors:true,roughness:0.86});
-  const glow = new T.MeshStandardMaterial({vertexColors:true,roughness:0.86});
-  glow.onBeforeCompile = shader => {
-    shader.fragmentShader = shader.fragmentShader.replace('#include <emissivemap_fragment>',
-      '#include <emissivemap_fragment>\n\ttotalEmissiveRadiance = vColor.rgb * 0.55;');
-  };
+  const {matte,glow} = library;
   const emissive = new Set([lamp,...Object.values(colors)]);
   const batches = new Map<string,Map<T.Material,Batch>>();
   const transform = new T.Object3D(), normals = new T.Matrix3(), tint = new T.Color();
-  function box(room: string,color: number,x: number,y: number,z: number,w: number,h: number,d: number,angle=0,axis:'x'|'z'='x') {
+  const white = new T.Color(1,1,1);
+  function box(room: string,finish: Finish,color: number,x: number,y: number,z: number,w: number,h: number,d: number,angle=0,axis:'x'|'z'='x') {
     transform.rotation.set(axis==='x'?angle:0,0,axis==='z'?angle:0);
     transform.position.set(x,y,z); transform.scale.set(w,h,d); transform.updateMatrix();
-    const material = textured.has(color) ? plate : emissive.has(color) ? glow : matte;
+    const kind = byId.get(room)!.kind, surface = surfaceFor(kind,finish);
+    const material = emissive.has(color) ? glow : surface ? library.surfaces.get(surface)! : matte;
+    // Shell textures carry their own colour, lightly tinted by the room's.
+    if (material !== glow && shellFinish(finish)) tint.setHex(colors[kind]).lerp(white,0.82);
+    else tint.setHex(color);
     let byMaterial = batches.get(room);
     if (!byMaterial) batches.set(room,byMaterial = new Map());
     let batch = byMaterial.get(material);
     if (!batch) byMaterial.set(material,batch = new Batch());
-    batch.add(transform.matrix,normals.getNormalMatrix(transform.matrix),tint.setHex(color));
+    batch.add(transform.matrix,normals.getNormalMatrix(transform.matrix),tint);
   }
   drawTemplates(geometry,box,id => colors[byId.get(id)!.kind]);
   // Each destination has a coloured floor marker; stations add side stripes.
   for (const room of layout.rooms) {
     if (room.kind === 'corridor' || room.kind === 'stairwell') continue;
     const a = anchor(room), color = colors[room.kind];
-    box(room.id,color,a.x,a.y+0.008,a.z,1.6,0.016,1.6);
-    if (stations.includes(room.kind)) for (const side of [-1,1]) box(room.id,color,a.x+side*0.88,a.y+0.023,a.z,0.09,0.028,2.1);
+    box(room.id,'matte',color,a.x,a.y+0.008,a.z,1.6,0.016,1.6);
+    if (stations.includes(room.kind)) for (const side of [-1,1]) box(room.id,'matte',color,a.x+side*0.88,a.y+0.023,a.z,0.09,0.028,2.1);
   }
   const labels = new Map<string,T.MeshBasicMaterial>();
   const signFace = new T.PlaneGeometry(2.35,0.44);
@@ -105,34 +108,36 @@ export function buildFacility(layout: Layout, surface: T.Texture) {
       label(here.id,roomLabel(ahead),o.x+sign*nx*0.16,o.y+2.78,o.z+sign*nz*0.16,Math.atan2(sign*nx,sign*nz));
     }
     // The amber jambs frame Intake, the way back to base, even after its
-    // bulkhead opens. They belong to both rooms so they show from either side.
-    for (const room of [a.id,b.id]) {
-      if (a.kind === 'intake' || b.kind === 'intake') {
-        for (const side of [-1,1]) {
-          const offset = side*(doorWidth/2-0.03);
-          for (let band=0;band<6;band++) box(room,colors.intake,o.x+nz*offset,o.y+0.26+band*0.4,o.z+nx*offset,nx?0.32:0.06,0.24,nz?0.32:0.06);
-        }
+    // bulkhead opens. They are drawn once, with Intake, and sit 5 mm inside
+    // the doorway edge so they never share a face with the wall.
+    if (a.kind === 'intake' || b.kind === 'intake') {
+      const room = a.kind === 'intake' ? a.id : b.id;
+      for (const side of [-1,1]) {
+        const offset = side*(doorWidth/2-0.035);
+        for (let band=0;band<6;band++) box(room,'matte',colors.intake,o.x+nz*offset,o.y+0.26+band*0.4,o.z+nx*offset,nx?0.32:0.06,0.24,nz?0.32:0.06);
       }
     }
-    for (const side of [-1,1]) box(a.id,0xb69c60,o.x+nz*side*0.8,o.y+0.009,o.z+nx*side*0.8,nx?1.2:0.07,0.018,nz?1.2:0.07);
+    for (const side of [-1,1]) box(a.id,'paint',0xb69c60,o.x+nz*side*0.8,o.y+0.009,o.z+nx*side*0.8,nx?1.2:0.07,0.018,nz?1.2:0.07);
   }
   // The cargo lift: a hazard-striped frame around Intake's pad.
   const intake = layout.rooms.find(r => r.kind === 'intake');
   const lift = intake && anchor(intake);
   if (intake && lift) {
     for (const [dx,dz,w,d] of [[0,-0.86,1.84,0.12],[0,0.86,1.84,0.12],[-0.86,0,0.12,1.84],[0.86,0,0.12,1.84]]) {
-      box(intake.id,0x1c2222,lift.x+dx,lift.y+0.03,lift.z+dz,w,0.06,d);
+      box(intake.id,'metal',0x3a4444,lift.x+dx,lift.y+0.03,lift.z+dz,w,0.06,d);
       const long = w > d ? w : d;
       for (let i=0;i<6;i++) {
         const t = -long/2+(i+0.5)*long/6;
-        box(intake.id,colors.intake,lift.x+dx+(w > d ? t : 0),lift.y+0.062,lift.z+dz+(w > d ? 0 : t),w > d ? 0.14 : 0.12,0.006,w > d ? 0.12 : 0.14);
+        box(intake.id,'matte',colors.intake,lift.x+dx+(w > d ? t : 0),lift.y+0.062,lift.z+dz+(w > d ? 0 : t),w > d ? 0.14 : 0.12,0.006,w > d ? 0.12 : 0.14);
       }
     }
   }
   for (const [room,byMaterial] of batches) {
     for (const [material,batch] of byMaterial) groups.get(room)!.add(new T.Mesh(batch.build(),material));
   }
-  const panel = new T.MeshStandardMaterial({color:0xa96c37,roughness:0.8});
+  // Bulkheads are painted steel plate.
+  const panel = library.surfaces.get('panel')!.clone();
+  panel.vertexColors = false; panel.color.setHex(0xc07a3c); panel.map = panel.map!.clone(); panel.map.repeat.set(1,1);
   const doors = geometry.doors.map(d => {
     const mesh = new T.Mesh(Batch.unit,panel);
     mesh.scale.set(d.w,d.h,d.d); mesh.position.set(d.x,d.y+d.h/2,d.z); root.add(mesh);
@@ -164,7 +169,8 @@ export function buildFacility(layout: Layout, surface: T.Texture) {
   // draw each. Items in rooms the camera cannot see are left out.
   const salvageMeshes = new Map((Object.keys(itemKinds) as ItemKind[]).map(kind => {
     const k = itemKinds[kind], count = spawnSalvage(layout).filter(i => i.kind === kind).length;
-    const mesh = new T.InstancedMesh(Batch.unit,new T.MeshStandardMaterial({color:k.color,roughness:0.55,metalness:0.35,emissive:k.color,emissiveIntensity:0.08}),Math.max(1,count));
+    const metal = kind !== 'board' && kind !== 'toolbox';
+    const mesh = new T.InstancedMesh(Batch.unit,new T.MeshStandardMaterial({color:k.color,roughness:metal ? 0.32 : 0.6,metalness:metal ? 0.85 : 0.2,envMap:metal ? library.reflections ?? null : null,emissive:k.color,emissiveIntensity:0.08}),Math.max(1,count));
     mesh.count = 0; mesh.frustumCulled = false; root.add(mesh);
     return [kind,mesh];
   }));
@@ -196,11 +202,13 @@ export function buildFacility(layout: Layout, surface: T.Texture) {
     const geometries = new Set<T.BufferGeometry>(), materials = new Set<T.Material>();
     root.traverse(item=>{ if (item instanceof T.Mesh) { geometries.add(item.geometry); materials.add(item.material); } });
     geometries.delete(Batch.unit);
+    // The material library is shared with the next facility.
+    for (const shared of [matte,glow,...library.surfaces.values()]) materials.delete(shared);
+    panel.map?.dispose();
     for (const mesh of salvageMeshes.values()) mesh.dispose();
     screenTexture.dispose();
     for (const mat of labels.values()) mat.map?.dispose();
     for (const resource of [...geometries,...materials]) resource.dispose();
-    surface.dispose();
     root.removeFromParent();
   }
   return {root,update,show,dispose,terminal,salvage,lift,rooms:groups.size};

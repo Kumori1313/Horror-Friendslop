@@ -162,8 +162,10 @@ export interface Solid extends Patch { y:number; h:number }
 export interface PlacedSurface extends Surface { room:string }
 export interface Opening extends Point3 { side:Side; a:string; b:string; index:number }
 export interface RoomSolid extends Solid { room:string }
+/** A wall face; `inward` is the sign, along the thin axis, that points into its room. */
+export interface RoomWall extends RoomSolid { inward:number }
 export interface TemplateGeometry {
-  surfaces:PlacedSurface[]; walls:RoomSolid[]; roofs:RoomSolid[]; rails:RoomSolid[];
+  surfaces:PlacedSurface[]; walls:RoomWall[]; roofs:RoomSolid[]; rails:RoomSolid[];
   props:(Solid & {kind:PropKind; room:string})[]; doors:(Solid & {id:string})[]; openings:Opening[];
 }
 
@@ -220,10 +222,14 @@ export function assembleTemplates(rooms:Placement[],links:(TemplateLink & {door?
         for (let i=1;i<levels.length;i++) {
           const low = levels[i-1], high = levels[i];
           const holes:Interval[] = ports.filter(s=>s.y<=low && s.y+doorHeight>=high).map(s=>[s[axis]-doorWidth/2,s[axis]+doorWidth/2]);
+          // Each room's wall sits on its own side of the boundary, so two rooms
+          // never draw surfaces in the same place: their different materials
+          // would flicker through each other. The inner face stays 6 cm in.
+          const inner = face-sign*0.03;
           for (const [a,b] of subtract([f[axis]-f[length]/2,f[axis]+f[length]/2],[...seams,...holes])) {
             const mid = (a+b)/2;
-            g.walls.push({x:room.x+(alongX?mid:face),z:room.z+(alongX?face:mid),
-              w:alongX?b-a:0.12,d:alongX?0.12:b-a,y:room.y+low,h:high-low,room:room.id});
+            g.walls.push({x:room.x+(alongX?mid:inner),z:room.z+(alongX?inner:mid),
+              w:alongX?b-a:0.06,d:alongX?0.06:b-a,y:room.y+low,h:high-low,room:room.id,inward:-sign});
           }
         }
       }

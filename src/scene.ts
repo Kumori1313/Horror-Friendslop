@@ -1,6 +1,7 @@
 import * as T from 'three';
 import { itemName, items, strikeRadius } from './mission.ts';
 import { buildFacility } from './facility-scene.ts';
+import { environment, materialLibrary } from './materials.ts';
 import { anchor, geometryFor, type Layout } from './layout.ts';
 import { surfaceAt } from './room-templates.ts';
 import { portalGraph, visibleRooms, type PortalGraph } from './visibility.ts';
@@ -60,6 +61,10 @@ export function createScene(canvas: HTMLCanvasElement, generated = false) {
     mesh.position.set(x, y, z); scene.add(mesh);
   }
   scene.add(new T.HemisphereLight(0xc0e0dc,0x605648,1.28));
+  // Generated facilities share one material library and one reflection map.
+  // Anisotropic filtering at 2x keeps floors crisp at grazing angles; higher
+  // levels cost noticeably more on software and low-end GPUs.
+  const library = generated ? materialLibrary(Math.min(2,renderer.capabilities.getMaxAnisotropy()),environment(renderer)) : undefined;
   if (generated) {
     const skylight = new T.DirectionalLight(0xe2d8b7,1);
     skylight.position.set(-4,6,2); scene.add(skylight);
@@ -195,7 +200,7 @@ export function createScene(canvas: HTMLCanvasElement, generated = false) {
   function render(state: Snapshot | undefined, self: number, yaw: number, pitch: number, dt: number, layout?: Layout, reducedMotion = false) {
     if (layout && layout !== loaded) {
       facility?.dispose();
-      facility = buildFacility(layout,painted('#c6ccc6','#8e9890'));
+      facility = buildFacility(layout,library!);
       scene.add(facility.root);
       portals = portalGraph(layout,geometryFor(layout));
       loaded = layout;

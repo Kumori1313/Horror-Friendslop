@@ -4,6 +4,7 @@ import { geometryFor, socketGroups, stairwellLayout, walkable } from '../src/lay
 import { assembleTemplates, orient, roomTemplates, surfaceAt, surfaceHeight } from '../src/room-templates.ts';
 import type { TemplateKind } from '../src/room-templates.ts';
 import { Simulation } from '../src/server/simulation.ts';
+import { generateLayout } from '../src/server/generate-layout.ts';
 
 test('stacked rooms have separate supports, and sockets must match in three dimensions',()=>{
   const plan=stairwellLayout(), geometry=geometryFor(plan);
@@ -80,4 +81,21 @@ test('walk from Intake to the upper closet, descend to the tunnel and return',()
   walk('x',0); walk('z',0);
   assert.equal(p.feetY,0);
   assert.equal(sim.roomOf(p),'intake');
+});
+
+test('rooms never draw walls in the same place, so their materials cannot flicker through each other', () => {
+  for (const seed of [0,19,20,77,715,4242]) {
+    const walls = geometryFor(generateLayout(seed)).walls;
+    const overlap = (a: typeof walls[number], b: typeof walls[number]) =>
+      Math.min(a.x+a.w/2,b.x+b.w/2)-Math.max(a.x-a.w/2,b.x-b.w/2) > 1e-6 &&
+      Math.min(a.z+a.d/2,b.z+b.d/2)-Math.max(a.z-a.d/2,b.z-b.d/2) > 1e-6 &&
+      Math.min(a.y+a.h,b.y+b.h)-Math.max(a.y,b.y) > 1e-6;
+    for (let i=0;i<walls.length;i++) for (let j=i+1;j<walls.length;j++) {
+      if (walls[i].room !== walls[j].room) assert.ok(!overlap(walls[i],walls[j]),'seed '+seed+': '+walls[i].room+' and '+walls[j].room+' share wall volume');
+    }
+  }
+  // Each room keeps its wall face 6 cm inside its boundary, as before.
+  const g = geometryFor(stairwellLayout());
+  const north = g.walls.find(w => w.room === 'intake' && w.w > 1 && Math.abs(w.z+2) < 0.1)!;
+  assert.equal(+(north.z+north.d/2).toFixed(6),-1.94);
 });

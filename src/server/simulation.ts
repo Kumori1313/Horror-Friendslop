@@ -126,8 +126,8 @@ export class Simulation {
         const lift = liftOf(layout);
         for (const h of mission.haul) if (h.owner === id) Object.assign(h,{owner:null,loaded:true,...lift});
       } else if (task?.kind === 'extract') {
-        settle(layout,this.state,mission,this.state.players.filter(q => onPad(q,liftOf(layout))).map(q => q.id),false);
-      } else if (task?.kind === 'abandon') settle(layout,this.state,mission,[id],true);
+        settle(layout,this.state,mission,this.state.players.filter(q => onPad(q,liftOf(layout))).map(q => q.id));
+      } else if (task?.kind === 'abandon') settle(layout,this.state,mission,[id]);
       return;
     }
     if (layout && mission && action === 'collect') {

@@ -2,7 +2,7 @@ import { distances, roomLabel } from './layout.ts';
 import type { Layout } from './layout.ts';
 import type { Player, Snapshot } from './room.ts';
 import type { Preferences } from './preferences.ts';
-import { abandonCut, finished, itemName } from './mission.ts';
+import { finished, itemName, lossPercent } from './mission.ts';
 
 const el = (id: string) => document.getElementById(id)!;
 
@@ -82,7 +82,7 @@ export function missionHud(preferences: Preferences) {
       if (sold) {
         for (const item of sold.items) list.append(line(itemName(item.kind),String(item.value)));
         if (!sold.items.length) list.append(line('Nothing loaded','0'));
-        if (sold.deduction) list.append(line('Partner left behind −'+abandonCut*100+'%','−'+sold.deduction,'cut'));
+        if (sold.deduction) list.append(line((sold.lost === 1 ? 'Operator' : sold.lost+' operators')+' left behind −'+lossPercent(sold.lost)+'%','−'+sold.deduction,'cut'));
         list.append(line('Credited',String(sold.credited),'total'));
       } else for (const r of c.receipts) list.append(line('Expedition '+(r.expedition+1),String(r.credited)));
       return;

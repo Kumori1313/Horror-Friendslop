@@ -1,12 +1,12 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { anchor } from '../src/layout.ts';
-import { assignment, items, pack } from '../src/mission.ts';
+import { assignment, items, kept, lossPercent, pack } from '../src/mission.ts';
 import type { Mission } from '../src/mission.ts';
 import type { Player } from '../src/room.ts';
 import { expeditionSeed, facilityValue, liftOf, packSize, spawnSalvage } from '../src/salvage.ts';
 import { generateLayout } from '../src/server/generate-layout.ts';
-import { expeditionsPerContract, newContract, quotaShare } from '../src/server/mission.ts';
+import { expeditionsPerContract, newContract, quotaShare, settle } from '../src/server/mission.ts';
 import { Simulation } from '../src/server/simulation.ts';
 
 function crew(seed = 19, mode: 'solo' | 'coop' = 'coop') {
@@ -127,7 +127,7 @@ test('rescuing a partner before extracting keeps the full haul', () => {
   for (const id of [1,2]) at(player(id),liftOf(sim.layout!));
   sim.act(2,'operate');
   const receipt = mission.contract.receipts[0];
-  assert.deepEqual([receipt.gross,receipt.deduction,receipt.credited,receipt.abandoned],[gross,0,gross,false]);
+  assert.deepEqual([receipt.gross,receipt.deduction,receipt.credited,receipt.lost],[gross,0,gross,0]);
 });
 
 test('extracting alone deducts a fifth of the haul, and the downed partner\'s pack is lost', () => {
@@ -146,7 +146,7 @@ test('extracting alone deducts a fifth of the haul, and the downed partner\'s pa
   assert.equal(receipt.deduction,Math.round(gross*0.2));
   assert.equal(receipt.credited,gross-Math.round(gross*0.2),'100 recovered credits 80');
   assert.equal(receipt.items.length,3,'only the lift is sold; the partner\'s '+left.kind+' stays behind');
-  assert.equal(receipt.abandoned,true);
+  assert.equal(receipt.lost,1);
 });
 
 test('a brief disconnect or leaving never counts as a paid extraction', () => {
@@ -191,4 +191,19 @@ test('refreshing during settlement credits the sale exactly once', () => {
   restored.act(1,'next'); restored.act(2,'next');
   assert.equal(restored.state.mission!.contract.index,1,'two presses start one expedition');
   assert.equal(restored.state.mission!.contract.credited,credited);
+});
+
+test('each operator left behind compounds the penalty instead of adding to it', () => {
+  // x · 0.8^d: five losses still leave a third of the haul, not nothing.
+  assert.deepEqual([0,1,2,3,4,5].map(d => kept(1000,d)),[1000,800,640,512,410,328]);
+  assert.deepEqual([1,2,5].map(lossPercent),[20,36,67]);
+  const {sim,mission,gather,load,loadedValue} = crew();
+  gather(1,3); load(1);
+  const gross = loadedValue(mission);
+  // A larger lobby: two more operators who never reach the lift.
+  sim.state.players.push({...sim.state.players[1],id:3},{...sim.state.players[1],id:4});
+  const receipt = settle(sim.layout!,sim.state,mission,[1]);
+  assert.equal(receipt.lost,3);
+  assert.equal(receipt.credited,Math.round(gross*0.8**3));
+  assert.equal(receipt.deduction,gross-receipt.credited);
 });

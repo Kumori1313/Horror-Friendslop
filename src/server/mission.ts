@@ -1,5 +1,5 @@
 import { anchor, distances, nextWiredBay, type Layout } from '../layout.ts';
-import { abandonCut, distance, items, sameStorey, strikeRadius } from '../mission.ts';
+import { distance, items, kept, sameStorey, strikeRadius } from '../mission.ts';
 import type { Contract, Mission, Receipt } from '../mission.ts';
 import type { Player, Snapshot } from '../room.ts';
 import { expeditionSeed, facilityValue } from '../salvage.ts';
@@ -32,14 +32,15 @@ export function wake(layout: Layout, mission: Mission, room: string) {
   mission.diver = {mode:'quiet',bay:far.id,seconds:6};
 }
 
-// Sell the lift and the packs of the operators extracting. Leaving a downed
-// partner behind deducts a fifth of the haul, and their pack is lost.
-export function settle(layout: Layout, state: Snapshot, mission: Mission, leaving: number[], abandoned: boolean) {
+// Sell the lift and the packs of the operators extracting. Every operator
+// left behind multiplies the haul by 0.8, and their pack is lost.
+export function settle(layout: Layout, state: Snapshot, mission: Mission, leaving: number[]) {
   const sold = items(layout,mission).filter(i => i.loaded || (i.owner !== null && leaving.includes(i.owner)));
   const gross = sold.reduce((sum,i) => sum+i.value,0);
-  const deduction = abandoned ? Math.round(gross*abandonCut) : 0;
+  const lost = state.players.filter(p => !leaving.includes(p.id)).length;
+  const credited = kept(gross,lost);
   const c = mission.contract;
-  const receipt: Receipt = {expedition:c.index,items:sold.map(i => ({kind:i.kind,value:i.value})),gross,deduction,credited:gross-deduction,abandoned};
+  const receipt: Receipt = {expedition:c.index,items:sold.map(i => ({kind:i.kind,value:i.value})),gross,deduction:gross-credited,credited,lost};
   c.receipts.push(receipt);
   c.credited += receipt.credited;
   mission.haul = [];

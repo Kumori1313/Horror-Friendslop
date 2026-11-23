@@ -13,7 +13,7 @@ export type Stage = 'explore' | 'settled' | 'won' | 'lost';
 export type Outcome = 'quota' | 'deadline' | 'wipe' | 'stranded' | 'left';
 export interface Receipt {
   expedition: number; items: {kind: ItemKind; value: number}[];
-  gross: number; deduction: number; credited: number; abandoned: boolean;
+  gross: number; deduction: number; credited: number; lost: number;
 }
 export interface Contract { seed: number; expeditions: number; index: number; layout: number; quota: number; credited: number; receipts: Receipt[] }
 // Salvage that has left its spawn: carried (`owner`), dropped, or loaded on the lift.
@@ -29,7 +29,11 @@ export interface Mission {
   down: { id: number; seconds: number }[];
 }
 export const strikeRadius = 2.4;
-export const abandonCut = 0.2;
+// Each operator who doesn't make it out keeps 80% of what remains, so the
+// crew keeps gross × 0.8^lost and never falls to nothing in a larger lobby.
+export const keptPerLoss = 0.8;
+export const kept = (gross: number, lost: number) => Math.round(gross*keptPerLoss**lost);
+export const lossPercent = (lost: number) => Math.round((1-keptPerLoss**lost)*100);
 export const distance = (a: Point, b: Point) => Math.hypot(a.x-b.x,a.z-b.z);
 export const finished = (stage?: Stage) => stage === 'won' || stage === 'lost';
 // Operators on the gallery above a pad, or the floor below a landing, are on another storey.
@@ -79,7 +83,7 @@ export function assignment(layout: Layout, state: Snapshot, player: Player, obst
   if (carried) return {kind:'load',label:'Load '+carried+(carried === 1 ? ' item' : ' items')};
   if (mission.solo) return {kind:'extract',label:'Extract'};
   // A brief disconnect is not a downed partner: nobody leaves without them.
-  if (partner?.connected && partnerDown) return {kind:'abandon',label:'Extract alone (−'+abandonCut*100+'%)'};
+  if (partner?.connected && partnerDown) return {kind:'abandon',label:'Extract alone (−'+lossPercent(1)+'%)'};
   if (partner?.connected && onPad(partner,liftOf(layout))) return {kind:'extract',label:'Extract crew'};
 }
 

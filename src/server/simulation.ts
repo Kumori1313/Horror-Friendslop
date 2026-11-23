@@ -3,11 +3,13 @@ import type { Action, Aim, Command, Input, Lamp, Player, Snapshot } from '../roo
 import { launchFrom, trajectory } from '../flight.ts';
 import type { Body, Flight } from '../flight.ts';
 
-import { geometryFor, lampSpawn, nearbyDoor, playerRadius, spawnPoints } from '../layout.ts';
+import { geometryFor, nearbyDoor, playerRadius, spawnPoints } from '../layout.ts';
 import type { Layout, Geometry, Rect } from '../layout.ts';
 
 import { obstaclesAt, surfaceAt, surfaceHeight } from '../room-templates.ts';
-import { assignment, finished, nearestPickup, onPad } from '../mission.ts';
+import { assignment, distance, finished, nearestPickup, onPad } from '../mission.ts';
+import { doorReach, home, intakeDoor, intakeEntry, outdoors, placeOf, riftReach } from '../places.ts';
+import type { Place, Stand } from '../places.ts';
 import { bodyOf, expeditionSeed, itemKinds, liftOf, spawnSalvage } from '../salvage.ts';
 import { generateLayout } from './generate-layout.ts';
 import { advanceMission, newMission, settle, wake } from './mission.ts';
@@ -26,15 +28,50 @@ export function moveOperator(p: Player, input: Input, dt: number, geometry: Geom
 
 function stepTo(p: Player, x: number, z: number, g: Geometry | undefined, opened: readonly string[]) {
   if (x === p.x && z === p.z) return;
-  if (g) {
-    const support = surfaceAt(g,x,z,p.feetY ?? 0);
-    if (!support) return;
-    const feet = surfaceHeight(support,x,z);
-    if (!clearAt(x,z,playerRadius,obstaclesAt(g,feet,opened))) return;
-    p.feetY = feet;
-  } else if (!clearAt(x,z,playerRadius,walls)) return;
-  p.x = x;
-  p.z = z;
+  if (!g) {
+    if (!clearAt(x,z,playerRadius,walls)) return;
+    p.x = x; p.z = z;
+    return;
+  }
+  const feet = p.feetY ?? 0, support = surfaceAt(g,x,z,feet);
+  if (support) {
+    const to = surfaceHeight(support,x,z);
+    if (!standable(g,x,z,to,opened)) return;
+    Object.assign(p,{x,z,feetY:to});
+    return;
+  }
+  // Off an edge, such as the side of a ramp: drop to the floor below,
+  // landing a little way out from the ledge so the body clears its side.
+  const dx = Math.sign(x-p.x), dz = Math.sign(z-p.z);
+  for (const extra of [0,0.1,0.2,0.3,0.4,0.5]) {
+    const cx = x+dx*extra, cz = z+dz*extra, below = floorBelow(g,cx,cz,feet);
+    if (below === undefined) return;
+    if (standable(g,cx,cz,below,opened)) { Object.assign(p,{x:cx,z:cz,feetY:below}); return; }
+  }
+}
+
+// Clear of walls, props and closed bulkheads, and of the solid side of any
+// ramp, stair flight or raised floor that rises more than a step above the
+// feet within the operator's reach. Ramps and stairs are solid underneath.
+function standable(g: Geometry, x: number, z: number, feet: number, opened: readonly string[]) {
+  if (!clearAt(x,z,playerRadius,obstaclesAt(g,feet,opened))) return false;
+  for (const s of g.surfaces) {
+    const cx = Math.max(s.x-s.w/2,Math.min(s.x+s.w/2,x)), cz = Math.max(s.z-s.d/2,Math.min(s.z+s.d/2,z));
+    if ((cx-x)**2+(cz-z)**2 >= playerRadius*playerRadius) continue;
+    if (surfaceHeight(s,cx,cz) > feet+0.32 && Math.min(s.y,s.y+(s.rise ?? 0))-0.13 < feet+1.75) return false;
+  }
+  return true;
+}
+
+// The highest floor below the feet at this point, if any.
+function floorBelow(g: Geometry, x: number, z: number, feet: number) {
+  let best: number | undefined;
+  for (const s of g.surfaces) {
+    if (Math.abs(x-s.x) > s.w/2+1e-6 || Math.abs(z-s.z) > s.d/2+1e-6) continue;
+    const y = surfaceHeight(s,x,z);
+    if (y < feet && (best === undefined || y > best)) best = y;
+  }
+  return best;
 }
 
 // Where a carried flashlight sits: ahead and to the right, slid back toward
@@ -69,19 +106,40 @@ function advance<T extends {flight?: Flight}>(thing: T, dt: number) {
   if (thing.flight.t >= thing.flight.d) delete thing.flight;
 }
 
+// Where an operator stands on arriving somewhere: side by side, by seat.
+const beside = (at: Stand, id: number): Stand => ({...at,x:at.x+(id === 1 ? -0.6 : 0.6)*Math.cos(at.yaw),z:at.z-(id === 1 ? -0.6 : 0.6)*Math.sin(at.yaw)});
+
 export class Simulation {
   layout?: Layout;
-  geometry?: Geometry;
+  // A contract starts in the home dimension. Tests of the facility itself
+  // can start the first expedition with everyone already inside Intake.
+  private readonly start: 'home' | 'inside';
 
-  constructor(layout?: Layout, mode: 'solo' | 'coop' = 'coop') {
+  constructor(layout?: Layout, mode: 'solo' | 'coop' = 'coop', start: 'home' | 'inside' = 'home') {
     this.layout = layout;
+    this.start = layout && !layout.tour ? start : 'inside';
     if (layout) {
-      this.geometry = geometryFor(layout);
       this.state.opened = [];
       if (!layout.tour) this.state.mission = newMission(layout);
       if (this.state.mission && mode === 'solo') this.state.mission.solo = true;
+      if (this.state.mission && this.start === 'home') {
+        this.state.mission.stage = 'home';
+        Object.assign(this.state.lamp,{...home().lamp,y:0.14,place:'home'});
+      }
     }
   }
+
+  // The facility's collision geometry, built the first time anyone needs it,
+  // so a crew waiting at home never builds the next expedition.
+  get geometry(): Geometry | undefined { return this.layout && geometryFor(this.layout); }
+
+  // The geometry of the place an operator, item or the flashlight is in.
+  geometryAt(place: Place): Geometry | undefined {
+    if (place === 'home') return home().geometry;
+    if (place === 'outside') return this.layout && outdoors(this.layout.seed).geometry;
+    return this.geometry;
+  }
+  openedAt(place: Place): readonly string[] { return place === 'inside' ? this.state.opened ?? [] : []; }
   state: Snapshot = { round: crypto.randomUUID(), update: 0, players: [], lamp: { x: 0, y: 0.14, z: 2, yaw: 0, pitch: 0, on: true, owner: null } };
   inputs = new Map<number, Input>();
 
@@ -89,14 +147,16 @@ export class Simulation {
     const seats = this.state.mission?.solo || this.layout?.tour ? [1] : [1,2];
     const id = seats.find(seat => (!assignedSeat || seat === assignedSeat) && !this.inputs.has(seat));
     if (!id) return;
-    this.state.players.push({ id, ...(this.geometry ? {feetY:0} : {}), connected: true, ...spawnPoints[id-1], yaw: 0, pitch: -0.12, slots: Array(hotbarSize).fill(null), hand: 0 });
+    const athome = this.start === 'home';
+    const at = athome ? home().spawns[id-1] : {...spawnPoints[id-1],y:0,yaw:0};
+    this.state.players.push({ id, ...(this.layout ? {feetY:0} : {}), connected: true, x: at.x, z: at.z, yaw: 0, pitch: -0.12, slots: Array(hotbarSize).fill(null), hand: 0, ...(athome ? {place:'home' as const} : {}) });
     this.inputs.set(id, { forward: 0, right: 0, yaw: 0, pitch: -0.12 });
     return id;
   }
 
   leave(id: number) {
     const holder = this.state.players.find(p => p.id === id);
-    if (this.state.lamp.owner === id) Object.assign(this.state.lamp,{owner:null,y:(holder?.feetY ?? 0)+0.14,pitch:0,stowed:false});
+    if (this.state.lamp.owner === id) Object.assign(this.state.lamp,{owner:null,y:(holder?.feetY ?? 0)+0.14,pitch:0,stowed:false,place:holder && placeOf(holder)});
     const mission = this.state.mission;
     // Leaving never sells anything: the contract simply ends.
     if (mission && !finished(mission.stage)) { mission.stage = 'lost'; mission.outcome = 'left'; }
@@ -116,25 +176,64 @@ export class Simulation {
         p.pitch = input.pitch;
         continue;
       }
-      moveOperator(p,input,dt,this.geometry,this.state.opened);
+      const place = placeOf(p);
+      moveOperator(p,input,dt,this.geometryAt(place),this.openedAt(place));
+      // Walking into the home rift goes through it.
+      if (mission && place === 'home' && distance(p,home().rift) <= riftReach) this.depart(p);
       if (this.state.lamp.owner === p.id) this.hold(p);
     }
     advance(this.state.lamp,dt);
     for (const h of mission?.haul ?? []) advance(h,dt);
-    if (mission && this.layout) advanceMission(this.layout,this.state,mission,dt,p => this.roomOf(p));
+    if (mission?.stage === 'explore' && this.layout) advanceMission(this.layout,this.state,mission,dt,p => this.roomOf(p));
   }
 
+  // The facility room an operator stands in; nothing outside the facility.
   roomOf(p: Player) {
-    return this.geometry && surfaceAt(this.geometry,p.x,p.z,p.feetY ?? 0)?.room;
+    const g = this.geometry;
+    return g && placeOf(p) === 'inside' ? surfaceAt(g,p.x,p.z,p.feetY ?? 0)?.room : undefined;
   }
 
   // Everything an operator at this height can bump into, with open bulkheads removed.
   solids(p: Player): Rect[] {
-    return this.geometry ? obstaclesAt(this.geometry,p.feetY ?? 0,this.state.opened) : walls;
+    const place = placeOf(p), g = this.geometryAt(place);
+    return g ? obstaclesAt(g,p.feetY ?? 0,this.openedAt(place)) : walls;
   }
 
   hold(p: Player) {
-    Object.assign(this.state.lamp,carriedLamp(p,this.solids(p)));
+    Object.assign(this.state.lamp,carriedLamp(p,this.solids(p)),this.state.mission ? {place:placeOf(p)} : {});
+  }
+
+  // Move an operator to another place, facing the arrival heading. Their
+  // client turns its view when it sees `transit` change.
+  private moveTo(p: Player, place: Place, at: Stand) {
+    Object.assign(p,{place,x:at.x,z:at.z,feetY:at.y,yaw:at.yaw});
+    p.transit = {n:(p.transit?.n ?? 0)+1,yaw:at.yaw};
+    const input = this.inputs.get(p.id);
+    if (input) this.inputs.set(p.id,{...input,yaw:at.yaw});
+    if (this.state.lamp.owner === p.id) this.hold(p);
+  }
+
+  // Through the home rift to the outdoor map. The first operator through
+  // starts the expedition; the arrival rift closes once everyone is out.
+  private depart(p: Player) {
+    const mission = this.state.mission;
+    if (!mission || !this.layout || (mission.stage !== 'home' && mission.arrival !== 'open')) return;
+    if (mission.stage === 'home') { mission.stage = 'explore'; mission.arrival = 'open'; }
+    this.moveTo(p,'outside',outdoors(this.layout.seed).spawns[p.id-1] ?? outdoors(this.layout.seed).spawns[0]);
+    if (this.state.players.every(q => placeOf(q) !== 'home')) mission.arrival = 'closed';
+  }
+
+  // The façade door and Intake's door to the outside, within reach.
+  passage(p: Player): 'enter' | 'leave' | undefined {
+    if (!this.state.mission || !this.layout || this.state.mission.stage !== 'explore') return;
+    return passageFor(p,this.layout.seed);
+  }
+
+  // After a sale everyone is back home, with the flashlight in its place.
+  private returnHome() {
+    for (const q of this.state.players) this.moveTo(q,'home',home().spawns[q.id-1] ?? home().spawns[0]);
+    Object.assign(this.state.lamp,{...home().lamp,y:0.14,yaw:0,pitch:0,owner:null,on:true,stowed:false,place:'home'});
+    delete this.state.lamp.flight;
   }
 
   // Keep every hotbar in step with what its operator actually carries. A
@@ -167,26 +266,26 @@ export class Simulation {
     const kind = item === lampSlot ? 'lamp' : layout && spawnSalvage(layout).find(s => s.id === item)?.kind;
     if (!kind) return;
     let rest = feet, flight: Flight | undefined;
-    const body: Body = bodyOf(kind);
-    if (aim && this.geometry) {
+    const body: Body = bodyOf(kind), place = placeOf(p), g = this.geometryAt(place);
+    if (aim && g) {
       // The aim travels with the command, so the throw goes where the thrower
       // was looking even if their latest view hasn't reached the host yet.
-      const opened = this.state.opened ?? [];
+      const opened = this.openedAt(place);
       const speed = throwSpeed(aim.power,kind !== 'lamp' && !!itemKinds[kind].heavy);
-      const start = launchFrom(this.geometry,opened,p,{fx:-Math.sin(aim.yaw),fz:-Math.cos(aim.yaw),up:Math.sin(aim.pitch),speed},body);
-      const path = trajectory(this.geometry,opened,start,body,feet);
+      const start = launchFrom(g,opened,p,{fx:-Math.sin(aim.yaw),fz:-Math.cos(aim.yaw),up:Math.sin(aim.pitch),speed},body);
+      const path = trajectory(g,opened,start,body,feet);
       rest = path.rest;
       if (path.duration > 0) flight = {...start,t:0,d:path.duration};
     }
     this.release(p,item);
     if (item === lampSlot) {
       const lamp: Lamp = this.state.lamp;
-      Object.assign(lamp,{owner:null,x:rest.x,y:rest.y+body.h,z:rest.z,pitch:0,stowed:false});
+      Object.assign(lamp,{owner:null,x:rest.x,y:rest.y+body.h,z:rest.z,pitch:0,stowed:false},mission ? {place} : {});
       if (flight) lamp.flight = flight; else delete lamp.flight;
     } else if (mission) {
       const h = mission.haul.find(entry => entry.id === item);
       if (!h) return;
-      Object.assign(h,{owner:null,x:rest.x,y:rest.y,z:rest.z});
+      Object.assign(h,{owner:null,x:rest.x,y:rest.y,z:rest.z,place});
       if (flight) h.flight = flight; else delete h.flight;
     }
   }
@@ -201,6 +300,8 @@ export class Simulation {
       if (action === 'next') this.nextExpedition();
       return;
     }
+    // The receipt is read at home; the rift there starts the next expedition.
+    if (mission?.stage === 'home' && action !== 'select' && action !== 'take' && action !== 'drop' && action !== 'throw' && action !== 'toggle') return;
     if (mission?.down.some(d => d.id === id)) return;
     const layout = this.layout;
     if (layout && mission && action === 'operate') {
@@ -212,6 +313,7 @@ export class Simulation {
       } else if (task?.kind === 'extract') {
         settle(layout,this.state,mission,this.state.players.filter(q => onPad(q,liftOf(layout))).map(q => q.id));
       } else if (task?.kind === 'abandon') settle(layout,this.state,mission,[id]);
+      if (mission.stage !== 'explore') this.returnHome();
       return;
     }
     const lamp = this.state.lamp;
@@ -246,9 +348,15 @@ export class Simulation {
       }
       return;
     }
-    if (action === 'open-door' && this.geometry && this.state.opened) {
-      const door = nearbyDoor(p,this.geometry,this.state.opened);
-      if (door) this.state.opened.push(door.id);
+    if (action === 'open-door') {
+      // R uses the nearest door: the façade, Intake's outer door, or a bulkhead.
+      const way = this.passage(p);
+      if (way === 'enter') this.moveTo(p,'inside',beside(intakeEntry,p.id));
+      else if (way === 'leave' && this.layout) this.moveTo(p,'outside',beside(outdoors(this.layout.seed).exit,p.id));
+      else if (placeOf(p) === 'inside' && this.geometry && this.state.opened) {
+        const door = nearbyDoor(p,this.geometry,this.state.opened);
+        if (door) this.state.opened.push(door.id);
+      }
       return;
     }
     if (lamp.owner === id && action === 'toggle') {
@@ -256,7 +364,8 @@ export class Simulation {
     }
   }
 
-  // Start the contract's next facility with the same crew and round.
+  // After the receipt, plan the contract's next facility. The crew stays home
+  // until someone steps into the rift; nothing of the facility is built yet.
   nextExpedition() {
     const mission = this.state.mission;
     if (!mission || mission.stage !== 'settled') return;
@@ -264,14 +373,17 @@ export class Simulation {
     c.index++;
     c.layout = expeditionSeed(c.seed,c.index);
     this.layout = generateLayout(c.layout);
-    this.geometry = geometryFor(this.layout);
     this.state.opened = [];
-    Object.assign(mission,{stage:'explore',haul:[],down:[],awake:false,diver:{mode:'dormant',bay:'',seconds:0}});
-    Object.assign(this.state.lamp,{...lampSpawn,y:0.14,yaw:0,pitch:0,owner:null,on:true,stowed:false});
-    delete this.state.lamp.flight;
-    for (const q of this.state.players) {
-      Object.assign(q,{...spawnPoints[q.id-1],feetY:0,yaw:0,pitch:-0.12,slots:Array(hotbarSize).fill(null),hand:0});
-      this.inputs.set(q.id,{forward:0,right:0,yaw:0,pitch:-0.12});
-    }
+    Object.assign(mission,{stage:'home',haul:[],down:[],awake:false,diver:{mode:'dormant',bay:'',seconds:0}});
+    delete mission.arrival;
+    for (const q of this.state.players) Object.assign(q,{slots:Array(hotbarSize).fill(null),hand:0});
   }
+}
+
+// Which door an operator can use from where they stand: the façade door
+// from outside, or Intake's outer door from inside.
+export function passageFor(p: Player, seed: number): 'enter' | 'leave' | undefined {
+  const place = placeOf(p);
+  if (place === 'outside' && distance(p,outdoors(seed).door) <= doorReach) return 'enter';
+  if (place === 'inside' && Math.abs(p.feetY ?? 0) < 1 && distance(p,intakeDoor) <= doorReach) return 'leave';
 }

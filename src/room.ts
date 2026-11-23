@@ -1,6 +1,7 @@
 import type { Layout, Rect } from './layout.ts';
 import type { Mission } from './mission.ts';
 import type { Flight } from './flight.ts';
+import type { Place } from './places.ts';
 export const walls = [
   { x: -5, z: 0, w: 0.25, d: 14 }, { x: 5, z: 0, w: 0.25, d: 14 },
   { x: 0, z: -7, w: 10, d: 0.25 }, { x: 0, z: 7, w: 10, d: 0.25 },
@@ -10,10 +11,13 @@ export interface Point { x: number; z: number }
 export interface Input { forward: number; right: number; yaw: number; pitch: number }
 // `slots` is the hotbar: salvage ids, `lampSlot` for the flashlight, or null.
 // `hand` is the selected slot.
-export interface Player extends Point { feetY?: number; connected: boolean; id: number; yaw: number; pitch: number; slots?: (string | null)[]; hand?: number }
+// `place` is where the operator is (see places.ts). `transit` counts moves
+// between places and gives the heading to face on arrival, so the client can
+// turn its own view.
+export interface Player extends Point { feetY?: number; connected: boolean; id: number; yaw: number; pitch: number; slots?: (string | null)[]; hand?: number; place?: Place; transit?: {n: number; yaw: number} }
 // A carried flashlight is `stowed` (clipped to the chest, dimmer) when its
 // holder has another slot selected. `flight` is set while it is thrown.
-export interface Lamp extends Point { owner: number | null; on: boolean; y: number; yaw: number; pitch: number; stowed?: boolean; flight?: Flight }
+export interface Lamp extends Point { owner: number | null; on: boolean; y: number; yaw: number; pitch: number; stowed?: boolean; flight?: Flight; place?: Place }
 export interface Snapshot { round: string; update: number; players: Player[]; lamp: Lamp; opened?: string[]; mission?: Mission }
 // `take` picks up the nearest item, the flashlight included; `drop` and
 // `throw` act on the selected slot; `select` chooses a slot.
@@ -62,6 +66,7 @@ export function clearAt(x: number, z: number, radius: number, obstacles: readonl
 }
 
 export function canTake(p: Player, lamp: Lamp, obstacles: readonly Rect[] = walls) {
+  if ((lamp.place ?? 'inside') !== (p.place ?? 'inside')) return false;
   if (p.feetY !== undefined && Math.abs(lamp.y-0.14-p.feetY)>1) return false;
   if (lamp.owner !== null || lamp.flight || Math.hypot(p.x - lamp.x, p.z - lamp.z) > 2 || freeSlot(p) < 0) return false;
   for (let i = 1; i <= 12; i++) {

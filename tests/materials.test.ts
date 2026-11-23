@@ -64,9 +64,9 @@ function flushFaces(layout: Layout) {
   const g = geometryFor(layout), kind = new Map(layout.rooms.map(r => [r.id,r.kind]));
   type Box = {look:string; lo:number[]; hi:number[]};
   const boxes: Box[] = [];
-  drawTemplates(g,(room,finish,color,x,y,z,w,h,d,angle) => {
+  drawTemplates(g,(room,finish,color,x,y,z,w,h,d,angle,axis) => {
     const shell = ['wall','floor','ceiling','grate','ramp'].includes(finish);
-    if (!angle) boxes.push({look:finish+':'+color+(shell ? ':'+kind.get(room) : ''),lo:[x-w/2,y-h/2,z-d/2],hi:[x+w/2,y+h/2,z+d/2]});
+    if (!angle && axis !== 'wedge') boxes.push({look:finish+':'+color+(shell ? ':'+kind.get(room) : ''),lo:[x-w/2,y-h/2,z-d/2],hi:[x+w/2,y+h/2,z+d/2]});
   },() => 0);
   // A point a player could see from: above some floor, below its ceiling.
   const air = (q: number[]) => g.surfaces.some(f => Math.abs(q[0]-f.x) < f.w/2 && Math.abs(q[2]-f.z) < f.d/2 && q[1] > Math.min(f.y,f.y+(f.rise ?? 0))-0.01 && q[1] < Math.max(f.y,f.y+(f.rise ?? 0))+3.7);
@@ -93,4 +93,19 @@ function flushFaces(layout: Layout) {
 test('no two materials are drawn flush in the same plane where a player can see them', () => {
   for (const seed of [0,1,19,20,77,187,715,4242]) assert.deepEqual(flushFaces(generateLayout(seed)).slice(0,3),[],'seed '+seed);
   assert.deepEqual(flushFaces(stairwellLayout()).slice(0,3),[],'stairwell walkthrough');
+});
+
+test('the solid fill under a ramp or stair flight stays inside its sides', () => {
+  for (const layout of [stairwellLayout(),generateLayout(19),generateLayout(77)]) {
+    const g = geometryFor(layout), drawn: {room: string; x: number; z: number; w: number; d: number; angle?: number; axis?: string}[] = [];
+    drawTemplates(g,(room,finish,color,x,y,z,w,h,d,angle,axis) => drawn.push({room,x,z,w,d,angle,axis}),() => 0);
+    for (const s of g.surfaces.filter(f => f.rise)) {
+      const across = s.along ? s.d : s.w;
+      const wedge = drawn.find(b => b.axis === 'wedge' && Math.abs(b.x-s.x) < 0.01 && Math.abs(b.z-s.z) < 0.01)!;
+      assert.ok(wedge,'a fill under '+s.room);
+      // A wedge's local width runs across the slope; the slab and treads span the full width.
+      assert.ok(wedge.w <= across-0.003,s.room+': fill '+wedge.w+' wide under a '+across+' m '+(s.stairs ? 'flight' : 'ramp'));
+      assert.ok(wedge.d <= (s.along ? s.w : s.d)-0.003,s.room+': fill stops short of the landing');
+    }
+  }
 });

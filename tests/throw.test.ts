@@ -18,7 +18,7 @@ function random(seed: number) {
   return () => ((n = (Math.imul(n,1664525)+1013904223) >>> 0) / 4294967296);
 }
 function crew(seed = 19) {
-  const sim = new Simulation(generateLayout(seed));
+  const sim = new Simulation(generateLayout(seed),'coop','inside');
   sim.join(); sim.join();
   const player = (id: number) => sim.state.players.find(p => p.id === id)!;
   const at = (p: Player, to: Point3) => Object.assign(p,{x:to.x,z:to.z,feetY:to.y});

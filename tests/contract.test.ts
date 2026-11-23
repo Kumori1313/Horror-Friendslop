@@ -9,9 +9,10 @@ import { expeditionSeed, facilityValue, liftOf, spawnSalvage } from '../src/salv
 import { generateLayout } from '../src/server/generate-layout.ts';
 import { expeditionsPerContract, newContract, quotaShare, settle } from '../src/server/mission.ts';
 import { Simulation } from '../src/server/simulation.ts';
+import { goInside } from './travel.ts';
 
 function crew(seed = 19, mode: 'solo' | 'coop' = 'coop') {
-  const sim = new Simulation(generateLayout(seed),mode);
+  const sim = new Simulation(generateLayout(seed),mode,'inside');
   sim.join(); if (mode === 'coop') sim.join();
   const mission = sim.state.mission!;
   const at = (p: Player, to: {x: number; y: number; z: number}) => Object.assign(p,{x:to.x,z:to.z,feetY:to.y});
@@ -87,6 +88,8 @@ test('hauling enough across expeditions meets the quota and wins the contract', 
   assert.equal(first.credited,facilityValue(sim.layout!));
   assert.equal(first.deduction,0);
   sim.act(2,'next');
+  assert.equal(mission.stage,'home','the crew waits at home for the rift');
+  goInside(sim);
   assert.equal(mission.contract.index,1);
   assert.equal(sim.layout!.seed,expeditionSeed(mission.contract.seed,1),'a fresh facility');
   assert.equal(sim.state.round,round,'the same crew session');
@@ -96,7 +99,7 @@ test('hauling enough across expeditions meets the quota and wins the contract', 
   while (stage() === 'explore') {
     gather(1); load(1);
     at(player(2),liftOf(sim.layout!)); sim.act(1,'operate');
-    if (stage() === 'settled') sim.act(1,'next');
+    if (stage() === 'settled') { sim.act(1,'next'); goInside(sim); }
   }
   assert.equal(mission.stage,'won');
   assert.equal(mission.outcome,'quota');
@@ -109,7 +112,7 @@ test('missing the quota by the last expedition loses the contract', () => {
   for (let i=0;i<expeditionsPerContract;i++) {
     for (const id of [1,2]) at(player(id),liftOf(sim.layout!));
     sim.act(1,'operate');
-    if (i < expeditionsPerContract-1) { assert.equal(mission.stage,'settled'); sim.act(1,'next'); }
+    if (i < expeditionsPerContract-1) { assert.equal(mission.stage,'settled'); sim.act(1,'next'); goInside(sim); }
   }
   assert.deepEqual([mission.stage,mission.outcome,mission.contract.credited],['lost','deadline',0]);
   assert.equal(mission.contract.receipts.length,expeditionsPerContract);

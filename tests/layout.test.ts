@@ -111,7 +111,7 @@ test('the fallback is playable, and overlapping or disconnected plans are reject
 
 test('closed bulkheads stop movement; opening one changes authoritative collision for both seats', () => {
   const plan = generateLayout(19), g = geometryFor(plan);
-  const sim = new Simulation(plan);
+  const sim = new Simulation(plan,'coop','inside');
   const id = sim.join()!, second = sim.join()!;
   const d = g.doors[0];
   assert.deepEqual([d.x,d.z],[0,-2]);
@@ -152,7 +152,7 @@ test('a route can stop near a tight goal and keep its wide clearance', () => {
 test('an operator walks the planned route through doors and stairs to loot rooms and back to base', () => {
   for (const seed of [19,20,715,4242]) {
     const plan = generateLayout(seed);
-    const sim = new Simulation(plan,'solo');
+    const sim = new Simulation(plan,'solo','inside');
     sim.join(1);
     const loot = plan.rooms.filter(r => roomTemplates[r.template].loot).slice(0,2);
     for (const room of [...loot,plan.rooms.find(r => r.kind === 'intake')!]) {

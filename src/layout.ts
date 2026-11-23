@@ -4,7 +4,7 @@ import type { Point } from './room.ts';
 import { assembleTemplates, cell, corridorKinds, destinationPool, isCorridor, orient, roomTemplates, socketAt, storey, surfaceAt, surfaceHeight, obstaclesAt } from './room-templates.ts';
 import type { PlacedSurface, Placement, Point3, Solid, TemplateGeometry, TemplateKind, TemplateLink } from './room-templates.ts';
 
-export const generatorVersion = 4;
+export const generatorVersion = 5;
 export const playerRadius = 0.25;
 export interface Rect extends Point { w: number; d: number }
 export type Kind = Exclude<TemplateKind,typeof corridorKinds[number]> | 'corridor';

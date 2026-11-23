@@ -14,6 +14,8 @@ import type { Action, Command, Input, Player, Ticket, Snapshot } from './room.ts
 import { bindDrag } from './touch.ts';
 import { createScene } from './scene.ts';
 import { Prediction } from './prediction.ts';
+import { home, outdoors, placeNames, placeOf, type Place } from './places.ts';
+import { passageFor } from './server/simulation.ts';
 
 function element<T extends HTMLElement>(id: string) {
   return document.getElementById(id) as T;
@@ -44,6 +46,12 @@ function start(render: ReturnType<typeof createScene>, mode?: Crew | 'solo', sce
   let prediction: Prediction | undefined;
   const frozen = (s: Snapshot) => !!s.mission && (finished(s.mission.stage) || s.mission.stage === 'settled' || s.mission.down.some(d => d.id === id));
   let layout: Layout | undefined, geometry: Geometry | undefined;
+  // This operator's place, and the collision geometry for it. The facility's
+  // is built only once someone is inside it.
+  let place: Place = 'inside', lastTransit: number | undefined;
+  const placeGeometry = (at: Place): Geometry | undefined => !layout ? undefined : at === 'home' ? home().geometry :
+    at === 'outside' ? outdoors(layout.seed).geometry : geometryFor(layout);
+  const openedHere = (s: Snapshot) => place === 'inside' ? s.opened ?? [] : [];
   const doorButton = element<HTMLButtonElement>('open-door');
   const { preferences, open: openSettings } = bindPreferences(pause);
   const hud = missionHud(preferences);
@@ -255,12 +263,16 @@ function start(render: ReturnType<typeof createScene>, mode?: Crew | 'solo', sce
     status.textContent = solo ? 'Solo operator' : 'Operator ' + id + '  ·  ' + s.players.filter(player => player.connected).length + '/2 online';
     const l = s.lamp;
     const holding = l.owner === id;
-    const opened = s.opened ?? [];
-    const door = geometry && nearbyDoor(p,geometry,opened);
+    const opened = openedHere(s);
+    const door = place === 'inside' && geometry ? nearbyDoor(p,geometry,opened) : undefined;
     const down = s.mission?.down.some(d => d.id === id);
-    doorButton.hidden = !door || !!down;
+    // The façade door from outside, or Intake's outer door from inside.
+    const way = layout && s.mission?.stage === 'explore' && !down ? passageFor(p,layout.seed) : undefined;
+    doorButton.hidden = (!door && !way) || !!down;
+    doorButton.textContent = way === 'enter' ? 'Enter facility' : way === 'leave' ? 'Leave facility' : 'Open bulkhead';
     const solids = geometry ? solidsAt(geometry,p.feetY ?? 0,opened) : walls;
-    const here = layout && geometry ? roomAt(layout,geometry,p) : undefined;
+    const here = layout && geometry && place === 'inside' ? roomAt(layout,geometry,p) : undefined;
+    const riftOpen = place === 'home' && (s.mission?.stage === 'home' || s.mission?.arrival === 'open');
     const task = layout && assignment(layout,s,p,solids);
     operate.hidden = !task;
     if (task) operate.textContent = task.label;
@@ -280,7 +292,7 @@ function start(render: ReturnType<typeof createScene>, mode?: Crew | 'solo', sce
       }
       hud.update(layout,s,p,here?.id,!brief.hidden);
     }
-    if (layout) element('sector').textContent = here ? roomLabel(here) : 'Corridor';
+    if (layout) element('sector').textContent = place !== 'inside' ? placeNames[place] : here ? roomLabel(here) : 'Corridor';
     if (touchMode) {
       take.hidden = !pick;
       take.textContent = 'Pick up '+pickName;
@@ -296,10 +308,12 @@ function start(render: ReturnType<typeof createScene>, mode?: Crew | 'solo', sce
     else if (!playing) prompt.textContent = touchMode ? 'Tap the room to resume' : 'Click the room to resume';
     else if (task) prompt.textContent = touchMode ? task.label : 'Q  '+task.label;
     else if (down) prompt.textContent = 'Waiting for rescue';
+    else if (way) prompt.textContent = (touchMode ? '' : 'R  ')+(way === 'enter' ? 'Enter the facility' : 'Leave the facility');
     else if (door) prompt.textContent = touchMode ? 'Bulkhead within reach' : 'R  Open bulkhead';
     else if (pick) prompt.textContent = touchMode ? pickName[0].toUpperCase()+pickName.slice(1)+' within reach' : 'E  Pick up '+pickName;
     else if (held) prompt.textContent = touchMode ? 'Holding the '+held : 'X  Drop '+held+'   ·   Hold T or click  Throw'+(holding ? '   ·   F  Switch '+(l.on ? 'off' : 'on') : '');
     else if (holding) prompt.textContent = touchMode ? 'The flashlight is clipped on' : 'F  Switch the clipped flashlight '+(l.on ? 'off' : 'on');
+    else if (riftOpen) prompt.textContent = s.mission?.stage === 'home' ? 'Walk into the rift to start the expedition' : 'Walk into the rift to follow your crew';
     else if (l.owner) prompt.textContent = 'Operator ' + l.owner + ' carries the flashlight';
     else prompt.textContent = '';
     diagnostics?.update(s,layout,network?.metrics,crew,delay);
@@ -314,7 +328,7 @@ function start(render: ReturnType<typeof createScene>, mode?: Crew | 'solo', sce
       }
       if (plan && (!layout || plan.seed !== layout.seed || plan.version !== layout.version)) {
         layout = plan;
-        geometry = geometryFor(plan);
+        geometry = undefined;
         element('sector').hidden = false;
         element('brief-type').textContent = plan.tour ? 'Stairwell playtest' : 'Salvage contract';
         // A new expedition puts everyone back at Intake, facing its bulkhead.
@@ -327,6 +341,17 @@ function start(render: ReturnType<typeof createScene>, mode?: Crew | 'solo', sce
     snapshot(snapshot, first) {
       state = snapshot;
       const auth = snapshot.players.find(p => p.id === id);
+      place = auth && snapshot.mission ? placeOf(auth) : 'inside';
+      geometry = placeGeometry(place);
+      // Moving between places turns the view to face the way in.
+      const moves = auth?.transit?.n ?? 0;
+      if (auth && moves !== lastTransit) {
+        if (lastTransit !== undefined && !first && auth.transit) {
+          yaw = auth.transit.yaw; pitch = -0.12;
+          prediction?.reset(auth,performance.now());
+        }
+        lastTransit = moves;
+      }
       if (prediction && auth) {
         if (first || !prediction.self) prediction.reset(auth,performance.now());
         else prediction.correct(auth,performance.now(),frozen(snapshot),geometry);
@@ -387,7 +412,7 @@ function start(render: ReturnType<typeof createScene>, mode?: Crew | 'solo', sce
       if (now-lastSent >= 33) { input(); lastSent = now; }
     }
     if (playing && !document.hidden) soloSession?.tick(dt);
-    if (prediction && state) prediction.step(now,dt,controls(),geometry,state.opened ?? [],frozen(state));
+    if (prediction && state) prediction.step(now,dt,controls(),geometry,openedHere(state),frozen(state));
     if (charging !== undefined) (charge.firstElementChild as HTMLElement).style.width = power()*100+'%';
     const shown = state && withHand(state);
     render(prediction && shown ? prediction.view(shown,id,geometry) : shown,id,yaw,pitch,dt,layout,preferences.reducedMotion);

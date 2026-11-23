@@ -4,6 +4,7 @@ import type { Contract, Mission, Receipt } from '../mission.ts';
 import type { Player, Snapshot } from '../room.ts';
 import { expeditionSeed, facilityValue } from '../salvage.ts';
 import { generateLayout } from './generate-layout.ts';
+import { placeOf } from '../places.ts';
 
 export const expeditionsPerContract = 3;
 // The quota asks for a little under half of everything the three facilities hold.
@@ -73,7 +74,8 @@ export function advanceMission(layout: Layout, state: Snapshot, mission: Mission
         break;
       case 'quiet':
       case 'tracking': {
-        const crew = state.players.filter(p => p.connected && !mission.down.some(d => d.id === p.id));
+        // It hunts only inside the facility; operators elsewhere are out of reach.
+        const crew = state.players.filter(p => p.connected && placeOf(p) === 'inside' && !mission.down.some(d => d.id === p.id));
         const target = crew.find(p => p.id === state.lamp.owner && state.lamp.on) ?? crew[0];
         if (target) {
           const bay = locate(target) ?? layout.rooms.reduce((a,b) => {
@@ -94,7 +96,7 @@ export function advanceMission(layout: Layout, state: Snapshot, mission: Mission
   if (diver.mode !== 'strike') return;
   const bay = anchor(layout.rooms.find(r => r.id === diver.bay)!);
   for (const p of state.players) {
-    if (distance(p,bay) > strikeRadius || !sameStorey(p,bay) || mission.down.some(d => d.id === p.id)) continue;
+    if (placeOf(p) !== 'inside' || distance(p,bay) > strikeRadius || !sameStorey(p,bay) || mission.down.some(d => d.id === p.id)) continue;
     mission.down.push({id:p.id,seconds:75});
     if (state.lamp.owner === p.id) Object.assign(state.lamp,{x:p.x,z:p.z,y:(p.feetY ?? 0)+0.14,owner:null,pitch:0,stowed:false});
   }

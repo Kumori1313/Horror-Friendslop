@@ -1,5 +1,5 @@
 import { collisionIndex, geometryFor, playerRadius } from './layout.ts';
-import type { Layout } from './layout.ts';
+import type { Geometry, Layout } from './layout.ts';
 import { surfaceHeight } from './room-templates.ts';
 import type { Point3 } from './room-templates.ts';
 
@@ -10,7 +10,8 @@ import type { Point3 } from './room-templates.ts';
 // and corridor and absorbs a laggy walker overshooting a corner.
 // With `near`, any point on the goal's storey within that distance will do,
 // so a tight goal does not force a tight route all the way there.
-export function route(layout: Layout, from: Point3, to: Point3, margins = [0.85,0.65,0.45,0.25,0], near = 0): Point3[] | undefined {
+// It walks a facility layout, or any place's geometry (home, outdoors).
+export function route(layout: Layout | Geometry, from: Point3, to: Point3, margins = [0.85,0.65,0.45,0.25,0], near = 0): Point3[] | undefined {
   for (const margin of margins) {
     const legs = plan(layout,from,to,margin,near);
     if (legs) return legs;
@@ -21,8 +22,8 @@ const directions = [[1,0],[-1,0],[0,1],[0,-1]];
 
 // Dijkstra over lattice points and headings; each turn costs as much as 3 m
 // of walking, so routes keep long straight legs.
-function plan(layout: Layout, from: Point3, to: Point3, margin: number, near: number): Point3[] | undefined {
-  const g = geometryFor(layout), step = 0.5, turn = 6;
+function plan(layout: Layout | Geometry, from: Point3, to: Point3, margin: number, near: number): Point3[] | undefined {
+  const g = 'rooms' in layout ? geometryFor(layout) : layout, step = 0.5, turn = 6;
   const index = collisionIndex(g,g.doors.map(d => d.id),playerRadius+margin+0.05);
   // Keep a margin from floor edges too. Beside the heading the floor must stay
   // within one step, so a walker that drifts sideways off the line cannot end

@@ -8,7 +8,7 @@ export interface Patch { x:number; z:number; w:number; d:number }
 export interface Surface extends Patch { y:number; rise?:number; along?:'x'; stairs?:boolean; catwalk?:boolean }
 export interface Socket { name:string; side:Side; x:number; z:number; y:number }
 export type PropKind = 'machine' | 'shelf' | 'tank' | 'locker' | 'crate' | 'console' | 'pump' | 'chiller' |
-  'switchboard' | 'relay' | 'generator' | 'filter' | 'bench' | 'desk' | 'pipe' | 'terminal';
+  'switchboard' | 'relay' | 'generator' | 'filter' | 'bench' | 'desk' | 'pipe' | 'terminal' | 'rock';
 export interface Prop extends Patch { kind:PropKind; h:number; y?:number }
 export interface RoomTemplate {
   name:string;

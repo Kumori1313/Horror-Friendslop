@@ -10,7 +10,7 @@ import { Simulation } from '../src/server/simulation.ts';
 // and receiving a snapshot every 100 ms, as the creator-hosted mode does.
 function session() {
   const plan = generateLayout(19), g = geometryFor(plan);
-  const host = new Simulation(plan);
+  const host = new Simulation(plan,'coop','inside');
   host.join(); host.join();
   const prediction = new Prediction();
   const inbound: [number,Input][] = [], outbound: [number,Snapshot][] = [];

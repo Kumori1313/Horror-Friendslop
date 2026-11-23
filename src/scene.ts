@@ -2,7 +2,9 @@ import * as T from 'three';
 import { itemName, items, strikeRadius } from './mission.ts';
 import { buildFacility } from './facility-scene.ts';
 import { environment, materialLibrary } from './materials.ts';
-import { anchor, geometryFor, type Layout } from './layout.ts';
+import { anchor, geometryFor, type Geometry, type Layout } from './layout.ts';
+import { home, outdoors, placeOf, type Place } from './places.ts';
+import { buildHome, buildOutdoors } from './world-scene.ts';
 import { obstaclesAt, surfaceAt } from './room-templates.ts';
 import { portalGraph, visibleRooms, type PortalGraph } from './visibility.ts';
 import { lampSlot, selected, walls } from './room.ts';
@@ -64,13 +66,14 @@ export function createScene(canvas: HTMLCanvasElement, generated = false) {
     const mesh = new T.Mesh(new T.PlaneGeometry(width, width / 5), new T.MeshBasicMaterial({ map: texture }));
     mesh.position.set(x, y, z); scene.add(mesh);
   }
-  scene.add(new T.HemisphereLight(0xc0e0dc,0x605648,1.28));
+  const sky = new T.HemisphereLight(0xc0e0dc,0x605648,1.28);
+  scene.add(sky);
   // Generated facilities share one material library and one reflection map.
   // Anisotropic filtering at 2x keeps floors crisp at grazing angles; higher
   // levels cost noticeably more on software and low-end GPUs.
+  const skylight = new T.DirectionalLight(0xe2d8b7,1);
   const library = generated ? materialLibrary(Math.min(2,renderer.capabilities.getMaxAnisotropy()),environment(renderer)) : undefined;
   if (generated) {
-    const skylight = new T.DirectionalLight(0xe2d8b7,1);
     skylight.position.set(-4,6,2); scene.add(skylight);
   } else {
     const floor = painted('#585e56', '#353e38'); floor.repeat.set(8, 12);
@@ -196,8 +199,8 @@ export function createScene(canvas: HTMLCanvasElement, generated = false) {
     return Math.min(f.d,(now-clock.start)/1000);
   }
   // Where a thrown item is now, as its centre, from the shared flight rules.
-  function inFlight(layout: Layout, opened: readonly string[], id: string, f: Flight, kind: ItemKind | 'lamp', rest: {x: number; y: number; z: number}, now: number) {
-    const path = trajectory(geometryFor(layout),opened,f,bodyOf(kind),rest);
+  function inFlight(g: Geometry, opened: readonly string[], id: string, f: Flight, kind: ItemKind | 'lamp', rest: {x: number; y: number; z: number}, now: number) {
+    const path = trajectory(g,opened,f,bodyOf(kind),rest);
     return {...positionAt(path,flown(id,f,now)),t:flown(id,f,now)};
   }
   // Each kind's hotbar picture, rendered once in a small off-screen scene.
@@ -287,22 +290,70 @@ export function createScene(canvas: HTMLCanvasElement, generated = false) {
     renderer.setPixelRatio(fullRatio*scale);
     renderer.setSize(innerWidth,innerHeight,false);
   }
+  // Each place has its own sky, fog and light. The facility keeps the look it
+  // always had; outdoors is a moonlit night; home is a violet void.
+  // Outdoors sees farther: the façade must show from the arrival rift.
+  const looks: Record<Place,{background: number; fog: number; density: number; sky: number; skyGround: number; skyLevel: number; moon: number; moonLevel: number; far: number}> = {
+    inside:{background:0x263331,fog:0x273532,density:0.043,sky:0xc0e0dc,skyGround:0x605648,skyLevel:1.28,moon:0xe2d8b7,moonLevel:1,far:48},
+    outside:{background:0x141d26,fog:0x18222b,density:0.017,sky:0x7f95b3,skyGround:0x3a352c,skyLevel:1.05,moon:0xb3c6ea,moonLevel:0.95,far:110},
+    home:{background:0x120d1c,fog:0x161023,density:0.035,sky:0xb7a6e6,skyGround:0x3a2f45,skyLevel:1.1,moon:0xd8c8ff,moonLevel:0.6,far:48},
+  };
+  let looked: Place | undefined;
+  function look(place: Place) {
+    if (place === looked) return;
+    looked = place;
+    const l = looks[place];
+    (scene.background as T.Color).setHex(l.background);
+    (scene.fog as T.FogExp2).color.setHex(l.fog); (scene.fog as T.FogExp2).density = l.density;
+    sky.color.setHex(l.sky); sky.groundColor.setHex(l.skyGround); sky.intensity = l.skyLevel;
+    skylight.color.setHex(l.moon); skylight.intensity = l.moonLevel;
+    camera.far = l.far; camera.updateProjectionMatrix();
+  }
+  let homeWorld: ReturnType<typeof buildHome> | undefined;
+  let outside: ReturnType<typeof buildOutdoors> | undefined;
+  // Salvage lying outdoors or at home: a few meshes, made as needed.
+  const loose = new Map<string,T.Mesh>();
   function render(state: Snapshot | undefined, self: number, yaw: number, pitch: number, dt: number, layout?: Layout, reducedMotion = false) {
-    if (layout && layout !== loaded) {
+    const me = state?.players.find(p => p.id === self);
+    // Without a contract everything is inside, as it always was.
+    const here: Place | undefined = !state?.mission ? (layout ? 'inside' : undefined) : me ? placeOf(me) : undefined;
+    if (generated && here) look(here);
+    // Build only the place this camera is in. Home drops the expedition.
+    if (here === 'home') {
+      facility?.dispose(); facility = undefined; loaded = undefined; portals = undefined;
+      outside?.dispose(); outside = undefined;
+    }
+    if (layout && here === 'inside' && (layout !== loaded || !facility)) {
       facility?.dispose();
       facility = buildFacility(layout,library!);
       scene.add(facility.root);
       portals = portalGraph(layout,geometryFor(layout));
       loaded = layout;
     }
+    if (layout && state?.mission && here === 'outside' && outside?.seed !== layout.seed) {
+      outside?.dispose();
+      outside = buildOutdoors(outdoors(layout.seed),library!);
+      scene.add(outside.root);
+    }
+    if (here === 'home' && !homeWorld && library) { homeWorld = buildHome(library); scene.add(homeWorld.root); }
+    if (facility) facility.root.visible = here === 'inside';
+    if (outside) outside.root.visible = here === 'outside';
+    if (homeWorld) homeWorld.root.visible = here === 'home';
+    const time = performance.now()/1000;
+    homeWorld?.update(time);
+    outside?.update(time,state?.mission?.arrival === 'open');
     if (!document.hidden) adapt(dt);
     if (facility && state) facility.update(state.opened ?? []);
     if (state) {
+      // The geometry of a place, for held items and thrown ones.
+      const placeGeometry = (place: Place): Geometry | undefined => place === 'home' ? home().geometry :
+        place === 'outside' ? layout && outdoors(layout.seed).geometry : layout && geometryFor(layout);
+      const sameHere = (thing: {place?: Place}) => !state.mission || placeOf(thing) === here;
       const blend = 1 - Math.exp(-18 * dt);
       const creature = state.mission?.diver;
       const room = layout?.rooms.find(r => r.id === creature?.bay);
       const target = room && anchor(room);
-      diver.visible = !!target && (creature?.mode === 'warning' || creature?.mode === 'strike');
+      diver.visible = here === 'inside' && !!target && (creature?.mode === 'warning' || creature?.mode === 'strike');
       if (target && creature && diver.visible) {
         diver.position.set(target.x,target.y,target.z);
         tines.position.y = creature.mode === 'strike' ? 0.75 : 2.8+Math.cos(creature.seconds*7)*0.12;
@@ -321,7 +372,8 @@ export function createScene(canvas: HTMLCanvasElement, generated = false) {
           // Smaller and lower than the partner sees it, so it doesn't fill the view.
           holdItem(inHand,kind,0.55);
           if (kind) {
-            const solids = layout ? obstaclesAt(geometryFor(layout),p.feetY ?? 0,state.opened) : walls;
+            const g = placeGeometry(placeOf(p));
+            const solids = g ? obstaclesAt(g,p.feetY ?? 0,placeOf(p) === 'inside' ? state.opened : []) : walls;
             const at = heldLamp(p,solids);
             inHand.position.set(at.x,at.y-0.1,at.z); inHand.rotation.set(0,p.yaw,0);
           }
@@ -335,7 +387,10 @@ export function createScene(canvas: HTMLCanvasElement, generated = false) {
           if (!g) { g = avatar(p.id); g.position.set(p.x,p.feetY ?? 0,p.z); }
           g.scale.y = down ? 0.35 : 1;
           holdItem(g.getObjectByName('held') as T.Mesh,down ? undefined : heldKind(p));
+          // Someone in another place jumps rather than glides when they come back.
+          if (!sameHere(p)) tracks.delete('p'+p.id);
           g.position.copy(glide('p'+p.id,state.update,p.x,p.feetY ?? 0,p.z,performance.now(),g.position));
+          g.visible = sameHere(p);
           g.rotation.y += Math.atan2(Math.sin(p.yaw-g.rotation.y),Math.cos(p.yaw-g.rotation.y))*blend;
         }
       }
@@ -343,9 +398,11 @@ export function createScene(canvas: HTMLCanvasElement, generated = false) {
       const l = state.lamp;
       const t = previousOwner === l.owner ? blend : 1;
       const now = performance.now();
-      if (l.flight && layout) {
+      const lampWorld = placeGeometry(placeOf(l));
+      torch.visible = sameHere(l);
+      if (l.flight && lampWorld) {
         // A thrown flashlight tumbles end over end, still lit.
-        const at = inFlight(layout,state.opened ?? [],'lamp',l.flight,'lamp',{x:l.x,y:l.y-0.14,z:l.z},now);
+        const at = inFlight(lampWorld,placeOf(l) === 'inside' ? state.opened ?? [] : [],'lamp',l.flight,'lamp',{x:l.x,y:l.y-0.14,z:l.z},now);
         torch.position.set(at.x,at.y,at.z);
         torch.rotation.x = -at.t*9;
         tracks.delete('lamp');
@@ -383,7 +440,7 @@ export function createScene(canvas: HTMLCanvasElement, generated = false) {
         const shown = (x: number,z: number,y: number) => !drawn || drawn.has(surfaceAt(g,x,z,y)?.room ?? '');
         for (const p of state.players) {
           const g2 = people.get(p.id);
-          if (g2) g2.visible = shown(p.x,p.z,p.feetY ?? 0);
+          if (g2) g2.visible = sameHere(p) && shown(p.x,p.z,p.feetY ?? 0);
         }
         if (diver.visible && drawn && room) diver.visible = drawn.has(room.id);
         const mission = state.mission;
@@ -391,9 +448,9 @@ export function createScene(canvas: HTMLCanvasElement, generated = false) {
           // Salvage on the floor or stacked on the lift; packs are not drawn.
           const lift = facility.lift, all = items(layout,mission);
           const loaded = all.filter(i => i.loaded);
-          facility.salvage(all.filter(i => i.owner === null).map(i => {
+          facility.salvage(all.filter(i => i.owner === null && i.place === 'inside').map(i => {
             if (i.flight) {
-              const at = inFlight(layout,state.opened ?? [],i.id,i.flight,i.kind,i,now), [,h] = itemKinds[i.kind].size;
+              const at = inFlight(g,state.opened ?? [],i.id,i.flight,i.kind,i,now), [,h] = itemKinds[i.kind].size;
               // Cull it with the room whose floor is below it.
               let under: string | undefined, top = -Infinity;
               for (const f of g.surfaces) {
@@ -414,6 +471,29 @@ export function createScene(canvas: HTMLCanvasElement, generated = false) {
             'On lift  '+loaded.length+' · value '+value,...loaded.slice(-3).reverse().map(i => '+ '+itemName(i.kind)+'  '+i.value)]);
         }
       }
+    }
+    if (state?.mission && layout && here) {
+      // Salvage lying in this place outside the facility.
+      const mission = state.mission, wanted = new Set<string>();
+      if (here !== 'inside') {
+        const g = here === 'home' ? home().geometry : outdoors(layout.seed).geometry;
+        for (const i of items(layout,mission)) {
+          if (i.owner !== null || i.loaded || i.place !== here) continue;
+          let mesh = loose.get(i.id);
+          if (!mesh) { mesh = new T.Mesh(cube,itemMaterial(i.kind)); loose.set(i.id,mesh); scene.add(mesh); }
+          const [w,h,d] = itemKinds[i.kind].size;
+          const at = i.flight ? inFlight(g,[],i.id,i.flight,i.kind,i,performance.now()) : {x:i.x,y:i.y+h/2,z:i.z};
+          mesh.position.set(at.x,at.y,at.z); mesh.scale.set(w,h,d); mesh.rotation.y = (i.x*7+i.z*3)%Math.PI;
+          wanted.add(i.id);
+        }
+      }
+      for (const [id,mesh] of loose) if (!wanted.has(id)) { scene.remove(mesh); loose.delete(id); }
+      if (here === 'home' && homeWorld) {
+        const c = mission.contract, last = c.receipts.at(-1);
+        homeWorld.terminal(['SALVAGE CONTRACT','Quota  '+c.credited+' / '+c.quota,'Expedition  '+(c.index+1)+' / '+c.expeditions,
+          ...(last ? ['Last sale  '+last.credited,...last.items.slice(0,3).map(i => '+ '+itemName(i.kind)+'  '+i.value)] : ['Step into the rift to begin'])]);
+      }
+      stats.drawn = here === 'inside' ? stats.drawn : 0;
     }
     renderer.render(scene,camera);
     stats.calls = renderer.info.render.calls;

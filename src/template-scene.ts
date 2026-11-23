@@ -2,7 +2,8 @@ import { surfaceHeight } from './room-templates.ts';
 import type { TemplateGeometry } from './room-templates.ts';
 import type { Finish } from './materials.ts';
 
-type Box = (color:number,x:number,y:number,z:number,w:number,h:number,d:number,angle?:number,axis?:'x'|'z')=>void;
+// `axis` 'wedge' draws a wedge turned `angle` about the vertical, rising toward its local +z.
+type Box = (color:number,x:number,y:number,z:number,w:number,h:number,d:number,angle?:number,axis?:'x'|'z'|'wedge')=>void;
 export type RoomBox = (room:string,finish:Finish,...box:Parameters<Box>)=>void;
 
 // Draw the same shell, openings and walkable surfaces used by the simulation.
@@ -31,6 +32,18 @@ export function drawTemplates(g:TemplateGeometry, emit:RoomBox, accent:(room:str
       as('ramp')(deck,s.x,s.y+rise/2-0.065,s.z,Math.hypot(s.w,rise),0.13,s.d,Math.atan2(rise,s.w),'z');
     } else {
       as(rise ? 'ramp' : s.catwalk ? 'grate' : 'floor')(deck,s.x,s.y+rise/2-0.065,s.z,s.w,0.13,Math.hypot(s.d,rise),-Math.atan2(rise,s.d));
+    }
+    // Ramps and stairs are solid underneath, as the simulation treats them.
+    // The wedge's top runs just under the slope: inside a ramp's slab, or
+    // between each tread's top and the bottom of the tread below. It sits
+    // 2 mm in from each side, so its sides never lie flush with the slab's.
+    if (rise) {
+      const run=s.along ? s.w : s.d, slope=Math.abs(rise)/run;
+      const sink=s.stairs ? run/Math.ceil(Math.abs(rise)/0.2)/2*slope+0.02 : 0.06;
+      const yaw=s.along ? (rise>0 ? Math.PI/2 : -Math.PI/2) : (rise>0 ? 0 : Math.PI);
+      // Its tall end also stops 2 mm short of the landing it meets.
+      const back=Math.sign(rise)*0.002;
+      as('floor')(deck,s.along ? s.x-back : s.x,Math.min(s.y,s.y+rise)-sink+Math.abs(rise)/2,s.along ? s.z : s.z-back,(s.along ? s.d : s.w)-0.004,Math.abs(rise),run-0.004,yaw,'wedge');
     }
   }
   for (const w of g.walls) {

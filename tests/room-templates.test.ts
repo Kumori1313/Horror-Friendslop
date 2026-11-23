@@ -99,3 +99,28 @@ test('rooms never draw walls in the same place, so their materials cannot flicke
   const north = g.walls.find(w => w.room === 'intake' && w.w > 1 && Math.abs(w.z+2) < 0.1)!;
   assert.equal(+(north.z+north.d/2).toFixed(6),-1.94);
 });
+
+test('ramps are solid underneath: an operator can step off a ramp\'s side but not walk under it', async () => {
+  const { moveOperator } = await import('../src/server/simulation.ts');
+  const { outdoors } = await import('../src/places.ts');
+  const g = geometryFor(stairwellLayout()), ramp = g.surfaces.find(s => s.rise && !s.stairs)!;
+  const walk = (p: Parameters<typeof moveOperator>[0], right: number, forward: number, seconds: number, geometry = g) => {
+    for (let t=0;t<seconds;t+=1/30) moveOperator(p,{forward,right,yaw:0,pitch:0},1/30,geometry);
+  };
+  // Halfway up, step off the side: the operator lands on the hall floor below.
+  const onRamp = {id:1,connected:true,x:ramp.x,z:ramp.z,feetY:surfaceHeight(ramp,ramp.x,ramp.z),yaw:0,pitch:0};
+  assert.ok(onRamp.feetY > 1.5);
+  walk(onRamp,-1,0,1);
+  assert.equal(onRamp.feetY,0,'dropped to the floor');
+  assert.ok(onRamp.x <= ramp.x-ramp.w/2-0.25+1e-9,'landed clear of the ramp\'s side at x='+onRamp.x);
+  // From the floor, the ramp's side is a wall: the body stays out of it.
+  walk(onRamp,1,0,1);
+  assert.ok(Math.abs(onRamp.x-(ramp.x-ramp.w/2-0.25)) < 0.15,'stopped at arm\'s length, x='+onRamp.x);
+  assert.equal(onRamp.feetY,0);
+  // Outdoors, walking off a bank's edge drops to the ground, clear of its side.
+  const map = outdoors(19), bank = map.rises[0];
+  const top = {id:1,connected:true,x:bank.x,z:bank.z,feetY:bank.h,yaw:0,pitch:0};
+  const away = bank.ramp.along ? {right:0,forward:bank.ramp.x > bank.x ? -1 : 1} : {right:bank.ramp.z > bank.z ? -1 : 1,forward:0};
+  walk(top,away.right,away.forward,4,map.geometry);
+  assert.equal(top.feetY,0,'dropped off the bank');
+});

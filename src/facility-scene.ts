@@ -5,6 +5,7 @@ import type { Layout, Kind } from './layout.ts';
 import { doorWidth, orient, outward } from './room-templates.ts';
 import { itemKinds, spawnSalvage, type ItemKind } from './salvage.ts';
 import { shellFinish, surfaceFor, worldUV, type Finish, type Library } from './materials.ts';
+import { intakeDoor } from './places.ts';
 
 export const colors: Record<Kind,number> = {
   intake:0xe0b258, relay:0xe6a840, switchboard:0xe0894e, chiller:0x57b9da, pump:0x648d92,
@@ -16,13 +17,34 @@ const stations: Kind[] = ['intake'];
 const lamp = 0xe4e7c9;
 
 // Box vertices for one material within one room, merged into a single draw.
-class Batch {
+export class Batch {
   static unit = new T.BoxGeometry();
+  // A unit wedge: flat underneath, its top rising from the front edge
+  // (local −z) to the full height at the back (+z). It fills under ramps.
+  static wedge = (() => {
+    const at: Record<string,number[]> = {A:[-0.5,-0.5,-0.5],B:[0.5,-0.5,-0.5],C:[-0.5,-0.5,0.5],D:[0.5,-0.5,0.5],E:[-0.5,0.5,0.5],F:[0.5,0.5,0.5]};
+    const position: number[] = [], normal: number[] = [], index: number[] = [], middle = new T.Vector3(0,-1/6,1/6);
+    for (const face of ['ABDC','ABFE','CDFE','ACE','BDF']) {
+      let points = [...face].map(k => new T.Vector3(...at[k]));
+      const n = new T.Vector3().subVectors(points[1],points[0]).cross(new T.Vector3().subVectors(points[2],points[0])).normalize();
+      const centre = points.reduce((sum,p) => sum.add(p),new T.Vector3()).divideScalar(points.length);
+      // Wind every face to face outward.
+      if (n.dot(centre.sub(middle)) < 0) { points = points.reverse(); n.negate(); }
+      const base = position.length/3;
+      for (const p of points) { position.push(p.x,p.y,p.z); normal.push(n.x,n.y,n.z); }
+      for (let i=1;i<points.length-1;i++) index.push(base,base+i,base+i+1);
+    }
+    const g = new T.BufferGeometry();
+    g.setAttribute('position',new T.Float32BufferAttribute(position,3));
+    g.setAttribute('normal',new T.Float32BufferAttribute(normal,3));
+    g.setIndex(index);
+    return g;
+  })();
   position: number[] = []; normal: number[] = []; uv: number[] = []; color: number[] = []; index: number[] = [];
   // Texture coordinates come from world position in metres, so a texture
   // keeps its scale on any length of wall, floor or ramp.
-  add(matrix: T.Matrix4, normals: T.Matrix3, color: T.Color) {
-    const u = Batch.unit, p = u.attributes.position, n = u.attributes.normal;
+  add(matrix: T.Matrix4, normals: T.Matrix3, color: T.Color, u: T.BufferGeometry = Batch.unit) {
+    const p = u.attributes.position, n = u.attributes.normal;
     const base = this.position.length/3, v = new T.Vector3(), w = new T.Vector3();
     for (let i=0;i<p.count;i++) {
       v.fromBufferAttribute(p,i).applyMatrix4(matrix); this.position.push(v.x,v.y,v.z);
@@ -61,8 +83,8 @@ export function buildFacility(layout: Layout, library: Library) {
   const batches = new Map<string,Map<T.Material,Batch>>();
   const transform = new T.Object3D(), normals = new T.Matrix3(), tint = new T.Color();
   const white = new T.Color(1,1,1);
-  function box(room: string,finish: Finish,color: number,x: number,y: number,z: number,w: number,h: number,d: number,angle=0,axis:'x'|'z'='x') {
-    transform.rotation.set(axis==='x'?angle:0,0,axis==='z'?angle:0);
+  function box(room: string,finish: Finish,color: number,x: number,y: number,z: number,w: number,h: number,d: number,angle=0,axis:'x'|'z'|'wedge'='x') {
+    transform.rotation.set(axis==='x'?angle:0,axis==='wedge'?angle:0,axis==='z'?angle:0);
     transform.position.set(x,y,z); transform.scale.set(w,h,d); transform.updateMatrix();
     const kind = byId.get(room)!.kind, surface = surfaceFor(kind,finish);
     const material = emissive.has(color) ? glow : surface ? library.surfaces.get(surface)! : matte;
@@ -73,7 +95,7 @@ export function buildFacility(layout: Layout, library: Library) {
     if (!byMaterial) batches.set(room,byMaterial = new Map());
     let batch = byMaterial.get(material);
     if (!batch) byMaterial.set(material,batch = new Batch());
-    batch.add(transform.matrix,normals.getNormalMatrix(transform.matrix),tint);
+    batch.add(transform.matrix,normals.getNormalMatrix(transform.matrix),tint,axis === 'wedge' ? Batch.wedge : Batch.unit);
   }
   drawTemplates(geometry,box,id => colors[byId.get(id)!.kind]);
   // Each destination has a coloured floor marker; stations add side stripes.
@@ -131,6 +153,13 @@ export function buildFacility(layout: Layout, library: Library) {
         box(intake.id,'matte',colors.intake,lift.x+dx+(w > d ? t : 0),lift.y+0.062,lift.z+dz+(w > d ? 0 : t),w > d ? 0.14 : 0.12,0.006,w > d ? 0.12 : 0.14);
       }
     }
+  }
+  // Intake's outer door in its south wall leads back outside to the façade.
+  if (intake && !layout.tour) {
+    const d = intakeDoor;
+    box(intake.id,'metal',0x2c3534,d.x,d.y+1.25,d.z+0.03,1.7,2.5,0.05);
+    for (const side of [-1,1]) for (let band=0;band<6;band++) box(intake.id,'matte',colors.intake,d.x+side*0.92,d.y+0.26+band*0.4,d.z-0.02,0.12,0.24,0.06);
+    label(intake.id,'Exit',d.x,d.y+2.95,d.z-0.06,Math.PI);
   }
   for (const [room,byMaterial] of batches) {
     for (const [material,batch] of byMaterial) groups.get(room)!.add(new T.Mesh(batch.build(),material));

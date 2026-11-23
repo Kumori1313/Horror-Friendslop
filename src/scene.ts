@@ -343,6 +343,9 @@ export function createScene(canvas: HTMLCanvasElement, generated = false) {
     if (facility) facility.root.visible = here === 'inside';
     if (outside) outside.root.visible = here === 'outside';
     if (homeWorld) homeWorld.root.visible = here === 'home';
+    // Which places are held in memory, for tests: at home, only the home dimension.
+    const built = [homeWorld && 'home',outside && 'outside',facility && 'inside'].filter(Boolean).join(' ');
+    if (canvas.dataset.built !== built) canvas.dataset.built = built;
     const time = performance.now()/1000;
     homeWorld?.update(time);
     outside?.update(time,state?.mission?.arrival === 'open',state?.mission?.rift,state?.mission?.bell !== undefined);

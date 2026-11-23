@@ -1,4 +1,4 @@
-import { cellsOf, distances, generatorVersion, kindOf, validLayout } from '../layout.ts';
+import { cellsOf, generatorVersion, kindOf, validLayout } from '../layout.ts';
 import type { Layout, Module, Passage } from '../layout.ts';
 import { cell, destinationPool, opposite, orient, outward, roomTemplates, socketAt, storey, turnSide } from '../room-templates.ts';
 import type { Side, TemplateKind } from '../room-templates.ts';
@@ -118,35 +118,28 @@ function fitCorridors(rooms: Module[], passages: Passage[]) {
 function grow(seed: number, random: () => number): Layout | undefined {
   const f = new Facility(random);
   f.place('intake','intake',-4,0,0,0);
-  const drawn = f.shuffle(destinationPool).slice(0,9+Math.floor(random()*4));
+  // At least three loot rooms, so every facility is worth a haul.
+  const order = f.shuffle(destinationPool).slice(0,12+Math.floor(random()*4));
   const loot = destinationPool.filter(k => roomTemplates[k].loot);
-  for (const k of f.shuffle(loot)) if (drawn.filter(d => roomTemplates[d].loot).length < 2 && !drawn.includes(k)) drawn.push(k);
-  drawn.splice(Math.floor(random()*(drawn.length+1)),0,'switchboard');
-  const order: TemplateKind[] = [...drawn,'relay','exit'];
+  for (const k of f.shuffle(loot)) if (order.filter(d => roomTemplates[d].loot).length < 3 && !order.includes(k)) order.push(k);
+  let placedCount = 0;
   for (const [index,kind] of order.entries()) {
     let placed = false;
     for (let attempt=0; attempt<40 && !placed; attempt++) {
-      let options: Open[];
-      if (index === 0) options = f.open(r => r.id === 'intake').filter(s => s.name === 'north1');
-      else {
-        options = f.open(r => r.id !== 'intake' && r.id !== 'exit');
-        if (kind === 'relay' || kind === 'exit') {
-          // Push the relay far from Intake, and the exit far from the relay.
-          const steps = distances(f.rooms,f.passages,kind === 'relay' ? 'intake' : 'relay');
-          const far = Math.max(...options.map(o => steps.get(o.room)!));
-          options = options.filter(o => steps.get(o.room)! >= far-1-Math.floor(attempt/10));
-        }
-      }
+      // Intake keeps one way in, through its north bulkhead.
+      const options = index === 0 ? f.open(r => r.id === 'intake').filter(s => s.name === 'north1') : f.open(r => r.id !== 'intake');
       if (!options.length) break;
       const at = f.pick(options);
       const run = index === 0 ? 1+Math.floor(random()*2) : Math.floor(random()*4);
       const climb = f.stairs === 0 ? index >= 2 && random() < 0.5 : random() < 0.18;
       placed = !!f.branch(at,kind,kind,run,climb);
     }
-    if (!placed && (index === 0 || order.length-index <= 3)) return;
+    if (!placed && index === 0) return;
+    if (placed) placedCount++;
   }
-  // Join meeting doorways for loops, away from the single doors into Intake and Exit.
-  const loose = f.open(r => r.id !== 'intake' && r.id !== 'exit');
+  if (placedCount < 12) return;
+  // Join meeting doorways for loops, away from Intake's single door.
+  const loose = f.open(r => r.id !== 'intake');
   for (let i=0;i<loose.length;i++) for (let j=i+1;j<loose.length;j++) {
     const a = loose[i], b = loose[j];
     if (a.room === b.room || a.x !== b.x || a.y !== b.y || a.z !== b.z || opposite(a.side) !== b.side) continue;
@@ -155,10 +148,7 @@ function grow(seed: number, random: () => number): Layout | undefined {
   }
   fitCorridors(f.rooms,f.passages);
   f.passages[0].bulkhead = true;
-  const exitDoor = f.passages.find(p => p.b === 'exit');
-  if (exitDoor) exitDoor.bulkhead = true;
-  const callout = seed % 2 === 0 ? 'black-start' : 'line-test';
-  return {callout,version:generatorVersion,seed,fallback:false,rooms:f.rooms,passages:f.passages,objectiveId:'relay',exitId:'exit',lampId:'inspection-light'};
+  return {version:generatorVersion,seed,fallback:false,rooms:f.rooms,passages:f.passages,lampId:'inspection-light'};
 }
 
 let fallback: Layout | undefined;
@@ -176,5 +166,5 @@ export function generateLayout(seed: number, attempts = 8): Layout {
       if (layout && validLayout(layout)) fallback = layout;
     }
   }
-  return {...structuredClone(fallback),seed,fallback:true,callout:seed % 2 === 0 ? 'black-start' : 'line-test'};
+  return {...structuredClone(fallback),seed,fallback:true};
 }

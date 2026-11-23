@@ -1,12 +1,12 @@
 # Relay Room
 
-Two operators share one flashlight in a seeded industrial facility. Restore the exit circuit, survive the Bell Diver, and extract together. The standalone synchronization test uses a fixed maintenance room. A local TypeScript simulation owns movement, collision, and the light. Both browser windows send inputs and receive the same room state over WebSocket.
+Two operators share one flashlight across a salvage contract. Each expedition is a fresh, seeded industrial facility: collect salvage, haul it back to the cargo lift in Intake, survive the Bell Diver, and extract to sell it. Meet the quota before the last expedition. The standalone synchronization test uses a fixed maintenance room. A local TypeScript simulation owns movement, collision, and the light. Both browser windows send inputs and receive the same room state over WebSocket.
 
 ## Play solo
 
 Open **Relay Room** from Game Hub and choose **Play solo**, or open the [solo playtest](https://kumori1313.github.io/relay-room/?solo=1) directly. The shift runs in your browser and pauses when you release controls or switch tabs. Refresh the same tab to resume. **Leave solo** ends the shift, and **New solo shift** on the results screen generates another facility.
 
-Carry the lit flashlight to Relay and use **Power exit circuit**. Black Start requires charging the Switchboard first. Once powered, avoid the Bell Diver and operate the Exit pad to extract. A strike ends a solo shift. The two-player callouts still use the paired stations and rescue rules.
+A solo contract follows the same rules as the crew contract below, with no partner to revive: a strike ends it. **New solo shift** on the results screen starts a fresh contract.
 
 ### Phase 9 stairwell playtest
 
@@ -35,10 +35,13 @@ npm run dev
 | Mouse or arrow keys | Look around |
 | E | Pick up a nearby flashlight or drop the one you hold |
 | F | Toggle the flashlight you hold |
+| C | Collect nearby salvage into your pack (three items) |
+| X | Drop the last item in your pack |
+| Q | Load your pack onto the lift, extract, or revive a downed partner |
 | G | Show or hide room diagnostics in developer builds |
 | Escape | Release controls. Click the scene to resume. |
 
-On a phone, tap **Enter room**, drag the lower-left pad to move, and swipe the room to look. Tap **Pick up** when the dropped light is within reach. Use **Light off/on** and **Drop** to test the handoff. Tap **Diagnostics** to see who holds it on each device.
+On a phone, tap **Enter room**, drag the lower-left pad to move, and swipe the room to look. Tap **Collect** beside salvage and **Drop item** to put the last one down. Tap **Pick up** when the dropped light is within reach. Use **Light off/on** and **Drop** to test the handoff. Tap **Diagnostics** to see who holds it on each device.
 
 A disconnected operator keeps their seat, position, and flashlight for 20 seconds after the server detects the disconnect. Refresh the same tab to resume. When the reservation expires, the seat is freed and its flashlight drops. The room resets when both seats expire. Stop the server with **Ctrl+C**.
 
@@ -77,21 +80,22 @@ In the hub checkout, `npm run test:relay` runs the browser acceptance test on po
 
 ### Explore a generated facility
 
-Start a **new Game Hub room** to get a new facility. Each facility spans two storeys and draws 13–16 destinations, each a different kind of room, from a pool of 15 optional rooms plus Intake, Relay, Switchboard and Exit. Corridors and up to three stairwells join them, and some routes loop back on themselves. The Machinery hall's ramp also joins the two storeys. Every room has a coloured floor marker and its own equipment. Both operators spawn at Intake within reach of the flashlight. Explore the connected rooms and corridors, locate the **Relay station**, then find the **Exit bay**. Overhead signs name the room beyond each doorway, except where the doorway opens onto a corridor. At a closed bulkhead, press **R** or tap **Open bulkhead** on a phone. The door opens for both players.
+Start a **new Game Hub room** to get a new facility. Each facility spans two storeys and draws 13–16 destinations, each a different kind of room, from a pool of 17 optional rooms, with at least three loot rooms. Corridors and up to three stairwells join them, and some routes loop back on themselves. The Machinery hall's ramp also joins the two storeys. Every room has a coloured floor marker and its own equipment. Both operators spawn at Intake within reach of the flashlight. Explore the connected rooms and corridors for salvage, then find your way back to Intake. Overhead signs name the room beyond each doorway, except where the doorway opens onto a corridor. At a closed bulkhead, press **R** or tap **Open bulkhead** on a phone. The door opens for both players.
 
 The amber-banded doorway marks Intake. Three green lights above a doorway mark Exit. For developer checks, run `npm run build:diagnostics` in the game checkout and open **Diagnostics** for the shared floor plan, player positions, seed, generator version, objective and exit IDs, and opened bulkheads. The plan shows the ground storey on the left and the upper storey on the right. Amber squares mark closed bulkheads. The **Render** line shows the current resolution scale, how many rooms are drawn out of the total, and the draw calls in the last frame. The game draws only the rooms you can see through doorways, and lowers the resolution while frames run slow. Refresh while holding the light to check that your room, door state, and flashlight are restored. The map also marks the Bell Diver’s current bay in red and a downed operator with a white cross.
 
 Run `npm run test:layouts` to check seeds 0–999. The check covers both storeys and the stairs between them, unique destinations, overlapping rooms and clearance. It also walks every seed's real floor geometry from the spawn to every room, which covers the route from each loot room to the exit, then walks planned routes to each station on a few seeds. It also checks door collision and the fixed fallback. The generator tries at most eight candidates per seed. Batch validation writes any fallback or failing seeds to `test-results/layout-seeds.json`. To replay a reported seed with this generator version, run `VITE_RELAY_TEST_SEED=19 npm run build` in the **game** checkout and create a new room in the local hub. Rebuild without the override to restore random layouts. The plan is sent on admission and resume, with only live door and item state in the regular snapshots.
 
-### Play the emergency callout
+### Work the salvage contract
 
-The entry screen names the callout. In **Line test** the answering operator waits at Intake. In **Black start** they first charge the orange Switchboard pad (S) and answer the tone from there. Both callouts use the following controls.
+A contract runs three expeditions, each in a new facility generated from the contract seed. The quota is 45% of all the salvage the three facilities hold, so a crew that hauls steadily can meet it. The terminal in Intake shows the quota, credited earnings, the expedition number, and every item loaded on the lift with its sale value.
 
-1. One operator takes the flashlight with **E** or **Pick up**. The other operates the answering pad at Intake or Switchboard. Overhead signs name the adjoining room.
-2. Stand on the Relay pad with the flashlight on and press **Q** to **Send test tone**. Stay there while the answering operator presses **Q** to **Answer relay**. On a phone, tap the named action.
-3. The Bell Diver wakes above Relay. Knocks, a warning naming the bay, and a glowing floor circle give four seconds to get clear. It drops inside the circle. On subsequent passes it targets the bay nearest the conscious operator carrying the lit lamp. It follows the doors and stairs between rooms, scraping overhead in each room it passes. The scrape carries up to three connections and fades with each one, so a room directly above or below can still be out of earshot. Without a lit carrier it follows a conscious operator.
-4. A struck operator drops the light. A teammate has 75 seconds to reach them and press **Q** or **Revive partner**. Both operators going down or a rescue timing out ends the shift.
-5. Meet on the green center pad at Exit and select **Extract crew**. Both players see the shift report. **Return to lobbies** releases the seats so one player can create a fresh match and share its new code.
+1. One operator takes the flashlight with **E** or **Pick up**. Both can explore. Loot rooms such as the Parts store, Loot closet, Locker room, Cold store, Foreman's office, and Workshop hold the most salvage. Other rooms hold a stray item at most.
+2. Press **C**, or tap **Collect**, beside an item to put it in your pack. A pack holds three items. Press **X** to drop the last one.
+3. The first item lifted wakes the Bell Diver in the room farthest away. Knocks, a warning naming the room, and a glowing floor circle give four seconds to get clear. It drops inside the circle. On later passes it targets the room of the conscious operator carrying the lit lamp. It follows the doors and stairs between rooms, scraping overhead in each room it passes. The scrape carries up to three connections and fades with each one, so a room directly above or below can still be out of earshot. Without a lit carrier it follows a conscious operator.
+4. A struck operator drops the light and keeps their pack. A teammate has 75 seconds to reach them and press **Q** or **Revive partner**. A crew wipe, or a rescue timing out, ends the whole contract.
+5. Back at the hazard-striped lift in Intake, press **Q** to **Load** your pack, then watch the terminal list each item's value. Haul again, or extract: with both operators on the lift, choose **Extract crew**. If your partner is down, **Extract alone (−20%)** sells the lift for a fifth less, and their pack is lost. A partner who is only reconnecting, or a tap on **Leave to hub**, never triggers a sale.
+6. Extraction sells the lift and the extracting operators' packs. The receipt lists each item and any deduction. **Next expedition** opens the next facility for both operators. Meeting the quota wins the contract at once, and missing it after the third expedition loses it. **Return to lobbies** releases the seats at any receipt.
 
 ### Phase 6 playtest
 
@@ -99,7 +103,7 @@ The Phase 6 co-op playtest supports two operators in WebGL 2 browsers. The brows
 
 Use **Settings** on either device (or press **O**) to adjust look sensitivity and game volume, toggle sound captions, or keep the camera level when downed. Preferences persist on that device. Knock warnings, the strike circle and rescue timers stay visible with sound muted.
 
-For repeatable runs, use `VITE_RELAY_TEST_SEED=19 npm run build` for Line test or seed 20 for Black start. With no seed override, create fresh rooms to draw new layouts. Try each callout, swap jobs, and try leaving mid-round and forming a new lobby. Record confusing signs, missed warnings, and the seed.
+For repeatable runs, use `VITE_RELAY_TEST_SEED=19 npm run build`, which pins the contract seed and so all three facilities. With no seed override, create fresh rooms to draw new contracts. Try different hauling plans, and try leaving mid-contract and forming a new lobby. Record confusing signs, missed warnings, and the seed.
 
 Using the developer build on the least powerful device, open **Diagnostics** while moving. Record the device, browser version, seed, scene-ready time, frame p95 and RX/TX. Scene-ready time runs from starting the 3D client to drawing the first room snapshot. Frame p95 is the 95th percentile of visible frame intervals over approximately two seconds. RX/TX measures WebSocket message bytes per second for that client.
 
@@ -122,7 +126,7 @@ The [Pages repository](https://github.com/Kumori1313/relay-room) builds the game
 
 1. Run the hub’s local release suite with the game, poker, and tic-tac-toe checkouts. Apply the compatible Game Hub migrations with the Relay Room catalog switch disabled.
 2. Apply the private Realtime channel policies, then publish the reviewed source revision. Verify `/relay-room/release.json` on the hub origin.
-3. With the hub listing still hidden, enable the two-player catalog row for a private smoke test. From the hub checkout run `E2E_BASE_URL=https://kumori1313.github.io RELAY_RELEASE_SMOKE=true npm run test:relay`. This signs in two anonymous guests, completes a private round, reconnects, extracts, replays, and leaves. Set the hub’s `VITE_ENABLE_RELAY_ROOM` Actions variable to `true` and rerun its Pages workflow after the smoke test passes. Verify **Open Relay Room** from the published hub.
+3. With the hub listing still hidden, enable the two-player catalog row for a private smoke test. From the hub checkout run `E2E_BASE_URL=https://kumori1313.github.io RELAY_RELEASE_SMOKE=true npm run test:relay`. This signs in two anonymous guests, collects and loads salvage, extracts, refreshes during settlement, starts the next expedition, extracts again, replays, and leaves. Set the hub’s `VITE_ENABLE_RELAY_ROOM` Actions variable to `true` and rerun its Pages workflow after the smoke test passes. Verify **Open Relay Room** from the published hub.
 4. To suspend play, set `public.game_catalog.playable` to `false` for `id='relay-room'`. The adapter denies new starts and clients check active membership and the catalog flag every 2.5 seconds. The client offers **Return to Game Hub** after admission ends. Set the hub listing variable to `false` and redeploy to hide its link. To restore an earlier client, revert `SOURCE_REVISION`, then repeat the private smoke test.
 
 For a playtest report, select **Copy reference** on the shift report and paste the build, generator version, and seed into the [issue form](https://github.com/Kumori1313/Horror-Friendslop/issues/new?template=playtest.yml). Check out that revision and start a local run with the reported seed to reproduce the layout.

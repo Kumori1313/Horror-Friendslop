@@ -1,5 +1,5 @@
 import * as T from 'three';
-import { strikeRadius } from './mission.ts';
+import { itemName, items, strikeRadius } from './mission.ts';
 import { buildFacility } from './facility-scene.ts';
 import { anchor, geometryFor, type Layout } from './layout.ts';
 import { surfaceAt } from './room-templates.ts';
@@ -261,6 +261,23 @@ export function createScene(canvas: HTMLCanvasElement, generated = false) {
           if (g2) g2.visible = shown(p.x,p.z,p.feetY ?? 0);
         }
         if (diver.visible && drawn && room) diver.visible = drawn.has(room.id);
+        const mission = state.mission;
+        if (mission) {
+          // Salvage on the floor or stacked on the lift; packs are not drawn.
+          const lift = facility.lift, all = items(layout,mission);
+          const loaded = all.filter(i => i.loaded);
+          facility.salvage(all.filter(i => i.owner === null).map(i => {
+            if (i.loaded && lift) {
+              const n = loaded.indexOf(i);
+              return {...i,room:'intake',x:lift.x+(n%3-1)*0.45,y:lift.y+0.07+Math.floor(n/9)*0.45,z:lift.z+(Math.floor(n/3)%3-1)*0.45};
+            }
+            const moved = mission.haul.some(h => h.id === i.id);
+            return {...i,room:moved ? surfaceAt(g,i.x,i.z,i.y)?.room ?? i.room : i.room};
+          }));
+          const c = mission.contract, value = loaded.reduce((sum,i) => sum+i.value,0);
+          facility.terminal(['SALVAGE CONTRACT','Quota  '+c.credited+' / '+c.quota,'Expedition  '+(c.index+1)+' / '+c.expeditions,
+            'On lift  '+loaded.length+' · value '+value,...loaded.slice(-3).reverse().map(i => '+ '+itemName(i.kind)+'  '+i.value)]);
+        }
       }
     }
     renderer.render(scene,camera);

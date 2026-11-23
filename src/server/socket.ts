@@ -5,6 +5,7 @@ import type { Duplex } from 'node:stream';
 import { WebSocketServer, WebSocket } from 'ws';
 import type { Layout } from '../layout.ts';
 import { Simulation } from './simulation.ts';
+import { actions } from '../room.ts';
 import type { Input, ServerMessage } from '../room.ts';
 
 function validInput(value: Input | undefined) {
@@ -49,6 +50,15 @@ export function createLiveRoom(graceMs: number, onEmpty?: () => void, layout?: L
   let room = new Simulation(layout);
   function send(socket: WebSocket, message: ServerMessage) {
     if (socket.readyState === WebSocket.OPEN) socket.send(JSON.stringify(message));
+  }
+  // A contract's next expedition swaps the facility: send it to every seat.
+  let shown = room.layout;
+  function announce() {
+    if (room.layout === shown) return;
+    shown = room.layout;
+    for (const seat of seats.values()) {
+      if (seat.ws) send(seat.ws,{type:'joined',id:seat.id,ticket:{round:room.state.round,token:seat.token},lastAction:seat.lastAction,layout:room.layout});
+    }
   }
   function stopWalking(id: number) {
     const input = room.inputs.get(id)!;
@@ -100,10 +110,10 @@ export function createLiveRoom(graceMs: number, onEmpty?: () => void, layout?: L
         seat.lastInput = Date.now();
         room.inputs.set(seat.id,m.input);
       }
-      if (m.type === 'action' && Number.isSafeInteger(m.seq) && m.seq > seat.lastAction &&
-          ['take','drop','toggle','open-door','operate'].includes(m.action)) {
+      if (m.type === 'action' && Number.isSafeInteger(m.seq) && m.seq > seat.lastAction && actions.includes(m.action)) {
         seat.lastAction = m.seq;
         room.act(seat.id,m.action);
+        announce();
       }
     });
     ws.on('pong', () => { if (seat?.ws === ws) seat.lastPong = Date.now(); });
@@ -126,7 +136,7 @@ export function createLiveRoom(graceMs: number, onEmpty?: () => void, layout?: L
         seats.delete(seat.token);
       } else if (now - seat.lastInput > 350) stopWalking(seat.id);
     }
-    if (!seats.size) { room = new Simulation(layout); onEmpty?.(); return; }
+    if (!seats.size) { room = new Simulation(layout); shown = room.layout; onEmpty?.(); return; }
     room.tick(1 / 30);
     for (const {ws,lastPong} of seats.values()) {
       if (ws?.readyState !== WebSocket.OPEN) continue;

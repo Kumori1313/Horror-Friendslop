@@ -2,7 +2,7 @@ import { distances, roomLabel } from './layout.ts';
 import type { Layout } from './layout.ts';
 import type { Player, Snapshot } from './room.ts';
 import type { Preferences } from './preferences.ts';
-import { finished } from './mission.ts';
+import { abandonCut, finished, itemName } from './mission.ts';
 
 const el = (id: string) => document.getElementById(id)!;
 
@@ -22,7 +22,7 @@ export function missionHud(preferences: Preferences) {
       copy.textContent = 'Select and copy';
     }
   };
-  let lastBeat = '', lastStage = '', caption = '', captionUntil = 0;
+  let lastBeat = '', caption = '', captionUntil = 0;
   function subtitle(label: string) {
     caption = label;
     captionUntil = performance.now()+2500;
@@ -46,33 +46,53 @@ export function missionHud(preferences: Preferences) {
   }
   // Scraping carries through doors and stairs, fading over four connections.
   const hearing = [1,0.6,0.35,0.2];
+  const outcomes = {quota:'Quota met',deadline:'Quota missed',wipe:'Crew lost',stranded:'Operator stranded',left:'Contract abandoned'};
+  function line(label: string, value: string, kind = '') {
+    const li = document.createElement('li');
+    if (kind) li.className = kind;
+    li.append(Object.assign(document.createElement('span'),{textContent:label}),Object.assign(document.createElement('span'),{textContent:value}));
+    return li;
+  }
+  let lastLoaded = 0, wasAwake = false, shownReport = '';
   function update(layout: Layout, state: Snapshot, self: Player, room: string | undefined, briefing: boolean) {
     const m = state.mission!;
-    const end = finished(m.stage);
-    el('result').hidden = !end;
-    if (end) {
+    const c = m.contract;
+    const end = finished(m.stage), report = end || m.stage === 'settled';
+    el('result').hidden = !report;
+    el('next').hidden = m.stage !== 'settled';
+    if (report) {
       el('mission').hidden = true;
-      const details = 'Build ' + import.meta.env.VITE_RELAY_BUILD + ' · Layout v' + layout.version + ' · Seed ' + layout.seed;
+      const details = 'Build '+import.meta.env.VITE_RELAY_BUILD+' · Layout v'+layout.version+' · Contract '+c.seed+' · Expedition '+(c.index+1)+' · Seed '+layout.seed;
       if (reference.value !== details) {
         reference.value = details;
         copy.textContent = 'Copy reference';
       }
-      const won = m.stage === 'won';
-      el('result-title').textContent = won ? (m.solo ? 'Operator extracted' : 'Crew extracted') : 'Signal lost';
-      if (m.solo) {
-        el('result-detail').textContent = won ? 'You made it out.' : 'Your operator went down.';
-        return;
-      }
-      el('result-detail').textContent = won ? 'Both operators made it out. Create a fresh lobby for another facility.' :
-        'The crew could not complete the shift. Create a fresh lobby to try again.';
+      // Rebuild the receipt only when the contract changes.
+      const key = m.stage+'/'+c.receipts.length+'/'+m.outcome;
+      if (key === shownReport) return;
+      shownReport = key;
+      if (m.stage === 'settled') tone(520,780,0.4,0.2);
+      const last = c.receipts.at(-1), sold = last && last.expedition === c.index ? last : undefined;
+      const left = c.expeditions-c.index-1;
+      el('result-eyebrow').textContent = m.stage === 'settled' ? 'Expedition '+(c.index+1)+' of '+c.expeditions+' sold' : 'Contract report';
+      el('result-title').textContent = m.stage === 'settled' ? 'Credited '+(sold?.credited ?? 0) : outcomes[m.outcome ?? 'deadline'];
+      el('result-detail').textContent = 'Quota '+c.credited+' of '+c.quota+(m.stage === 'settled' ? ' · '+left+(left === 1 ? ' expedition' : ' expeditions')+' remaining' : '');
+      const list = el('receipt');
+      list.replaceChildren();
+      if (sold) {
+        for (const item of sold.items) list.append(line(itemName(item.kind),String(item.value)));
+        if (!sold.items.length) list.append(line('Nothing loaded','0'));
+        if (sold.deduction) list.append(line('Partner left behind −'+abandonCut*100+'%','−'+sold.deduction,'cut'));
+        list.append(line('Credited',String(sold.credited),'total'));
+      } else for (const r of c.receipts) list.append(line('Expedition '+(r.expedition+1),String(r.credited)));
       return;
     }
-    if (lastStage && m.stage !== lastStage) {
-      if (m.stage === 'trace') { tone(70,220,0.65,0.25); subtitle('Switchboard winding up'); }
-      if (m.stage === 'answer') { tone(540,680,0.35,0.18); subtitle('Relay test tone'); }
-      if (m.stage === 'extract') { tone(340,110,0.6,0.2); subtitle('Exit circuit engaged'); }
-    }
-    lastStage = m.stage;
+    shownReport = '';
+    const loaded = m.haul.filter(h => h.loaded).length;
+    if (loaded > lastLoaded) { tone(420,620,0.25,0.18); subtitle('Salvage loaded onto the lift'); }
+    lastLoaded = loaded;
+    if (m.awake && !wasAwake) { tone(120,60,0.9,0.22); subtitle('Something shifts in the ceiling wiring'); }
+    wasAwake = !!m.awake;
     const alerts: string[] = [];
     for (const d of m.down) alerts.push((d.id === self.id ? 'You are down. Your partner can revive you' :
       'Operator '+d.id+' is down. Reach them and revive')+' · '+Math.ceil(d.seconds)+'s');

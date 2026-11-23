@@ -1,5 +1,5 @@
 import type { Events } from './connection.ts';
-import { generatorVersion, stairwellLayout } from './layout.ts';
+import { generatorVersion, stairwellLayout, type Layout } from './layout.ts';
 import type { Action, Input, Snapshot } from './room.ts';
 import { generateLayout } from './server/generate-layout.ts';
 import { Simulation } from './server/simulation.ts';
@@ -38,7 +38,9 @@ export class SoloSession {
     if (!this.sim.state.players.length) this.sim.join(1);
     this.events = events;
   }
+  private shownLayout?: Layout;
   connect() {
+    this.shownLayout = this.sim.layout;
     this.events.joined(1,{round:this.sim.state.round,token:'solo'},this.sim.layout);
     this.events.snapshot(this.sim.state,true);
     this.save();
@@ -46,8 +48,15 @@ export class SoloSession {
   input(input: Input) { this.sim.inputs.set(1,input); }
   action(action: Action) {
     this.sim.act(1,action);
+    this.announceLayout();
     this.events.snapshot(this.sim.state,false);
     this.save();
+  }
+  // A contract's next expedition brings a new facility.
+  private announceLayout() {
+    if (this.sim.layout === this.shownLayout) return;
+    this.shownLayout = this.sim.layout;
+    this.events.joined(1,{round:this.sim.state.round,token:'solo'},this.sim.layout);
   }
   tick(dt: number) {
     this.sim.tick(dt);

@@ -3,14 +3,15 @@ import { drawTemplates } from './template-scene.ts';
 import { anchor, geometryFor, roomLabel } from './layout.ts';
 import type { Layout, Kind } from './layout.ts';
 import { doorWidth, orient, outward } from './room-templates.ts';
+import { itemKinds, spawnSalvage, type ItemKind } from './salvage.ts';
 
 export const colors: Record<Kind,number> = {
-  intake:0xe0b258, relay:0xe6a840, exit:0x70cfaf, switchboard:0xe0894e, chiller:0x57b9da, pump:0x648d92,
+  intake:0xe0b258, relay:0xe6a840, switchboard:0xe0894e, chiller:0x57b9da, pump:0x648d92,
   stores:0xb78155, closet:0xc49a6c, boiler:0xb5654a, lockers:0x8c8fb8, control:0x7fb069, coldstore:0x9fd3e6,
   filters:0xa3b86c, generator:0xd4c24f, gallery:0x7d8f99, office:0xc98a9b, workshop:0xb88a4a, tunnel:0x6f8278,
   hall:0x8fa3a0, stairwell:0xd9d2b4, corridor:0x93a599,
 };
-const stations: Kind[] = ['relay','exit','switchboard','intake'];
+const stations: Kind[] = ['intake'];
 const textured = new Set([0x748078,0x515e59]);
 const lamp = 0xe4e7c9;
 
@@ -103,9 +104,8 @@ export function buildFacility(layout: Layout, surface: T.Texture) {
       if (ahead.kind === 'corridor' || orient(here.template,here.turn).height < 3.1) continue;
       label(here.id,roomLabel(ahead),o.x+sign*nx*0.16,o.y+2.78,o.z+sign*nz*0.16,Math.atan2(sign*nx,sign*nz));
     }
-    // The amber jambs frame Intake even after its bulkhead opens. At Exit the
-    // three green lights sit over the door and read from either side. Each
-    // landmark belongs to both rooms so it shows from whichever side is drawn.
+    // The amber jambs frame Intake, the way back to base, even after its
+    // bulkhead opens. They belong to both rooms so they show from either side.
     for (const room of [a.id,b.id]) {
       if (a.kind === 'intake' || b.kind === 'intake') {
         for (const side of [-1,1]) {
@@ -113,11 +113,21 @@ export function buildFacility(layout: Layout, surface: T.Texture) {
           for (let band=0;band<6;band++) box(room,colors.intake,o.x+nz*offset,o.y+0.26+band*0.4,o.z+nx*offset,nx?0.32:0.06,0.24,nz?0.32:0.06);
         }
       }
-      if (a.kind === 'exit' || b.kind === 'exit') {
-        for (const offset of [-0.65,0,0.65]) box(room,colors.exit,o.x+nz*offset,o.y+2.66,o.z+nx*offset,nx?0.34:0.36,0.16,nz?0.34:0.36);
-      }
     }
     for (const side of [-1,1]) box(a.id,0xb69c60,o.x+nz*side*0.8,o.y+0.009,o.z+nx*side*0.8,nx?1.2:0.07,0.018,nz?1.2:0.07);
+  }
+  // The cargo lift: a hazard-striped frame around Intake's pad.
+  const intake = layout.rooms.find(r => r.kind === 'intake');
+  const lift = intake && anchor(intake);
+  if (intake && lift) {
+    for (const [dx,dz,w,d] of [[0,-0.86,1.84,0.12],[0,0.86,1.84,0.12],[-0.86,0,0.12,1.84],[0.86,0,0.12,1.84]]) {
+      box(intake.id,0x1c2222,lift.x+dx,lift.y+0.03,lift.z+dz,w,0.06,d);
+      const long = w > d ? w : d;
+      for (let i=0;i<6;i++) {
+        const t = -long/2+(i+0.5)*long/6;
+        box(intake.id,colors.intake,lift.x+dx+(w > d ? t : 0),lift.y+0.062,lift.z+dz+(w > d ? 0 : t),w > d ? 0.14 : 0.12,0.006,w > d ? 0.12 : 0.14);
+      }
+    }
   }
   for (const [room,byMaterial] of batches) {
     for (const [material,batch] of byMaterial) groups.get(room)!.add(new T.Mesh(batch.build(),material));
@@ -129,6 +139,50 @@ export function buildFacility(layout: Layout, surface: T.Texture) {
     const passage = layout.passages.find(p => p.id === d.id)!;
     return {id:d.id,mesh,rooms:[passage.a,passage.b]};
   });
+  // The contract terminal's screen faces into Intake from the west wall.
+  const desk = geometry.props.find(p => p.kind === 'terminal');
+  const screenCanvas = document.createElement('canvas'); screenCanvas.width = 512; screenCanvas.height = 320;
+  const screenTexture = new T.CanvasTexture(screenCanvas); screenTexture.colorSpace = T.SRGBColorSpace;
+  const screen = new T.Mesh(new T.PlaneGeometry(1.25,0.78),new T.MeshBasicMaterial({map:screenTexture}));
+  if (desk) {
+    screen.position.set(desk.x+desk.w/2+0.012,desk.y+desk.h+0.45,desk.z);
+    screen.rotation.y = Math.PI/2;
+    groups.get(desk.room)!.add(screen);
+  }
+  let screenText = '';
+  function terminal(lines: string[]) {
+    const text = lines.join('\n');
+    if (text === screenText) return;
+    screenText = text;
+    const g = screenCanvas.getContext('2d')!;
+    g.fillStyle = '#0d1a17'; g.fillRect(0,0,512,320);
+    g.fillStyle = '#7ee0b5'; g.font = 'bold 30px monospace'; g.textBaseline = 'top';
+    lines.forEach((l,i) => { g.fillStyle = i ? '#bfe8d4' : '#7ee0b5'; g.fillText(l,22,18+i*38,468); });
+    screenTexture.needsUpdate = true;
+  }
+  // One instanced box per kind of salvage, so any number of items costs one
+  // draw each. Items in rooms the camera cannot see are left out.
+  const salvageMeshes = new Map((Object.keys(itemKinds) as ItemKind[]).map(kind => {
+    const k = itemKinds[kind], count = spawnSalvage(layout).filter(i => i.kind === kind).length;
+    const mesh = new T.InstancedMesh(Batch.unit,new T.MeshStandardMaterial({color:k.color,roughness:0.55,metalness:0.35,emissive:k.color,emissiveIntensity:0.08}),Math.max(1,count));
+    mesh.count = 0; mesh.frustumCulled = false; root.add(mesh);
+    return [kind,mesh];
+  }));
+  const place = new T.Object3D();
+  let salvageKey = '';
+  function salvage(list: {kind: ItemKind; x: number; y: number; z: number; room: string}[]) {
+    const visible = list.filter(i => drawn(i.room));
+    const key = visible.map(i => i.kind+i.x.toFixed(2)+i.y.toFixed(2)+i.z.toFixed(2)).join('|');
+    if (key === salvageKey) return;
+    salvageKey = key;
+    for (const mesh of salvageMeshes.values()) mesh.count = 0;
+    for (const i of visible) {
+      const mesh = salvageMeshes.get(i.kind)!, [w,h,d] = itemKinds[i.kind].size;
+      place.position.set(i.x,i.y+h/2,i.z); place.scale.set(w,h,d); place.rotation.set(0,(i.x*7+i.z*3)%Math.PI,0); place.updateMatrix();
+      mesh.setMatrixAt(mesh.count++,place.matrix);
+    }
+    for (const mesh of salvageMeshes.values()) mesh.instanceMatrix.needsUpdate = true;
+  }
   let opened: readonly string[] = [], shown: Set<string> | undefined;
   const drawn = (room: string) => !shown || shown.has(room);
   function refresh() {
@@ -142,10 +196,12 @@ export function buildFacility(layout: Layout, surface: T.Texture) {
     const geometries = new Set<T.BufferGeometry>(), materials = new Set<T.Material>();
     root.traverse(item=>{ if (item instanceof T.Mesh) { geometries.add(item.geometry); materials.add(item.material); } });
     geometries.delete(Batch.unit);
+    for (const mesh of salvageMeshes.values()) mesh.dispose();
+    screenTexture.dispose();
     for (const mat of labels.values()) mat.map?.dispose();
     for (const resource of [...geometries,...materials]) resource.dispose();
     surface.dispose();
     root.removeFromParent();
   }
-  return {root,update,show,dispose,rooms:groups.size};
+  return {root,update,show,dispose,terminal,salvage,lift,rooms:groups.size};
 }

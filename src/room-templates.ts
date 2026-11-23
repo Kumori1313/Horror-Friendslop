@@ -8,7 +8,7 @@ export interface Patch { x:number; z:number; w:number; d:number }
 export interface Surface extends Patch { y:number; rise?:number; along?:'x'; stairs?:boolean; catwalk?:boolean }
 export interface Socket { name:string; side:Side; x:number; z:number; y:number }
 export type PropKind = 'machine' | 'shelf' | 'tank' | 'locker' | 'crate' | 'console' | 'pump' | 'chiller' |
-  'switchboard' | 'relay' | 'generator' | 'filter' | 'bench' | 'desk' | 'pipe';
+  'switchboard' | 'relay' | 'generator' | 'filter' | 'bench' | 'desk' | 'pipe' | 'terminal';
 export interface Prop extends Patch { kind:PropKind; h:number; y?:number }
 export interface RoomTemplate {
   name:string;
@@ -52,10 +52,11 @@ const arm = (side:Side) => ({north:patch(0,-1.6,2.4,0.8),east:patch(1.6,0,0.8,2.
 const hallFloor = patch(0,0,12,12);
 
 const templates = {
-  intake:block('Intake',3,2,{pad:{x:4,y:0,z:0},sockets:block('',3,2).sockets.filter(s=>s.side!=='south'),
-    props:[prop('locker',0,5.6,2.4,0.6,2),prop('locker',8,5.6,2.4,0.6,2)]}),
+  // Intake is base: the cargo lift pad sits in front of the contract terminal
+  // on the west wall, between the two west doorways.
+  intake:block('Intake',3,2,{pad:{x:0.5,y:0,z:2},sockets:block('',3,2).sockets.filter(s=>s.side!=='south'),
+    props:[prop('locker',0,5.6,2.4,0.6,2),prop('locker',8,5.6,2.4,0.6,2),prop('terminal',-1.65,2,0.6,1.4,1.3)]}),
   relay:block('Relay station',2,2,{props:[prop('relay',2,-1.3,1.4,1.2,1.4)]}),
-  exit:block('Exit bay',2,2,{props:[prop('crate',5.3,2,1.2,1.4,1.1)]}),
   switchboard:block('Switchboard',2,2,{props:[prop('switchboard',2,-1.35,1.4,1.1,2)]}),
   chiller:block('Chiller hall',2,1,{props:[prop('chiller',2,-1.55,1.4,0.8,1.7),prop('chiller',2,1.55,1.4,0.8,1.7)]}),
   pump:block('Pump hall',3,2,{props:[2,6].flatMap(x=>[prop('pump',x,-1.3,1.4,1.2,1.3),prop('pump',x,5.3,1.4,1.2,1.3)])}),
@@ -105,9 +106,8 @@ const templates = {
 export type TemplateKind = keyof typeof templates;
 export const roomTemplates: Record<TemplateKind,RoomTemplate> = templates;
 export const corridorKinds = ['straight','corner','tee','cross'] as const;
-export const missionKinds = ['relay','exit','switchboard'] as const;
 // Destinations a seed can draw from, each at most once. Connectors may repeat.
-export const destinationPool:TemplateKind[] = ['chiller','pump','stores','closet','boiler','lockers','control',
+export const destinationPool:TemplateKind[] = ['relay','switchboard','chiller','pump','stores','closet','boiler','lockers','control',
   'coldstore','filters','generator','gallery','office','workshop','tunnel','hall'];
 export const isCorridor = (kind:TemplateKind) => (corridorKinds as readonly string[]).includes(kind);
 

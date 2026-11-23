@@ -45,6 +45,11 @@ pre { margin-bottom: 0; line-height: 1.5 }
 #live-leave { pointer-events: auto; padding: .45rem }
 
 #sector { display: block; color: #edc47d; letter-spacing: .03em; font-weight: normal }
+#pack { display: block; color: #c9d6cf; letter-spacing: .03em; font-weight: normal; font-size: .85em }
+#receipt { list-style: none; padding: 0; margin: .8rem 0; font-variant-numeric: tabular-nums }
+#receipt li { display: flex; justify-content: space-between; gap: 1rem; padding: .15rem 0; border-bottom: 1px solid #2a3936 }
+#receipt li.total { font-weight: bold; color: #fff3d8; border-bottom: 0 }
+#receipt li.cut { color: #f0a17c }
 #layout-map { width: 100%; max-width: 300px; height: auto; background: #172421 }
 #floor-plan { margin: .75rem 0; color: #d2d7c7 }
 #top-hud { position: absolute; inset: 0 0 auto; pointer-events: none }

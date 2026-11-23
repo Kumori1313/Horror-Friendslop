@@ -1,10 +1,10 @@
 import { clearAt } from './room.ts';
 import type { Point } from './room.ts';
 
-import { assembleTemplates, cell, corridorKinds, destinationPool, isCorridor, missionKinds, orient, roomTemplates, socketAt, storey, surfaceAt, surfaceHeight, obstaclesAt } from './room-templates.ts';
+import { assembleTemplates, cell, corridorKinds, destinationPool, isCorridor, orient, roomTemplates, socketAt, storey, surfaceAt, surfaceHeight, obstaclesAt } from './room-templates.ts';
 import type { PlacedSurface, Placement, Point3, Solid, TemplateGeometry, TemplateKind, TemplateLink } from './room-templates.ts';
 
-export const generatorVersion = 3;
+export const generatorVersion = 4;
 export const playerRadius = 0.25;
 export interface Rect extends Point { w: number; d: number }
 export type Kind = Exclude<TemplateKind,typeof corridorKinds[number]> | 'corridor';
@@ -13,8 +13,7 @@ export interface Passage extends TemplateLink { id: string; bulkhead: boolean }
 export interface Layout {
   seed: number; version: number; fallback: boolean; tour?: boolean;
   rooms: Module[]; passages: Passage[];
-  callout: 'line-test' | 'black-start';
-  lampId: 'inspection-light'; objectiveId: string; exitId: string;
+  lampId: 'inspection-light';
 }
 export type Geometry = TemplateGeometry;
 
@@ -47,8 +46,7 @@ export function stairwellLayout(): Layout {
     {a:'hall',from:'floor-east-4',b:'tunnel',to:'side'},
     {a:'tunnel',from:'mouth',b:'intake',to:'east0'},
   ] as TemplateLink[]).map(e=>({...e,id:e.a+'-'+e.b,bulkhead:false}));
-  return {version:generatorVersion,seed:0,fallback:false,tour:true,callout:'line-test',lampId:'inspection-light',
-    objectiveId:'hall',exitId:'intake',rooms,passages};
+  return {version:generatorVersion,seed:0,fallback:false,tour:true,lampId:'inspection-light',rooms,passages};
 }
 
 // Both collision and rendering use these exact slabs.
@@ -224,11 +222,9 @@ export function validLayout(layout: Layout) {
       ![0,storey].includes(r.y) || !Number.isInteger(r.x/cell) || !Number.isInteger(r.z/cell))) return false;
   const intake = rooms.find(r => r.kind === 'intake');
   if (!intake || intake.x !== -4 || intake.y !== 0 || intake.z !== 0 || intake.turn !== 0) return false;
-  if (byId.get(layout.objectiveId)?.kind !== 'relay' || byId.get(layout.exitId)?.kind !== 'exit') return false;
   const destinations = rooms.filter(r => r.kind !== 'corridor' && r.kind !== 'stairwell');
   if (new Set(destinations.map(r => r.kind)).size !== destinations.length) return false;
-  if (!missionKinds.every(k => destinations.some(r => r.kind === k))) return false;
-  if (destinations.some(r => r.kind !== 'intake' && !(missionKinds as readonly string[]).includes(r.kind) && !destinationPool.includes(r.template))) return false;
+  if (destinations.some(r => r.kind !== 'intake' && !destinationPool.includes(r.template))) return false;
   const filled = new Set<string>();
   for (const r of rooms) for (const key of cellsOf(r)) {
     if (filled.has(key) || +key.split(',')[2] > 1) return false;

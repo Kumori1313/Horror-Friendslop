@@ -10,7 +10,8 @@ export interface Input { forward: number; right: number; yaw: number; pitch: num
 export interface Player extends Point { feetY?: number; connected: boolean; id: number; yaw: number; pitch: number }
 export interface Lamp extends Point { owner: number | null; on: boolean; y: number; yaw: number; pitch: number }
 export interface Snapshot { round: string; update: number; players: Player[]; lamp: Lamp; opened?: string[]; mission?: Mission }
-export type Action = 'take' | 'drop' | 'toggle' | 'open-door' | 'operate';
+export type Action = 'take' | 'drop' | 'toggle' | 'open-door' | 'operate' | 'collect' | 'drop-item' | 'next';
+export const actions: Action[] = ['take','drop','toggle','open-door','operate','collect','drop-item','next'];
 export interface Ticket { round: string; token: string }
 export interface Admission { lobby: string; round: number; token: string }
 export type ClientMessage =

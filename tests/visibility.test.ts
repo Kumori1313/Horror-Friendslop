@@ -27,7 +27,8 @@ function occluders(g: Geometry, opened: readonly string[]) {
   const boxes: {min: T.Vector3; max: T.Vector3; rooms: string[]}[] = [];
   const add = (s: {x: number; z: number; w: number; d: number}, y0: number, y1: number, rooms: string[]) =>
     boxes.push({min:new T.Vector3(s.x-s.w/2,y0,s.z-s.d/2),max:new T.Vector3(s.x+s.w/2,y1,s.z+s.d/2),rooms});
-  for (const s of [...g.walls,...g.roofs,...g.props]) add(s,s.y,s.y+s.h,[s.room]);
+  for (const s of g.walls) add(s,s.y-0.13,s.y+s.h,[s.room]);
+  for (const s of [...g.roofs,...g.props]) add(s,s.y,s.y+s.h,[s.room]);
   for (const s of g.surfaces) if (!s.rise) add(s,s.y-0.13,s.y,[s.room]);
   for (const o of g.openings) {
     const door = g.doors.find(d => Math.abs(d.x-o.x) < 1e-6 && Math.abs(d.z-o.z) < 1e-6 && Math.abs(d.y-o.y) < 1e-6);

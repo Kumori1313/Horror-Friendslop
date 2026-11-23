@@ -1,5 +1,6 @@
 import { bindPreferences } from './preferences.ts';
-import { assignment, finished } from './mission.ts';
+import { assignment, collectable, finished, itemName, pack } from './mission.ts';
+import { packSize } from './salvage.ts';
 import { missionHud } from './mission-hud.ts';
 import { mountDiagnostics } from './diagnostics.ts';
 import './style.css';
@@ -41,7 +42,7 @@ function start(render: ReturnType<typeof createScene>, mode?: Crew | 'solo', sce
   let state: Snapshot | undefined;
   // Clients without the simulation on hand predict their own operator.
   let prediction: Prediction | undefined;
-  const frozen = (s: Snapshot) => !!s.mission && (finished(s.mission.stage) || s.mission.down.some(d => d.id === id));
+  const frozen = (s: Snapshot) => !!s.mission && (finished(s.mission.stage) || s.mission.stage === 'settled' || s.mission.down.some(d => d.id === id));
   let layout: Layout | undefined, geometry: Geometry | undefined;
   const doorButton = element<HTMLButtonElement>('open-door');
   const { preferences, open: openSettings } = bindPreferences(pause);
@@ -59,6 +60,8 @@ function start(render: ReturnType<typeof createScene>, mode?: Crew | 'solo', sce
   const pad = element('move-pad');
   const thumb = element('thumb');
   const take = element<HTMLButtonElement>('take');
+  const collect = element<HTMLButtonElement>('collect');
+  const dropItem = element<HTMLButtonElement>('drop-item');
   const toggle = element<HTMLButtonElement>('toggle');
   function showControls() {
     touchControls.hidden = !playing || !touchMode;
@@ -95,6 +98,11 @@ function start(render: ReturnType<typeof createScene>, mode?: Crew | 'solo', sce
   function openDoor() { if (playing && state && geometry) connection.action('open-door'); }
   doorButton.onclick = openDoor;
   take.onclick = useFlashlight;
+  function collectItem() { if (playing && state?.mission) connection.action('collect'); }
+  function dropSalvage() { if (playing && state?.mission) connection.action('drop-item'); }
+  collect.onclick = collectItem;
+  dropItem.onclick = dropSalvage;
+  element('next').onclick = () => { if (state?.mission?.stage === 'settled') connection.action('next'); };
   toggle.onclick = switchLight;
   showControls();
   function controls(): Input {
@@ -110,7 +118,7 @@ function start(render: ReturnType<typeof createScene>, mode?: Crew | 'solo', sce
     if (solo && state && !finished(state.mission?.stage)) updateHud(state);
   }
   function control() {
-    if (!state || finished(state.mission?.stage)) return;
+    if (!state || finished(state.mission?.stage) || state.mission?.stage === 'settled') return;
     if (state.mission) hud.enableSound();
     brief.hidden = true; reticle.hidden = false; playing = true;
     // Arrow-key look remains available when pointer capture is unavailable.
@@ -142,6 +150,8 @@ function start(render: ReturnType<typeof createScene>, mode?: Crew | 'solo', sce
     if (e.code === 'KeyE') useFlashlight();
     if (e.code === 'KeyR') openDoor();
     if (e.code === 'KeyF') switchLight();
+    if (e.code === 'KeyC') collectItem();
+    if (e.code === 'KeyX') dropSalvage();
     if (e.code === 'Escape') {
       pause();
       if (document.pointerLockElement) document.exitPointerLock();
@@ -164,9 +174,14 @@ function start(render: ReturnType<typeof createScene>, mode?: Crew | 'solo', sce
     const here = layout && geometry ? roomAt(layout,geometry,p) : undefined;
     const task = layout && assignment(layout,s,p,solids);
     operate.hidden = !task;
-    if (task) operate.textContent = task;
+    if (task) operate.textContent = task.label;
+    const mission = s.mission, exploring = mission?.stage === 'explore' && !down;
+    const carried = layout && mission ? pack(layout,mission,id) : [];
+    const item = layout && mission && exploring ? collectable(layout,mission,p,solids) : undefined;
+    element('pack').hidden = !mission;
+    element('pack').textContent = 'Pack '+carried.length+'/'+packSize+(carried.length ? ' · '+carried.map(i => itemName(i.kind)).join(', ') : '');
     if (layout && s.mission) {
-      if (finished(s.mission.stage)) {
+      if (finished(s.mission.stage) || s.mission.stage === 'settled') {
         if (playing) pause();
         brief.hidden = true;
         if (document.pointerLockElement) document.exitPointerLock();
@@ -176,17 +191,22 @@ function start(render: ReturnType<typeof createScene>, mode?: Crew | 'solo', sce
     const reachable = canTake(p,l,solids);
     if (layout) element('sector').textContent = here ? roomLabel(here) : 'Corridor';
     if (touchMode) {
+      collect.hidden = !item;
+      if (item) collect.textContent = 'Collect '+itemName(item.kind);
+      dropItem.hidden = !carried.length || !exploring;
       take.disabled = !!down || (!holding && !reachable);
       take.textContent = holding ? 'Drop' : 'Pick up';
       toggle.disabled = !!down || !holding;
       toggle.textContent = l.on ? 'Light off' : 'Light on';
     }
     if (!brief.hidden) prompt.textContent = solo ? '' : s.players.length === 2 ? 'Both seats occupied' : 'Waiting for a partner';
-    else if (finished(s.mission?.stage)) prompt.textContent = 'Shift ended';
+    else if (finished(s.mission?.stage)) prompt.textContent = 'Contract ended';
+    else if (s.mission?.stage === 'settled') prompt.textContent = 'Expedition sold';
     else if (!playing) prompt.textContent = touchMode ? 'Tap the room to resume' : 'Click the room to resume';
-    else if (task) prompt.textContent = touchMode ? task : 'Q  '+task;
+    else if (task) prompt.textContent = touchMode ? task.label : 'Q  '+task.label;
     else if (down) prompt.textContent = 'Waiting for rescue';
     else if (door) prompt.textContent = touchMode ? 'Bulkhead within reach' : 'R  Open bulkhead';
+    else if (item) prompt.textContent = touchMode ? itemName(item.kind)+' within reach' : 'C  Collect '+itemName(item.kind);
     else if (holding) prompt.textContent = touchMode ? 'You hold the flashlight' : 'E  Drop flashlight   ·   F  Switch ' + (l.on ? 'off' : 'on');
     else if (l.owner) prompt.textContent = 'Operator ' + l.owner + ' holds the flashlight';
     else prompt.textContent = reachable ? (touchMode ? 'Flashlight within reach' : 'E  Pick up flashlight') : '';
@@ -204,8 +224,10 @@ function start(render: ReturnType<typeof createScene>, mode?: Crew | 'solo', sce
         layout = plan;
         geometry = geometryFor(plan);
         element('sector').hidden = false;
-        const backup = plan.callout === 'black-start';
-        element('brief-type').textContent = plan.tour ? 'Stairwell playtest' : backup ? 'Black start' : 'Line test';
+        element('brief-type').textContent = plan.tour ? 'Stairwell playtest' : 'Salvage contract';
+        // A new expedition puts everyone back at Intake, facing its bulkhead.
+        if (prediction) prediction.self = undefined;
+        yaw = 0; pitch = -0.12;
       }
       id = seat;
       if (!mode) sessionStorage.setItem(key,JSON.stringify(ticket));

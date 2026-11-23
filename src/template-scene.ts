@@ -32,7 +32,8 @@ export function drawTemplates(g:TemplateGeometry, emit:RoomBox, accent:(room:str
   }
   for (const w of g.walls) {
     room=w.room;
-    box(0x748078,w.x,w.y+w.h/2,w.z,w.w,w.h,w.d);
+    // Walls reach down through the 0.13 m floor slab, so no seam shows beneath them.
+    box(0x748078,w.x,w.y+w.h/2-0.065,w.z,w.w,w.h+0.13,w.d);
     if (w.h>1.2) box(steel,w.x,w.y+0.42,w.z,w.w+0.025,0.1,w.d+0.025);
   }
   for (const r of g.roofs) {
@@ -113,6 +114,11 @@ export function drawTemplates(g:TemplateGeometry, emit:RoomBox, accent:(room:str
         box(0x6b5a44,x,y+h-0.03,z,w,0.06,d);
         for (const sx of [-1,1]) for (const sz of [-1,1]) box(steel,x+sx*(w/2-0.06),y+(h-0.06)/2,z+sz*(d/2-0.06),0.05,h-0.06,0.05);
         box(color,x,y+h+0.06,z,0.22,0.12,0.16);
+        break;
+      case 'terminal':
+        box(0x182c2c,x,y+h/2,z,w,h,d);
+        box(0x0d1a17,x,y+h+0.45,z,w*0.5,0.9,d);
+        box(color,x,y+h-0.06,z,w+0.03,0.1,d+0.03);
         break;
       case 'pipe':
         box(0x5b6b66,x,y+h/2,z,w,h,d);

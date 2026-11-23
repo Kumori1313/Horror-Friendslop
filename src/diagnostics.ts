@@ -11,7 +11,7 @@ export function mountDiagnostics(sceneStarted: number, interrupt?: () => void, r
       <h2>Room diagnostics</h2>
       <div id="floor-plan" hidden>
         <canvas id="layout-map" width="300" height="175" aria-label="Facility floor plan"></canvas>
-        <small>I · Intake　S · Switchboard　C · Chiller　R · Relay　X · Exit</small>
+        <small>I · Intake (base)　≡ · Stairwell　amber · salvage</small>
       </div>
       <pre id="stats"></pre><button id="outage">Simulate 2 s outage</button>
     </aside>`);
@@ -61,7 +61,8 @@ export function mountDiagnostics(sceneStarted: number, interrupt?: () => void, r
       ...(layout ? [
         'Layout v' + layout.version + ' · seed ' + layout.seed + (layout.fallback ? ' (fallback)' : ''),
         'Rooms   ' + layout.rooms.length + ' · passages ' + layout.passages.length,
-        'Relay   ' + layout.objectiveId + ' · Exit ' + layout.exitId,
+        ...(s.mission ? ['Contract  '+s.mission.contract.seed+' · expedition '+(s.mission.contract.index+1)+'/'+s.mission.contract.expeditions+' · '+s.mission.contract.credited+'/'+s.mission.contract.quota,
+          'Salvage moved  '+s.mission.haul.length+(s.mission.awake ? ' · Diver awake' : '')] : []),
         'Open doors  ' + (opened.join(', ') || 'none'),
       ] : []),
     ].join('\n');

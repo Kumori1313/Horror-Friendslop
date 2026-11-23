@@ -34,7 +34,7 @@
   <main>
     <canvas id="scene" aria-label="First-person view of the relay room"></canvas>
     <div id="top-hud">
-    <header><div><span class="lamp-icon" aria-hidden="true">◈</span> RELAY ROOM <span id="sector" hidden></span></div><div class="session-controls"><span id="connection" role="status">Connecting…</span><button id="settings" aria-haspopup="dialog">Settings</button></div></header>
+    <header><div><span class="lamp-icon" aria-hidden="true">◈</span> RELAY ROOM <span id="sector" hidden></span><span id="pack" hidden></span></div><div class="session-controls"><span id="connection" role="status">Connecting…</span><button id="settings" aria-haspopup="dialog">Settings</button></div></header>
     <aside id="mission" hidden><span id="warning" role="status"></span><small id="sound-caption"></small></aside>
     </div>
     <dialog id="preferences" aria-labelledby="preferences-title">
@@ -57,8 +57,10 @@
       <p class="hint" id="control-hint">WASD to walk · Mouse or arrows to look</p>
     </section>
     <section id="result" hidden aria-labelledby="result-title">
-      <p class="eyebrow">Shift report</p>
+      <p class="eyebrow" id="result-eyebrow">Shift report</p>
       <h2 id="result-title"></h2><p id="result-detail"></p>
+      <ul id="receipt"></ul>
+      <button id="next" type="button" hidden>Next expedition</button>
       <label class="report-label" for="report-reference">Playtest reference</label>
       <input id="report-reference" readonly>
       <button id="copy-reference" type="button">Copy reference</button>
@@ -70,6 +72,8 @@
       <div id="touch-actions">
         <button id="operate" hidden></button>
         <button id="open-door" hidden>Open bulkhead</button>
+        <button id="collect" hidden>Collect</button>
+        <button id="drop-item" hidden>Drop item</button>
         <button id="take" disabled>Pick up</button>
         <button id="toggle" disabled>Light off</button>
       </div>

@@ -3,6 +3,7 @@ import type { Events } from './connection.ts';
 import { generatorVersion, type Layout } from './layout.ts';
 import { generateLayout } from './server/generate-layout.ts';
 import { Simulation } from './server/simulation.ts';
+import { actions } from './room.ts';
 import type { Action, Input, Snapshot } from './room.ts';
 
 export interface Crew {
@@ -16,7 +17,6 @@ export interface Crew {
 }
 const grace = 20000;
 const idle = (): Input => ({forward:0,right:0,yaw:0,pitch:-0.12});
-const actions: Action[] = ['take','drop','toggle','open-door','operate'];
 type Control = {seq:number; action:Action};
 type GuestFrame = {type:'hello'|'control'; version:number; peer:string; round:string; input:Input; action?:Control; sent:number};
 type HostFrame =
@@ -57,6 +57,10 @@ export class CreatorSession {
   private lastCheckpoint = 0;
   private pausedUntil = 0;
   private lastTick = 0;
+  // The facility each side last announced, to follow a contract's next expedition.
+  private shownLayout?: Layout;
+  private guestLayout?: number;
+  private lastHello = 0;
   private downSince = 0;
   private lastSample = performance.now();
   private bytesIn = 0;
@@ -107,6 +111,7 @@ export class CreatorSession {
     localStorage.setItem(this.key,'active');
     this.checkpoint();
     this.round = sim.state.round;
+    this.shownLayout = sim.layout;
     this.events.joined(1,{round:this.round,token:'creator'},sim.layout);
     this.events.snapshot(sim.state,true);
   }
@@ -157,6 +162,7 @@ export class CreatorSession {
     sim.inputs.set(2,m.input);
     if (m.action && Number.isSafeInteger(m.action.seq) && m.action.seq===this.ack+1 && actions.includes(m.action.action)) {
       sim.act(2,m.action.action); this.ack=m.action.seq;
+      this.afterAction();
     }
   }
   private receiveHost(m: HostFrame) {
@@ -169,10 +175,14 @@ export class CreatorSession {
       const first = !this.round || !!this.downSince;
       this.round=m.state.round;
       this.seq=Math.max(this.seq,m.ack);
+      this.guestLayout=m.layout.seed;
       this.events.joined(2,{round:this.round,token:'guest'},m.layout);
       this.events.snapshot(m.state,first);
     } else {
       if (!this.round || m.state.round!==this.round || m.state.update<=this.latest) return;
+      // The host moved on to the next expedition: ask again for its facility.
+      const facility = m.state.mission?.contract.layout;
+      if (facility!==undefined && facility!==this.guestLayout && now-this.lastHello>1000) { this.lastHello=now; this.hello(); }
       this.events.snapshot(m.state,!!this.downSince);
       if (m.echo>this.lastEcho) { this.metrics.rtt=now-m.echo; this.lastEcho=m.echo; }
     }
@@ -212,6 +222,7 @@ export class CreatorSession {
       const steps=this.lastTick ? Math.max(1,Math.min(4,Math.round((now-this.lastTick)*30/1000))) : 1;
       this.lastTick=now;
       for (let i=0;i<steps;i++) sim.tick(1/30);
+      this.announceLayout();
       this.events.snapshot(sim.state,false);
       if (now-this.lastCheckpoint>=500) { this.checkpoint(); this.lastCheckpoint=now; }
       if (guest && now-this.lastSend>=100) {
@@ -241,8 +252,20 @@ export class CreatorSession {
   input(input: Input) { this.inputState=input; this.sim?.inputs.set(1,input); }
   action(action: Action) {
     if (performance.now()<this.pausedUntil || !this.round) return;
-    if (this.sim) this.sim.act(1,action);
+    if (this.sim) { this.sim.act(1,action); this.afterAction(); }
     else if (this.pending.length<8) this.pending.push({seq:++this.seq,action});
+  }
+  // Save at once, so a refresh right after a sale cannot undo or repeat it.
+  private afterAction() {
+    this.announceLayout();
+    this.checkpoint();
+    this.lastCheckpoint=performance.now();
+  }
+  private announceLayout() {
+    const sim=this.sim;
+    if (!sim || sim.layout===this.shownLayout) return;
+    this.shownLayout=sim.layout;
+    this.events.joined(1,{round:this.round,token:'creator'},sim.layout);
   }
   interrupt(duration=0) {
     if (this.stopped || !duration) return;

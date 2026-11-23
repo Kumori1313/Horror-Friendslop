@@ -4,6 +4,7 @@ import { mkdirSync, writeFileSync } from 'node:fs';
 import { anchor, distances, generatorVersion, geometryFor, nearbyDoor, nextWiredBay, routeReach, validLayout, walkable } from '../src/layout.ts';
 import type { Layout } from '../src/layout.ts';
 import { obstaclesAt, roomTemplates, storey } from '../src/room-templates.ts';
+import { spawnSalvage } from '../src/salvage.ts';
 import { clearAt } from '../src/room.ts';
 import { generateLayout } from '../src/server/generate-layout.ts';
 import { Simulation } from '../src/server/simulation.ts';
@@ -32,13 +33,13 @@ test('1,000 repeatable seeds build traversable two-storey facilities from unique
       const ends = plan.passages.flatMap(p => [p.a === s.id ? p.from : '',p.b === s.id ? p.to : '']);
       assert.ok(ends.some(e => e.startsWith('upper')) && ends.some(e => e.startsWith('lower')),'stairwell '+s.id+' joins both storeys');
     }
-    // Every loot room has a walking route to the exit through doors and stairs.
+    // Every loot room has a walking route back to base through doors and stairs.
     for (const room of destinations.filter(r => roomTemplates[r.template].loot)) {
-      assert.ok(routeReach(plan,room.id,linkedSocket(plan,room.id)).has(plan.exitId),'seed '+seed+': '+room.id+' cannot reach the exit');
+      assert.ok(routeReach(plan,room.id,linkedSocket(plan,room.id)).has('intake'),'seed '+seed+': '+room.id+' cannot reach Intake');
     }
-    const steps = distances(plan.rooms,plan.passages,plan.exitId);
-    for (const bay of plan.rooms.filter(r => r.id !== plan.exitId)) {
-      const next = nextWiredBay(plan,bay.id,plan.exitId);
+    const steps = distances(plan.rooms,plan.passages,'intake');
+    for (const bay of plan.rooms.filter(r => r.id !== 'intake')) {
+      const next = nextWiredBay(plan,bay.id,'intake');
       assert.equal(steps.get(next),steps.get(bay.id)!-1);
     }
     counts.rooms.push(plan.rooms.length); counts.destinations.push(destinations.length);
@@ -66,11 +67,12 @@ test('every facility can be walked on the real geometry from the spawn to each r
     const plan = generateLayout(seed), g = geometryFor(plan);
     const reached = walkable(g,{x:-0.7,y:0,z:3},g.doors.map(d => d.id));
     for (const room of plan.rooms) assert.ok(reached(anchor(room)),'seed '+seed+': cannot walk to '+room.id);
-    // Loot and the exit share the spawn's walkable region, so a route joins them.
+    // Every salvage spot shares the spawn's walkable region, so it can be hauled back to base.
+    for (const item of spawnSalvage(plan)) assert.ok(reached(item),'seed '+seed+': cannot walk to '+item.id);
     if (seed % 40) continue;
-    // Closed bulkheads hold the crew in Intake until someone opens them.
+    // Intake's closed bulkhead holds the crew in base until someone opens it.
     const sealed = walkable(g,{x:-0.7,y:0,z:3});
-    assert.equal(sealed(anchor(plan.rooms.find(r => r.id === plan.exitId)!)),false);
+    assert.ok(plan.rooms.filter(r => r.id !== 'intake').every(r => !sealed(anchor(r))));
   }
 });
 
@@ -83,7 +85,7 @@ test('the fallback is playable, and overlapping or disconnected plans are reject
   Object.assign(store,{x:moved.rooms[0].x,y:0,z:moved.rooms[0].z});
   assert.equal(validLayout(moved),false);
   const blocked = structuredClone(plan);
-  blocked.passages = blocked.passages.filter(p => p.b !== blocked.exitId && p.a !== blocked.exitId);
+  blocked.passages = blocked.passages.slice(1);
   assert.equal(validLayout(blocked),false);
   const twin = structuredClone(plan);
   twin.rooms.find(r => r.kind === 'workshop' || r.kind === 'stores' || r.kind === 'closet' || r.kind === 'office' || r.kind === 'lockers' || r.kind === 'coldstore')!.template = 'relay';
@@ -109,11 +111,11 @@ test('closed bulkheads stop movement; opening one changes authoritative collisio
   assert.equal(clearAt(d.x,d.z,0.25,obstaclesAt(g,0,sim.state.opened)),true);
 });
 
-test('every station has a centred walking route from the spawn', () => {
+test('every salvage item has a centred walking route from the spawn', () => {
   for (let seed=0;seed<1000;seed+=10) {
     const plan = generateLayout(seed);
-    for (const room of plan.rooms.filter(r => ['intake','relay','exit','switchboard'].includes(r.kind))) {
-      assert.ok(route(plan,{x:-0.7,y:0,z:3},anchor(room)),'seed '+seed+': no route to '+room.id);
+    for (const item of spawnSalvage(plan)) {
+      assert.ok(route(plan,{x:-0.7,y:0,z:3},item,undefined,1),'seed '+seed+': no route to '+item.id);
     }
   }
 });
@@ -130,15 +132,16 @@ test('a route can stop near a tight goal and keep its wide clearance', () => {
   assert.ok(route(plan,{x:-0.7,y:0,z:3},tight,[0.85],1),'the wide margin reaches the neighbourhood');
 });
 
-test('an operator walks the planned route through doors and stairs to each station', () => {
+test('an operator walks the planned route through doors and stairs to loot rooms and back to base', () => {
   for (const seed of [19,20,715,4242]) {
     const plan = generateLayout(seed);
     const sim = new Simulation(plan,'solo');
     sim.join(1);
-    for (const id of ['switchboard',plan.objectiveId,plan.exitId,'intake']) {
-      const target = anchor(plan.rooms.find(r => r.kind === id || r.id === id)!);
+    const loot = plan.rooms.filter(r => roomTemplates[r.template].loot).slice(0,2);
+    for (const room of [...loot,plan.rooms.find(r => r.kind === 'intake')!]) {
+      const target = anchor(room);
       const p = walkRoute(sim,1,target);
-      assert.equal(sim.roomOf(p),plan.rooms.find(r => r.kind === id || r.id === id)!.id,'seed '+seed+' reached '+id);
+      assert.equal(sim.roomOf(p),room.id,'seed '+seed+' reached '+room.id);
       assert.equal(p.feetY,target.y);
     }
   }

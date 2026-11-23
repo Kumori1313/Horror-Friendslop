@@ -1,12 +1,14 @@
 import { canTake, clearAt, walls } from '../room.ts';
 import type { Action, Input, Player, Snapshot } from '../room.ts';
 
-import { geometryFor, nearbyDoor, playerRadius, spawnPoints } from '../layout.ts';
+import { geometryFor, lampSpawn, nearbyDoor, playerRadius, spawnPoints } from '../layout.ts';
 import type { Layout, Geometry, Rect } from '../layout.ts';
 
 import { obstaclesAt, surfaceAt, surfaceHeight } from '../room-templates.ts';
-import { assignment, finished, station } from '../mission.ts';
-import { advanceMission, newMission, warn } from './mission.ts';
+import { assignment, collectable, finished, onPad, pack } from '../mission.ts';
+import { expeditionSeed, liftOf } from '../salvage.ts';
+import { generateLayout } from './generate-layout.ts';
+import { advanceMission, newMission, settle, wake } from './mission.ts';
 
 // Operator movement shared by the host and by clients predicting their own
 // operator, so both agree on walls, stairs and closed bulkheads.
@@ -43,8 +45,8 @@ export function heldLamp(p: Player, solids: readonly Rect[]) {
 }
 
 export class Simulation {
-  readonly layout?: Layout;
-  readonly geometry?: Geometry;
+  layout?: Layout;
+  geometry?: Geometry;
 
   constructor(layout?: Layout, mode: 'solo' | 'coop' = 'coop') {
     this.layout = layout;
@@ -71,7 +73,8 @@ export class Simulation {
     const holder = this.state.players.find(p => p.id === id);
     if (this.state.lamp.owner === id) Object.assign(this.state.lamp,{owner:null,y:(holder?.feetY ?? 0)+0.14,pitch:0});
     const mission = this.state.mission;
-    if (mission && !finished(mission.stage)) mission.stage = 'lost';
+    // Leaving never sells anything: the contract simply ends.
+    if (mission && !finished(mission.stage)) { mission.stage = 'lost'; mission.outcome = 'left'; }
     this.inputs.delete(id);
     this.state.players = this.state.players.filter(p => p.id !== id);
   }
@@ -79,7 +82,7 @@ export class Simulation {
   tick(dt: number) {
     this.state.update++;
     const mission = this.state.mission;
-    if (finished(mission?.stage)) return;
+    if (finished(mission?.stage) || mission?.stage === 'settled') return;
     for (const p of this.state.players) {
       const input = this.inputs.get(p.id)!;
       if (mission?.down.some(d => d.id === p.id)) {
@@ -109,20 +112,35 @@ export class Simulation {
   act(id: number, action: Action) {
     const p = this.state.players.find(player => player.id === id);
     const mission = this.state.mission;
-    if (!p?.connected || finished(mission?.stage) || mission?.down.some(d => d.id === id)) return;
-    if (this.layout && mission && action === 'operate') {
-      switch (assignment(this.layout,this.state,p,this.solids(p))) {
-        case 'Charge switchboard': mission.stage = 'trace'; break;
-        case 'Send test tone': mission.stage = 'answer'; break;
-        case 'Power exit circuit':
-        case 'Answer relay':
-          mission.stage = 'extract';
-          warn(mission,station(this.layout,'relay').id);
-          break;
-        case 'Revive partner': mission.down = []; break;
-        case 'Extract':
-        case 'Extract crew': mission.stage = 'won'; break;
-      }
+    if (!p?.connected || finished(mission?.stage)) return;
+    if (mission?.stage === 'settled') {
+      if (action === 'next') this.nextExpedition();
+      return;
+    }
+    if (mission?.down.some(d => d.id === id)) return;
+    const layout = this.layout;
+    if (layout && mission && action === 'operate') {
+      const task = assignment(layout,this.state,p,this.solids(p));
+      if (task?.kind === 'revive') mission.down = [];
+      else if (task?.kind === 'load') {
+        const lift = liftOf(layout);
+        for (const h of mission.haul) if (h.owner === id) Object.assign(h,{owner:null,loaded:true,...lift});
+      } else if (task?.kind === 'extract') {
+        settle(layout,this.state,mission,this.state.players.filter(q => onPad(q,liftOf(layout))).map(q => q.id),false);
+      } else if (task?.kind === 'abandon') settle(layout,this.state,mission,[id],true);
+      return;
+    }
+    if (layout && mission && action === 'collect') {
+      const item = collectable(layout,mission,p,this.solids(p));
+      if (!item) return;
+      mission.haul = [...mission.haul.filter(h => h.id !== item.id),{id:item.id,owner:id,x:item.x,y:item.y,z:item.z}];
+      wake(layout,mission,this.roomOf(p) ?? item.room);
+      return;
+    }
+    if (layout && mission && action === 'drop-item') {
+      const last = pack(layout,mission,id).at(-1);
+      const h = last && mission.haul.find(h => h.id === last.id);
+      if (h) Object.assign(h,{owner:null,x:p.x,y:p.feetY ?? 0,z:p.z});
       return;
     }
     const lamp = this.state.lamp;
@@ -140,6 +158,24 @@ export class Simulation {
       Object.assign(lamp, { owner: null, y: (p.feetY ?? 0)+0.14, pitch: 0 });
     } else if (lamp.owner === id && action === 'toggle') {
       lamp.on = !lamp.on;
+    }
+  }
+
+  // Start the contract's next facility with the same crew and round.
+  nextExpedition() {
+    const mission = this.state.mission;
+    if (!mission || mission.stage !== 'settled') return;
+    const c = mission.contract;
+    c.index++;
+    c.layout = expeditionSeed(c.seed,c.index);
+    this.layout = generateLayout(c.layout);
+    this.geometry = geometryFor(this.layout);
+    this.state.opened = [];
+    Object.assign(mission,{stage:'explore',haul:[],down:[],awake:false,diver:{mode:'dormant',bay:'',seconds:0}});
+    Object.assign(this.state.lamp,{...lampSpawn,y:0.14,yaw:0,pitch:0,owner:null,on:true});
+    for (const q of this.state.players) {
+      Object.assign(q,{...spawnPoints[q.id-1],feetY:0,yaw:0,pitch:-0.12});
+      this.inputs.set(q.id,{forward:0,right:0,yaw:0,pitch:-0.12});
     }
   }
 }

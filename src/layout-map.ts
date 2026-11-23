@@ -1,9 +1,10 @@
 import { anchor, geometryFor } from './layout.ts';
+import { items } from './mission.ts';
 import type { Layout } from './layout.ts';
 import { storey } from './room-templates.ts';
 import type { Snapshot } from './room.ts';
 
-const letters: Record<string,string> = {intake:'I',relay:'R',exit:'X',switchboard:'S',chiller:'C',stairwell:'≡'};
+const letters: Record<string,string> = {intake:'I',stairwell:'≡'};
 
 // Ground storey on the left, upper storey on the right, drawn from the room floors.
 export function drawMap(canvas: HTMLCanvasElement, layout: Layout, state: Snapshot) {
@@ -38,6 +39,14 @@ export function drawMap(canvas: HTMLCanvasElement, layout: Layout, state: Snapsh
     ctx.fillStyle = '#dbce9b'; ctx.fillRect(x(a.x,a.y)-6,z(a.z)-6,12,12);
     ctx.fillStyle='#15201f'; ctx.font='bold 10px monospace'; ctx.textAlign='center'; ctx.textBaseline='middle';
     ctx.fillText(label,x(a.x,a.y),z(a.z));
+  }
+  // Salvage still in the facility, as amber dots.
+  if (state.mission) {
+    ctx.fillStyle = '#e8b04f';
+    for (const i of items(layout,state.mission)) {
+      if (i.owner !== null || i.loaded) continue;
+      ctx.fillRect(x(i.x,i.y)-1.5,z(i.z)-1.5,3,3);
+    }
   }
   const diver = state.mission?.diver;
   const lair = diver && byId.get(diver.bay);

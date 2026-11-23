@@ -1,21 +1,62 @@
-import { anchor, nextWiredBay, type Layout } from '../layout.ts';
-import { distance, sameStorey, strikeRadius } from '../mission.ts';
-import type { Mission } from '../mission.ts';
+import { anchor, distances, nextWiredBay, type Layout } from '../layout.ts';
+import { abandonCut, distance, items, sameStorey, strikeRadius } from '../mission.ts';
+import type { Contract, Mission, Receipt } from '../mission.ts';
 import type { Player, Snapshot } from '../room.ts';
+import { expeditionSeed, facilityValue } from '../salvage.ts';
+import { generateLayout } from './generate-layout.ts';
 
-export function newMission(layout: Layout): Mission {
-  return { stage:layout.callout === 'black-start' ? 'prime' : 'trace', down:[], diver:{mode:'dormant',bay:'',seconds:0} };
+export const expeditionsPerContract = 3;
+// The quota asks for a little under half of everything the three facilities hold.
+export const quotaShare = 0.45;
+
+export function newContract(seed: number, expeditions = expeditionsPerContract): Contract {
+  let total = 0;
+  for (let i=0;i<expeditions;i++) total += facilityValue(generateLayout(expeditionSeed(seed,i)));
+  return {seed:seed >>> 0,expeditions,index:0,layout:seed >>> 0,quota:Math.floor(total*quotaShare/10)*10,credited:0,receipts:[]};
+}
+
+export function newMission(layout: Layout, contract = newContract(layout.seed)): Mission {
+  return {stage:'explore',contract,haul:[],down:[],diver:{mode:'dormant',bay:'',seconds:0}};
 }
 
 export function warn(mission: Mission, bay: string) {
   mission.diver = {mode:'warning',bay,seconds:4};
 }
 
+// The first salvage lifted wakes the Bell Diver in the room farthest from it.
+export function wake(layout: Layout, mission: Mission, room: string) {
+  if (mission.awake) return;
+  mission.awake = true;
+  const steps = distances(layout.rooms,layout.passages,room);
+  const far = layout.rooms.reduce((a,b) => (steps.get(b.id) ?? 0) > (steps.get(a.id) ?? 0) ? b : a);
+  mission.diver = {mode:'quiet',bay:far.id,seconds:6};
+}
+
+// Sell the lift and the packs of the operators extracting. Leaving a downed
+// partner behind deducts a fifth of the haul, and their pack is lost.
+export function settle(layout: Layout, state: Snapshot, mission: Mission, leaving: number[], abandoned: boolean) {
+  const sold = items(layout,mission).filter(i => i.loaded || (i.owner !== null && leaving.includes(i.owner)));
+  const gross = sold.reduce((sum,i) => sum+i.value,0);
+  const deduction = abandoned ? Math.round(gross*abandonCut) : 0;
+  const c = mission.contract;
+  const receipt: Receipt = {expedition:c.index,items:sold.map(i => ({kind:i.kind,value:i.value})),gross,deduction,credited:gross-deduction,abandoned};
+  c.receipts.push(receipt);
+  c.credited += receipt.credited;
+  mission.haul = [];
+  mission.down = [];
+  mission.diver = {mode:'dormant',bay:'',seconds:0};
+  if (c.credited >= c.quota) { mission.stage = 'won'; mission.outcome = 'quota'; }
+  else if (c.index+1 >= c.expeditions) { mission.stage = 'lost'; mission.outcome = 'deadline'; }
+  else mission.stage = 'settled';
+  state.lamp.owner = null;
+  return receipt;
+}
+
 // `locate` names the room whose floor an operator stands on.
 export function advanceMission(layout: Layout, state: Snapshot, mission: Mission, dt: number, locate: (p: Player) => string | undefined) {
   for (const down of mission.down) down.seconds = Math.max(0,down.seconds-dt);
   if (mission.down.some(d => d.seconds === 0)) {
-    mission.stage = 'lost';
+    mission.stage = 'lost'; mission.outcome = 'stranded';
     return;
   }
   const diver = mission.diver;
@@ -56,5 +97,6 @@ export function advanceMission(layout: Layout, state: Snapshot, mission: Mission
     mission.down.push({id:p.id,seconds:75});
     if (state.lamp.owner === p.id) Object.assign(state.lamp,{x:p.x,z:p.z,y:(p.feetY ?? 0)+0.14,owner:null,pitch:0});
   }
-  if (mission.down.length === (mission.solo ? 1 : 2)) mission.stage = 'lost';
+  // A crew wipe ends the contract.
+  if (mission.down.length === (mission.solo ? 1 : state.players.length)) { mission.stage = 'lost'; mission.outcome = 'wipe'; }
 }

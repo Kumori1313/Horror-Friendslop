@@ -175,6 +175,12 @@ function start(render: ReturnType<typeof createScene>, mode?: Crew | 'solo', sce
     // Arrow-key look remains available when pointer capture is unavailable.
     showControls();
     if (!touchMode) canvas.requestPointerLock?.()?.catch(() => {});
+    // Browsers allow fullscreen only from a tap, so this is the moment: the
+    // tap that enters or resumes play. Leaving it (the back gesture) just
+    // waits for the next resume.
+    else if (preferences.fullscreen && document.fullscreenEnabled && !document.fullscreenElement) {
+      document.documentElement.requestFullscreen({navigationUI:'hide'}).catch(() => {});
+    }
   }
   enter.onclick = control;
   canvas.onclick = () => { if (!playing || (!touchMode && !document.pointerLockElement)) control(); };

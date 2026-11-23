@@ -3,13 +3,15 @@ export interface Preferences {
   volume: number;
   captions: boolean;
   reducedMotion: boolean;
+  // Go fullscreen when play starts on a touch screen.
+  fullscreen: boolean;
 }
 
 export function bindPreferences(pause: () => void) {
   const key = 'relay-room-preferences';
   const preferences: Preferences = {
     sensitivity:1, volume:0.6, captions:true,
-    reducedMotion:matchMedia('(prefers-reduced-motion: reduce)').matches,
+    reducedMotion:matchMedia('(prefers-reduced-motion: reduce)').matches, fullscreen:true,
   };
   const dialog = document.querySelector<HTMLDialogElement>('#preferences')!;
   let saved: Partial<Preferences> = {};
@@ -29,12 +31,17 @@ export function bindPreferences(pause: () => void) {
     display();
     field.oninput = () => { preferences[name] = field.valueAsNumber; display(); save(); };
   }
-  for (const name of ['captions','reducedMotion'] as const) {
+  for (const name of ['captions','reducedMotion','fullscreen'] as const) {
     const field = dialog.querySelector<HTMLInputElement>('#'+name)!;
     if (typeof saved[name] === 'boolean') preferences[name] = saved[name];
     field.checked = preferences[name];
-    field.onchange = () => { preferences[name] = field.checked; save(); };
+    field.onchange = () => {
+      preferences[name] = field.checked; save();
+      if (name === 'fullscreen' && !field.checked && document.fullscreenElement) document.exitFullscreen().catch(() => {});
+    };
   }
+  // Only offer fullscreen where the browser supports it for a page.
+  dialog.querySelector<HTMLElement>('#fullscreen')!.closest('label')!.hidden = !document.fullscreenEnabled;
   function open() {
     if (dialog.open) return;
     pause();

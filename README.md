@@ -42,7 +42,7 @@ npm run dev
 | G | Show or hide room diagnostics in developer builds |
 | Escape | Release controls. Click the scene to resume. |
 
-On a phone, tap **Enter room**, drag the lower-left pad to move, and swipe the room to look. Tap **Pick up** beside salvage or the flashlight, tap a hotbar slot to select it, and use **Drop** or hold **Hold to throw**. Use **Light off/on** and **Drop** to test the handoff. Tap **Diagnostics** to see who holds it on each device.
+On a phone, tap **Enter room**; the game goes fullscreen on that tap (or the next tap that resumes play), unless **Fullscreen on touch screens** is off in Settings. Browsers only allow fullscreen from a tap, and iPhone Safari doesn't allow it for pages. Drag the lower-left pad to move, and swipe the room to look. Tap **Pick up** beside salvage or the flashlight, tap a hotbar slot to select it, and use **Drop** or hold **Hold to throw**. Use **Light off/on** and **Drop** to test the handoff. Tap **Diagnostics** to see who holds it on each device.
 
 A disconnected operator keeps their seat, position, and flashlight for 20 seconds after the server detects the disconnect. Refresh the same tab to resume. When the reservation expires, the seat is freed and its flashlight drops. The room resets when both seats expire. Stop the server with **Ctrl+C**.
 

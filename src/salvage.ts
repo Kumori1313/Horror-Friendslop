@@ -7,17 +7,24 @@ import { clearAt } from './room.ts';
 // Salvage is part of the facility: every client derives the same items from
 // the layout seed, and snapshots only carry the ones that have moved.
 export type ItemKind = 'valve' | 'gauge' | 'fuse' | 'coil' | 'board' | 'battery' | 'toolbox' | 'bell';
-export const itemKinds: Record<ItemKind,{name: string; value: [number,number]; size: [number,number,number]; color: number; rare?: boolean}> = {
+// Heavy items throw shorter.
+export const itemKinds: Record<ItemKind,{name: string; value: [number,number]; size: [number,number,number]; color: number; rare?: boolean; heavy?: boolean}> = {
   valve:{name:'Brass valve',value:[15,30],size:[0.36,0.2,0.36],color:0xb08d57},
   gauge:{name:'Pressure gauge',value:[20,40],size:[0.32,0.32,0.12],color:0xd8d2b8},
   fuse:{name:'Fuse cartridge',value:[10,25],size:[0.16,0.36,0.16],color:0xc9a64a},
-  coil:{name:'Copper coil',value:[30,55],size:[0.4,0.3,0.4],color:0xb8693e},
+  coil:{name:'Copper coil',value:[30,55],size:[0.4,0.3,0.4],color:0xb8693e,heavy:true},
   board:{name:'Circuit board',value:[35,60],size:[0.46,0.06,0.34],color:0x3f8a4f,rare:true},
-  battery:{name:'Battery cell',value:[25,45],size:[0.3,0.44,0.24],color:0x6c7b8a,rare:true},
-  toolbox:{name:'Toolbox',value:[40,70],size:[0.56,0.3,0.3],color:0xa83a32,rare:true},
+  battery:{name:'Battery cell',value:[25,45],size:[0.3,0.44,0.24],color:0x6c7b8a,rare:true,heavy:true},
+  toolbox:{name:'Toolbox',value:[40,70],size:[0.56,0.3,0.3],color:0xa83a32,rare:true,heavy:true},
   bell:{name:'Signal bell',value:[60,90],size:[0.34,0.42,0.34],color:0xd9b44a,rare:true},
 };
-export const packSize = 3;
+// Half the width and height that a thrown item collides with. The flashlight
+// is the lamp slot's item.
+export function bodyOf(kind: ItemKind | 'lamp') {
+  if (kind === 'lamp') return {r:0.13,h:0.14};
+  const [w,h,d] = itemKinds[kind].size;
+  return {r:Math.max(w,d)/2,h:h/2};
+}
 export interface Salvage extends Point3 { id: string; kind: ItemKind; value: number; room: string }
 
 function random(seed: number) {

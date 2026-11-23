@@ -26,22 +26,23 @@ npm run dev
 1. Open **http://127.0.0.1:5176/** in two desktop browser windows with WebGL 2 enabled. A normal and a private window work. Keep them side by side so one window can observe the other.
 2. Click **Enter room** in each window. The header shows your operator number and the occupied seats. Both players start within reach of the flashlight on the floor by the yellow line.
 3. In the first window, press **E** to pick it up and **F** to switch it off and on. Walk forward through the doorway. In the other window, watch the operator carry the light, then follow.
-4. Stand together, drop the flashlight with **E**, then click the other window and press **E** to pick it up. Press **G** in both windows to compare the round ID, update number, positions, flashlight owner, and round-trip time. Each client measures its own delay.
+4. Stand together, drop the flashlight with **X**, then click the other window and press **E** to pick it up. Press **G** in both windows to compare the round ID, update number, positions, flashlight owner, and round-trip time. Each client measures its own delay.
 5. For a simultaneous pickup on a single keyboard, run `npm test`. Two socket clients send competing requests and verify the same winner. The test also covers toggling, movement, handoff, a departing holder, and seat capacity.
 
 | Control | Action |
 | --- | --- |
 | WASD | Move or strafe |
 | Mouse or arrow keys | Look around |
-| E | Pick up a nearby flashlight or drop the one you hold |
-| F | Toggle the flashlight you hold |
-| C | Collect nearby salvage into your pack (three items) |
-| X | Drop the last item in your pack |
-| Q | Load your pack onto the lift, extract, or revive a downed partner |
+| E | Pick up the nearest item: salvage or the flashlight |
+| 1–4 or scroll wheel | Select a hotbar slot |
+| X | Drop the selected item at your feet |
+| Hold T or hold the left mouse button | Throw the selected item; hold longer to throw harder |
+| F | Switch the flashlight you carry off and on |
+| Q | Load your salvage onto the lift, extract, or revive a downed partner |
 | G | Show or hide room diagnostics in developer builds |
 | Escape | Release controls. Click the scene to resume. |
 
-On a phone, tap **Enter room**, drag the lower-left pad to move, and swipe the room to look. Tap **Collect** beside salvage and **Drop item** to put the last one down. Tap **Pick up** when the dropped light is within reach. Use **Light off/on** and **Drop** to test the handoff. Tap **Diagnostics** to see who holds it on each device.
+On a phone, tap **Enter room**, drag the lower-left pad to move, and swipe the room to look. Tap **Pick up** beside salvage or the flashlight, tap a hotbar slot to select it, and use **Drop** or hold **Hold to throw**. Use **Light off/on** and **Drop** to test the handoff. Tap **Diagnostics** to see who holds it on each device.
 
 A disconnected operator keeps their seat, position, and flashlight for 20 seconds after the server detects the disconnect. Refresh the same tab to resume. When the reservation expires, the seat is freed and its flashlight drops. The room resets when both seats expire. Stop the server with **Ctrl+C**.
 
@@ -91,11 +92,11 @@ Run `npm run test:layouts` to check seeds 0–999. The check covers both storeys
 A contract runs three expeditions, each in a new facility generated from the contract seed. The quota is 45% of all the salvage the three facilities hold, so a crew that hauls steadily can meet it. The terminal in Intake shows the quota, credited earnings, the expedition number, and every item loaded on the lift with its sale value.
 
 1. One operator takes the flashlight with **E** or **Pick up**. Both can explore. Loot rooms such as the Parts store, Loot closet, Locker room, Cold store, Foreman's office, and Workshop always hold salvage. No room holds more than two items: a loot room holds two 30% of the time, and any other room is empty 65% of the time, holds one 30% of the time, and two only 5%.
-2. Press **C**, or tap **Collect**, beside an item to put it in your pack. A pack holds three items. Press **X** to drop the last one.
+2. Press **E**, or tap **Pick up**, beside an item to put it in your hotbar. The hotbar has four slots, and the flashlight takes one of them. Select a slot with **1–4**, the scroll wheel, or a tap, and the item shows in your hands and your partner's view. With salvage selected, the flashlight clips to your chest: still lit, but dimmer, shorter, and pointing where your body faces. Press **X** to drop the selected item, or hold **T** or the left mouse button and release to throw it. A throw arcs, bounces off walls and floors, slides to rest, falls off galleries and down stairwells, and stops at closed bulkheads. Heavy items (coils, battery cells, toolboxes) throw shorter. A thrown flashlight stays lit.
 3. The first item lifted wakes the Bell Diver in the room farthest away. Knocks, a warning naming the room, and a glowing floor circle give four seconds to get clear. It drops inside the circle. On later passes it targets the room of the conscious operator carrying the lit lamp. It follows the doors and stairs between rooms, scraping overhead in each room it passes. The scrape carries up to three connections and fades with each one, so a room directly above or below can still be out of earshot. Without a lit carrier it follows a conscious operator.
-4. A struck operator drops the light and keeps their pack. A teammate has 75 seconds to reach them and press **Q** or **Revive partner**. A crew wipe, or a rescue timing out, ends the whole contract.
-5. Back at the hazard-striped lift in Intake, press **Q** to **Load** your pack, then watch the terminal list each item's value. Haul again, or extract: with both operators on the lift, choose **Extract crew**. If your partner is down, **Extract alone (−20%)** sells the lift for a fifth less, and their pack is lost. In larger crews the reduction compounds: each operator left behind keeps 80% of what remains, so the crew keeps x × 0.80^d. A partner who is only reconnecting, or a tap on **Leave to hub**, never triggers a sale.
-6. Extraction sells the lift and the extracting operators' packs. The receipt lists each item and any deduction. **Next expedition** opens the next facility for both operators. Meeting the quota wins the contract at once, and missing it after the third expedition loses it. **Return to lobbies** releases the seats at any receipt.
+4. A struck operator drops the light and keeps their salvage. A teammate has 75 seconds to reach them and press **Q** or **Revive partner**. A crew wipe, or a rescue timing out, ends the whole contract.
+5. Back at the hazard-striped lift in Intake, press **Q** to **Load** your salvage, then watch the terminal list each item's value. Haul again, or extract: with both operators on the lift, choose **Extract crew**. If your partner is down, **Extract alone (−20%)** sells the lift for a fifth less, and the salvage they carry is lost. In larger crews the reduction compounds: each operator left behind keeps 80% of what remains, so the crew keeps x × 0.80^d. A partner who is only reconnecting, or a tap on **Leave to hub**, never triggers a sale.
+6. Extraction sells the lift and the salvage the extracting operators carry. The receipt lists each item and any deduction. **Next expedition** opens the next facility for both operators. Meeting the quota wins the contract at once, and missing it after the third expedition loses it. **Return to lobbies** releases the seats at any receipt.
 
 ### Phase 6 playtest
 

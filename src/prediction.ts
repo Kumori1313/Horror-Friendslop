@@ -2,7 +2,7 @@ import type { Geometry } from './layout.ts';
 import { obstaclesAt, surfaceAt, surfaceHeight } from './room-templates.ts';
 import { walls } from './room.ts';
 import type { Input, Player, Snapshot } from './room.ts';
-import { heldLamp, moveOperator } from './server/simulation.ts';
+import { carriedLamp, moveOperator } from './server/simulation.ts';
 
 interface Sample { t: number; x: number; z: number; feetY: number }
 
@@ -54,13 +54,14 @@ export class Prediction {
   }
 
   // The snapshot as this client should draw it: its own operator, and the
-  // flashlight it carries, at the predicted position.
+  // flashlight it carries, in the hand or on the chest, at the predicted position.
   view(state: Snapshot, id: number, geometry: Geometry | undefined): Snapshot {
     const p = this.self;
     if (!p) return state;
     const players = state.players.map(player => player.id === id ? {...player,x:p.x,z:p.z,feetY:p.feetY,yaw:p.yaw,pitch:p.pitch} : player);
-    const lamp = state.lamp.owner === id ?
-      {...state.lamp,...heldLamp(p,geometry ? obstaclesAt(geometry,p.feetY ?? 0,state.opened) : walls)} : state.lamp;
+    const me = players.find(player => player.id === id);
+    const lamp = state.lamp.owner === id && me ?
+      {...state.lamp,...carriedLamp(me,geometry ? obstaclesAt(geometry,p.feetY ?? 0,state.opened) : walls)} : state.lamp;
     return {...state,players,lamp};
   }
 }

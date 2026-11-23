@@ -1,9 +1,10 @@
 import type { Layout } from './layout.ts';
-import { clearAt } from './room.ts';
+import { canTake, clearAt, freeSlot } from './room.ts';
+import type { Flight } from './flight.ts';
 import type { Player, Point, Snapshot } from './room.ts';
 import type { Point3 } from './room-templates.ts';
 import type { Rect } from './layout.ts';
-import { itemKinds, liftOf, packSize, spawnSalvage } from './salvage.ts';
+import { itemKinds, liftOf, spawnSalvage } from './salvage.ts';
 import type { ItemKind, Salvage } from './salvage.ts';
 
 // A contract runs several expeditions. Each one is explored, hauled back to
@@ -16,8 +17,10 @@ export interface Receipt {
   gross: number; deduction: number; credited: number; lost: number;
 }
 export interface Contract { seed: number; expeditions: number; index: number; layout: number; quota: number; credited: number; receipts: Receipt[] }
-// Salvage that has left its spawn: carried (`owner`), dropped, or loaded on the lift.
-export interface Haul extends Point3 { id: string; owner: number | null; loaded?: boolean }
+// Salvage that has left its spawn: carried (`owner`), dropped, thrown, or
+// loaded on the lift. A thrown item's x, y and z are where it will come to
+// rest; `flight` is set until it gets there.
+export interface Haul extends Point3 { id: string; owner: number | null; loaded?: boolean; flight?: Flight }
 export interface Mission {
   solo?: boolean;
   stage: Stage;
@@ -41,15 +44,15 @@ export const sameStorey = (p: {feetY?: number}, at: {y: number}) => Math.abs((p.
 export function onPad(p: Point & {feetY?: number}, pad: Point3) { return distance(p,pad) <= 1.5 && sameStorey(p,pad); }
 
 // Every item with its current place and holder.
-export interface Item extends Salvage { owner: number | null; loaded: boolean }
+export interface Item extends Salvage { owner: number | null; loaded: boolean; flight?: Flight }
 export function items(layout: Layout, mission: Mission | undefined): Item[] {
   const moved = new Map(mission?.haul.map(h => [h.id,h]));
   return spawnSalvage(layout).map(s => {
     const h = moved.get(s.id);
-    return h ? {...s,x:h.x,y:h.y,z:h.z,owner:h.owner,loaded:!!h.loaded} : {...s,owner:null,loaded:false};
+    return h ? {...s,x:h.x,y:h.y,z:h.z,owner:h.owner,loaded:!!h.loaded,flight:h.flight} : {...s,owner:null,loaded:false};
   });
 }
-// A pack lists items in the order they were collected.
+// The salvage an operator carries, in the order it was collected.
 export function pack(layout: Layout, mission: Mission, id: number) {
   const byId = new Map(spawnSalvage(layout).map(s => [s.id,s]));
   return mission.haul.filter(h => h.owner === id && byId.has(h.id)).map(h => byId.get(h.id)!);
@@ -64,9 +67,18 @@ export function canCollect(p: Player, item: Point3, obstacles: readonly Rect[]) 
   return true;
 }
 export function collectable(layout: Layout, mission: Mission, p: Player, obstacles: readonly Rect[]) {
-  if (pack(layout,mission,p.id).length >= packSize) return;
-  return items(layout,mission).filter(i => i.owner === null && !i.loaded && canCollect(p,i,obstacles))
+  if (freeSlot(p) < 0) return;
+  return items(layout,mission).filter(i => i.owner === null && !i.loaded && !i.flight && canCollect(p,i,obstacles))
     .sort((a,b) => Math.hypot(a.x-p.x,a.z-p.z)-Math.hypot(b.x-p.x,b.z-p.z))[0];
+}
+
+// What **E** picks up: the flashlight or the nearest salvage, whichever is closer.
+export function nearestPickup(layout: Layout | undefined, state: Snapshot, p: Player, obstacles: readonly Rect[]): {lamp: true} | {item: Item} | undefined {
+  const mission = state.mission;
+  const item = layout && mission && mission.stage === 'explore' ? collectable(layout,mission,p,obstacles) : undefined;
+  const light = canTake(p,state.lamp,obstacles);
+  if (light && (!item || distance(state.lamp,p) <= distance(item,p))) return {lamp:true};
+  if (item) return {item};
 }
 
 export type Task = { kind: 'revive' | 'load' | 'extract' | 'abandon'; label: string };

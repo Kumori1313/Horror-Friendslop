@@ -3,10 +3,14 @@ import { itemName, items, strikeRadius } from './mission.ts';
 import { buildFacility } from './facility-scene.ts';
 import { environment, materialLibrary } from './materials.ts';
 import { anchor, geometryFor, type Layout } from './layout.ts';
-import { surfaceAt } from './room-templates.ts';
+import { obstaclesAt, surfaceAt } from './room-templates.ts';
 import { portalGraph, visibleRooms, type PortalGraph } from './visibility.ts';
-import { walls } from './room.ts';
+import { lampSlot, selected, walls } from './room.ts';
 import type { Snapshot } from './room.ts';
+import { positionAt, trajectory } from './flight.ts';
+import type { Flight } from './flight.ts';
+import { bodyOf, itemKinds, spawnSalvage, type ItemKind } from './salvage.ts';
+import { heldLamp } from './server/simulation.ts';
 
 function painted(color: string, seam: string) {
   const canvas = document.createElement('canvas');
@@ -110,6 +114,27 @@ export function createScene(canvas: HTMLCanvasElement, generated = false) {
   let loaded: Layout | undefined;
   let facility: ReturnType<typeof buildFacility> | undefined;
   const people = new Map<number,T.Group>();
+  // Salvage looks the same on the floor, in flight, in hand and in the hotbar.
+  const itemMaterials = new Map<ItemKind,T.Material>();
+  function itemMaterial(kind: ItemKind) {
+    let m = itemMaterials.get(kind);
+    if (!m) {
+      const k = itemKinds[kind], metal = kind !== 'board' && kind !== 'toolbox';
+      m = new T.MeshStandardMaterial({color:k.color,roughness:metal ? 0.32 : 0.6,metalness:metal ? 0.85 : 0.2,envMap:metal ? library?.reflections ?? null : null,emissive:k.color,emissiveIntensity:0.08});
+      itemMaterials.set(kind,m);
+    }
+    return m;
+  }
+  // The item an operator has selected, shown in their hand.
+  function holdItem(mesh: T.Mesh, kind: ItemKind | undefined, scale = 0.85) {
+    mesh.visible = !!kind;
+    if (!kind) return;
+    mesh.material = itemMaterial(kind);
+    const [w,h,d] = itemKinds[kind].size;
+    mesh.scale.set(w*scale,h*scale,d*scale);
+  }
+  const inHand = new T.Mesh(cube,steel);
+  inHand.visible = false; scene.add(inHand);
   function avatar(id: number) {
     const g = new T.Group(); scene.add(g);
     const suit = material(id === 1 ? 0xa76531 : 0x487b79);
@@ -119,6 +144,9 @@ export function createScene(canvas: HTMLCanvasElement, generated = false) {
     for (const x of [-0.13,0.13]) box(x,0.39,0,0.18,0.78,0.22,dark,g);
     for (const x of [-0.28,0.28]) box(x,1.01,-0.04,0.13,0.54,0.16,suit,g);
     box(0,1.23,0,0.45,0.055,0.30,yellow,g);
+    // Held salvage sits where a held flashlight would: ahead and to the right.
+    const held = box(0.24,1.28,-0.38,1,1,1,steel,g);
+    held.name = 'held'; held.visible = false;
     people.set(id,g); return g;
   }
   // The diver hangs from the ceiling bell, then folds its tines down to the floor.
@@ -156,7 +184,69 @@ export function createScene(canvas: HTMLCanvasElement, generated = false) {
   }));
   cone.position.z = -1.36; cone.rotation.x = Math.PI/2; torch.add(cone);
   camera.position.set(-0.7,1.59,3); camera.rotation.x = -0.12;
-  let previousOwner: number | null | undefined;
+  // A thrown item's clock: when this client first saw its flight, so it can
+  // replay the host's arc smoothly between snapshots.
+  const flights = new Map<string,{key: string; start: number}>();
+  function flown(id: string, f: Flight, now: number) {
+    const key = [f.x,f.y,f.z,f.vx,f.vy,f.vz].join();
+    let clock = flights.get(id);
+    if (!clock || clock.key !== key) flights.set(id,clock = {key,start:now-f.t*1000});
+    // Never fall more than a tenth of a second behind the host.
+    if ((now-clock.start)/1000 < f.t-0.1) clock.start = now-f.t*1000;
+    return Math.min(f.d,(now-clock.start)/1000);
+  }
+  // Where a thrown item is now, as its centre, from the shared flight rules.
+  function inFlight(layout: Layout, opened: readonly string[], id: string, f: Flight, kind: ItemKind | 'lamp', rest: {x: number; y: number; z: number}, now: number) {
+    const path = trajectory(geometryFor(layout),opened,f,bodyOf(kind),rest);
+    return {...positionAt(path,flown(id,f,now)),t:flown(id,f,now)};
+  }
+  // Each kind's hotbar picture, rendered once in a small off-screen scene.
+  let previewImages: Record<string,string> | undefined;
+  function previews() {
+    if (previewImages) return previewImages;
+    const size = 96, target = new T.WebGLRenderTarget(size,size), stage = new T.Scene();
+    const lens2 = new T.PerspectiveCamera(30,1,0.1,10);
+    lens2.position.set(1.25,1,1.25); lens2.lookAt(0,0,0);
+    stage.add(new T.HemisphereLight(0xffffff,0x5a5048,2.4));
+    const key = new T.DirectionalLight(0xffffff,2.2); key.position.set(2,3,1); stage.add(key);
+    const pixels = new Uint8Array(size*size*4), canvas = document.createElement('canvas');
+    canvas.width = canvas.height = size;
+    const ctx = canvas.getContext('2d')!;
+    // Render targets hold linear colour; encode it as sRGB for the image.
+    const encode = (v: number) => { const c = v/255; return 255*(c <= 0.0031308 ? c*12.92 : 1.055*c**(1/2.4)-0.055); };
+    function shoot(object: T.Object3D) {
+      stage.add(object);
+      renderer.setRenderTarget(target);
+      renderer.setClearColor(0x000000,0); renderer.clear();
+      renderer.render(stage,lens2);
+      renderer.readRenderTargetPixels(target,0,0,size,size,pixels);
+      renderer.setRenderTarget(null);
+      stage.remove(object);
+      const image = ctx.createImageData(size,size);
+      for (let y=0;y<size;y++) for (let x=0;x<size;x++) {
+        const from = ((size-1-y)*size+x)*4, to = (y*size+x)*4;
+        for (let c=0;c<3;c++) image.data[to+c] = encode(pixels[from+c]);
+        image.data[to+3] = pixels[from+3];
+      }
+      ctx.putImageData(image,0,0);
+      return canvas.toDataURL();
+    }
+    const out: Record<string,string> = {};
+    for (const kind of Object.keys(itemKinds) as ItemKind[]) {
+      const [w,h,d] = itemKinds[kind].size, fit = 0.75/Math.max(w,h,d);
+      const mesh = new T.Mesh(cube,itemMaterial(kind));
+      mesh.scale.set(w*fit,h*fit,d*fit); mesh.rotation.y = 0.35;
+      out[kind] = shoot(mesh);
+    }
+    const light = new T.Group();
+    for (const part of [barrel,head,lens]) light.add(part.clone());
+    light.scale.setScalar(2.2); light.rotation.set(0.2,0.8,0);
+    out.lamp = shoot(light);
+    target.dispose();
+    renderer.setClearColor(0x000000,1);
+    return previewImages = out;
+  }
+  let previousOwner: number | null | undefined, previousFlight = false;
   let portals: PortalGraph | undefined;
   // Remote operators and a flashlight they carry move once per snapshot, up
   // to 100 ms apart for a guest. Glide from where each was drawn to its new
@@ -218,9 +308,23 @@ export function createScene(canvas: HTMLCanvasElement, generated = false) {
         tines.position.y = creature.mode === 'strike' ? 0.75 : 2.8+Math.cos(creature.seconds*7)*0.12;
         tines.rotation.y = creature.seconds*0.45;
       }
+      const salvageKind = new Map(layout && state.mission ? spawnSalvage(layout).map(s => [s.id,s.kind]) : []);
+      const heldKind = (p: Snapshot['players'][number]) => {
+        const item = selected(p);
+        return item && item !== lampSlot ? salvageKind.get(item) : undefined;
+      };
       for (const p of state.players) {
         const down = state.mission?.down.some(d => d.id === p.id);
         if (p.id === self) {
+          // Your own held salvage, kept clear of walls like a held flashlight.
+          const kind = down ? undefined : heldKind(p);
+          // Smaller and lower than the partner sees it, so it doesn't fill the view.
+          holdItem(inHand,kind,0.55);
+          if (kind) {
+            const solids = layout ? obstaclesAt(geometryFor(layout),p.feetY ?? 0,state.opened) : walls;
+            const at = heldLamp(p,solids);
+            inHand.position.set(at.x,at.y-0.1,at.z); inHand.rotation.set(0,p.yaw,0);
+          }
           const eyeHeight=(p.feetY??0)+(down && !reducedMotion ? 0.45 : 1.59);
           camera.position.y = reducedMotion ? eyeHeight : T.MathUtils.lerp(camera.position.y,eyeHeight,blend);
           camera.position.x = T.MathUtils.lerp(camera.position.x,p.x,blend);
@@ -230,6 +334,7 @@ export function createScene(canvas: HTMLCanvasElement, generated = false) {
           let g = people.get(p.id);
           if (!g) { g = avatar(p.id); g.position.set(p.x,p.feetY ?? 0,p.z); }
           g.scale.y = down ? 0.35 : 1;
+          holdItem(g.getObjectByName('held') as T.Mesh,down ? undefined : heldKind(p));
           g.position.copy(glide('p'+p.id,state.update,p.x,p.feetY ?? 0,p.z,performance.now(),g.position));
           g.rotation.y += Math.atan2(Math.sin(p.yaw-g.rotation.y),Math.cos(p.yaw-g.rotation.y))*blend;
         }
@@ -237,15 +342,30 @@ export function createScene(canvas: HTMLCanvasElement, generated = false) {
       for (const [id,g] of people) if (!state.players.some(p => p.id === id)) { scene.remove(g); people.delete(id); }
       const l = state.lamp;
       const t = previousOwner === l.owner ? blend : 1;
-      if (l.owner !== null && l.owner !== self && previousOwner === l.owner) {
+      const now = performance.now();
+      if (l.flight && layout) {
+        // A thrown flashlight tumbles end over end, still lit.
+        const at = inFlight(layout,state.opened ?? [],'lamp',l.flight,'lamp',{x:l.x,y:l.y-0.14,z:l.z},now);
+        torch.position.set(at.x,at.y,at.z);
+        torch.rotation.x = -at.t*9;
+        tracks.delete('lamp');
+      } else if (l.owner !== null && l.owner !== self && previousOwner === l.owner) {
         torch.position.copy(glide('lamp',state.update,l.x,l.y,l.z,performance.now(),torch.position));
       } else {
         tracks.delete('lamp');
         torch.position.lerp(new T.Vector3(l.x,l.y,l.z),t);
       }
       torch.rotation.y += Math.atan2(Math.sin(l.yaw-torch.rotation.y),Math.cos(l.yaw-torch.rotation.y))*t;
-      torch.rotation.x += (l.pitch-torch.rotation.x)*t;
-      beam.visible = cone.visible = l.on; lensMat.color.setHex(l.on ? 0xffe7a6 : 0x646951);
+      if (!l.flight) torch.rotation.x += (l.pitch-torch.rotation.x)*(previousFlight ? 1 : t);
+      previousFlight = !!l.flight;
+      // Clipped to the chest, the beam is shorter and dimmer. Its holder
+      // doesn't see the flashlight itself, only its light.
+      const stowed = !!l.stowed && l.owner !== null;
+      beam.intensity = stowed ? 32 : 85; beam.distance = stowed ? 10 : 17; beam.angle = stowed ? 0.5 : 0.43;
+      (cone.material as T.MeshBasicMaterial).opacity = stowed ? 0.02 : 0.045;
+      barrel.visible = head.visible = lens.visible = !(stowed && l.owner === self);
+      beam.visible = l.on; cone.visible = l.on && !(stowed && l.owner === self);
+      lensMat.color.setHex(l.on ? 0xffe7a6 : 0x646951);
       previousOwner = l.owner;
       // Draw the camera's room and the rooms visible through its doorways.
       if (facility && layout && portals) {
@@ -272,6 +392,16 @@ export function createScene(canvas: HTMLCanvasElement, generated = false) {
           const lift = facility.lift, all = items(layout,mission);
           const loaded = all.filter(i => i.loaded);
           facility.salvage(all.filter(i => i.owner === null).map(i => {
+            if (i.flight) {
+              const at = inFlight(layout,state.opened ?? [],i.id,i.flight,i.kind,i,now), [,h] = itemKinds[i.kind].size;
+              // Cull it with the room whose floor is below it.
+              let under: string | undefined, top = -Infinity;
+              for (const f of g.surfaces) {
+                if (Math.abs(at.x-f.x) > f.w/2 || Math.abs(at.z-f.z) > f.d/2 || f.y > at.y || f.y < top) continue;
+                top = f.y; under = f.room;
+              }
+              return {...i,x:at.x,y:at.y-h/2,z:at.z,room:under ?? i.room};
+            }
             if (i.loaded && lift) {
               const n = loaded.indexOf(i);
               return {...i,room:'intake',x:lift.x+(n%3-1)*0.45,y:lift.y+0.07+Math.floor(n/9)*0.45,z:lift.z+(Math.floor(n/3)%3-1)*0.45};
@@ -293,5 +423,5 @@ export function createScene(canvas: HTMLCanvasElement, generated = false) {
     camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix();
   }
   resize(); window.addEventListener('resize',resize);
-  return Object.assign(render,{stats});
+  return Object.assign(render,{stats,previews});
 }

@@ -1,16 +1,16 @@
 import { bindPreferences } from './preferences.ts';
-import { assignment, collectable, finished, itemName, pack } from './mission.ts';
-import { packSize } from './salvage.ts';
+import { assignment, finished, itemName, nearestPickup } from './mission.ts';
+import { spawnSalvage, type ItemKind } from './salvage.ts';
 import { missionHud } from './mission-hud.ts';
 import { mountDiagnostics } from './diagnostics.ts';
 import './style.css';
 import { generatorVersion, geometryFor, nearbyDoor, roomAt, roomLabel, solidsAt } from './layout.ts';
 import type { Layout, Geometry } from './layout.ts';
-import { canTake, walls } from './room.ts';
+import { hotbarSize, lampSlot, selected, slotsOf, walls } from './room.ts';
 import { SoloSession } from './solo-session.ts';
 import { CreatorSession, type Crew } from './creator-session.ts';
 import { RoomConnection, type Events } from './connection.ts';
-import type { Input, Ticket, Snapshot } from './room.ts';
+import type { Action, Command, Input, Player, Ticket, Snapshot } from './room.ts';
 import { bindDrag } from './touch.ts';
 import { createScene } from './scene.ts';
 import { Prediction } from './prediction.ts';
@@ -60,9 +60,22 @@ function start(render: ReturnType<typeof createScene>, mode?: Crew | 'solo', sce
   const pad = element('move-pad');
   const thumb = element('thumb');
   const take = element<HTMLButtonElement>('take');
-  const collect = element<HTMLButtonElement>('collect');
-  const dropItem = element<HTMLButtonElement>('drop-item');
+  const dropButton = element<HTMLButtonElement>('drop');
+  const throwButton = element<HTMLButtonElement>('throw');
   const toggle = element<HTMLButtonElement>('toggle');
+  const hotbar = element('hotbar');
+  const charge = element('charge');
+  // One button per slot, each with a preview of its item rendered once per kind.
+  const slotButtons = Array.from({length:hotbarSize},(_,i) => {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.innerHTML = '<img alt=""><span class="key">'+(i+1)+'</span>';
+    b.onclick = () => select(i);
+    hotbar.append(b);
+    return b;
+  });
+  const slotName = document.createElement('span');
+  slotName.className = 'name';
   function showControls() {
     touchControls.hidden = !playing || !touchMode;
     element('control-hint').textContent = touchMode ? 'Left pad to walk · Swipe the room to look' : 'WASD to walk · Mouse or arrows to look';
@@ -91,19 +104,56 @@ function start(render: ReturnType<typeof createScene>, mode?: Crew | 'solo', sce
       showControls();
     });
   }
-  function useFlashlight() {
-    if (playing && state) connection.action(state.lamp.owner === id ? 'drop' : 'take');
-  }
-  function switchLight() { if (playing && state) connection.action('toggle'); }
-  function openDoor() { if (playing && state && geometry) connection.action('open-door'); }
+  function act(action: Action, extra?: Command) { if (playing && state) connection.action(action,extra); }
+  function switchLight() { if (state?.lamp.owner === id) act('toggle'); }
+  function openDoor() { if (geometry) act('open-door'); }
   doorButton.onclick = openDoor;
-  take.onclick = useFlashlight;
-  function collectItem() { if (playing && state?.mission) connection.action('collect'); }
-  function dropSalvage() { if (playing && state?.mission) connection.action('drop-item'); }
-  collect.onclick = collectItem;
-  dropItem.onclick = dropSalvage;
+  take.onclick = () => act('take');
+  dropButton.onclick = () => act('drop');
   element('next').onclick = () => { if (state?.mission?.stage === 'settled') connection.action('next'); };
   toggle.onclick = switchLight;
+  // The selected slot shows at once; the host's copy catches up a round trip later.
+  let hand: {slot: number; until: number} | undefined;
+  const handOf = (p: Player) => hand && performance.now() < hand.until ? hand.slot : p.hand ?? 0;
+  function withHand(s: Snapshot): Snapshot {
+    const p = s.players.find(player => player.id === id);
+    return p && handOf(p) !== (p.hand ?? 0) ? {...s,players:s.players.map(q => q === p ? {...p,hand:handOf(p)} : q)} : s;
+  }
+  function select(slot: number) {
+    if (!playing || !state) return;
+    slot = (slot+hotbarSize) % hotbarSize;
+    hand = {slot,until:performance.now()+1500};
+    act('select',{slot});
+    updateHud(state);
+  }
+  // Hold to throw: the longer the hold, up to 0.9 s, the harder the throw.
+  let charging: number | undefined;
+  const power = () => charging === undefined ? 0 : Math.min(1,(performance.now()-charging)/900);
+  function startThrow() {
+    const p = state?.players.find(player => player.id === id);
+    if (!playing || !p || !geometry || !selected({...p,hand:handOf(p)}) || charging !== undefined) return;
+    charging = performance.now();
+    charge.hidden = false;
+  }
+  function endThrow(cancel = false) {
+    if (charging === undefined) return;
+    const strength = power();
+    charging = undefined;
+    charge.hidden = true;
+    if (!cancel) act('throw',{aim:{yaw,pitch,power:strength}});
+  }
+  throwButton.addEventListener('pointerdown',e => { e.preventDefault(); startThrow(); });
+  throwButton.addEventListener('pointerup',() => endThrow());
+  throwButton.addEventListener('pointercancel',() => endThrow(true));
+  window.addEventListener('mousedown',e => { if (e.button === 0 && playing && document.pointerLockElement === canvas) startThrow(); });
+  window.addEventListener('mouseup',e => { if (e.button === 0) endThrow(); });
+  let lastWheel = 0;
+  window.addEventListener('wheel',e => {
+    const p = state?.players.find(player => player.id === id);
+    if (!playing || !p || !e.deltaY || performance.now()-lastWheel < 90) return;
+    lastWheel = performance.now();
+    select(handOf(p)+Math.sign(e.deltaY));
+  },{passive:true});
   showControls();
   function controls(): Input {
     if (!playing) return {forward:0,right:0,yaw,pitch};
@@ -114,6 +164,7 @@ function start(render: ReturnType<typeof createScene>, mode?: Crew | 'solo', sce
   }
   function input() { connection.input(controls()); }
   function pause() {
+    endThrow(true);
     keys.clear(); playing = false; resetStick(); resetLook(); showControls(); reticle.hidden = true; input();
     if (solo && state && !finished(state.mission?.stage)) updateHud(state);
   }
@@ -147,18 +198,50 @@ function start(render: ReturnType<typeof createScene>, mode?: Crew | 'solo', sce
     if (e.repeat) return;
     keys.add(e.code);
     if (e.code === 'KeyQ') operate.click();
-    if (e.code === 'KeyE') useFlashlight();
+    if (e.code === 'KeyE') act('take');
     if (e.code === 'KeyR') openDoor();
     if (e.code === 'KeyF') switchLight();
-    if (e.code === 'KeyC') collectItem();
-    if (e.code === 'KeyX') dropSalvage();
+    if (e.code === 'KeyX') act('drop');
+    if (e.code === 'KeyT') startThrow();
+    const digit = /^Digit([1-9])$/.exec(e.code);
+    if (digit && +digit[1] <= hotbarSize) select(+digit[1]-1);
     if (e.code === 'Escape') {
       pause();
       if (document.pointerLockElement) document.exitPointerLock();
     }
     input();
   });
-  window.addEventListener('keyup',e => { keys.delete(e.code); if (playing) input(); });
+  window.addEventListener('keyup',e => {
+    keys.delete(e.code);
+    if (e.code === 'KeyT') endThrow();
+    if (playing) input();
+  });
+
+  // Each slot's item: the flashlight or a piece of salvage from this facility.
+  let kinds = new Map<string,ItemKind>(), kindsFor: Layout | undefined;
+  function kindOf(item: string): ItemKind | 'lamp' | undefined {
+    if (item === lampSlot) return 'lamp';
+    if (layout && kindsFor !== layout) { kinds = new Map(spawnSalvage(layout).map(s => [s.id,s.kind])); kindsFor = layout; }
+    return kinds.get(item);
+  }
+  const nameOf = (kind: ItemKind | 'lamp') => kind === 'lamp' ? 'Flashlight' : itemName(kind);
+  let previews: Record<string,string> | undefined;
+  function showHotbar(p: Player) {
+    previews ??= render.previews();
+    const slots = slotsOf(p), current = handOf(p);
+    slots.forEach((item,i) => {
+      const b = slotButtons[i], kind = item ? kindOf(item) : undefined, img = b.querySelector('img')!;
+      const src = kind ? previews![kind] : '';
+      if (img.getAttribute('src') !== src) { if (src) img.src = src; else img.removeAttribute('src'); }
+      img.hidden = !kind;
+      b.setAttribute('aria-label','Slot '+(i+1)+': '+(kind ? nameOf(kind) : 'empty'));
+      b.setAttribute('aria-pressed',String(i === current));
+      if (i === current) {
+        slotName.textContent = kind ? nameOf(kind) : '';
+        if (slotName.parentElement !== b) b.append(slotName);
+      }
+    });
+  }
 
   function updateHud(s: Snapshot) {
     const p = s.players.find(player => player.id === id);
@@ -175,11 +258,14 @@ function start(render: ReturnType<typeof createScene>, mode?: Crew | 'solo', sce
     const task = layout && assignment(layout,s,p,solids);
     operate.hidden = !task;
     if (task) operate.textContent = task.label;
-    const mission = s.mission, exploring = mission?.stage === 'explore' && !down;
-    const carried = layout && mission ? pack(layout,mission,id) : [];
-    const item = layout && mission && exploring ? collectable(layout,mission,p,solids) : undefined;
-    element('pack').hidden = !mission;
-    element('pack').textContent = 'Pack '+carried.length+'/'+packSize+(carried.length ? ' · '+carried.map(i => itemName(i.kind)).join(', ') : '');
+    const mission = s.mission, active = !down && !finished(mission?.stage) && mission?.stage !== 'settled';
+    if (hand && (p.hand ?? 0) === hand.slot) hand = undefined;
+    const me = {...p,hand:handOf(p)};
+    const inHand = selected(me), heldKind = inHand ? kindOf(inHand) : undefined;
+    const pick = active ? nearestPickup(layout,s,p,solids) : undefined;
+    const pickName = pick ? ('lamp' in pick ? 'flashlight' : itemName(pick.item.kind)) : '';
+    hotbar.hidden = !brief.hidden;
+    if (brief.hidden) showHotbar(me);
     if (layout && s.mission) {
       if (finished(s.mission.stage) || s.mission.stage === 'settled') {
         if (playing) pause();
@@ -188,17 +274,16 @@ function start(render: ReturnType<typeof createScene>, mode?: Crew | 'solo', sce
       }
       hud.update(layout,s,p,here?.id,!brief.hidden);
     }
-    const reachable = canTake(p,l,solids);
     if (layout) element('sector').textContent = here ? roomLabel(here) : 'Corridor';
     if (touchMode) {
-      collect.hidden = !item;
-      if (item) collect.textContent = 'Collect '+itemName(item.kind);
-      dropItem.hidden = !carried.length || !exploring;
-      take.disabled = !!down || (!holding && !reachable);
-      take.textContent = holding ? 'Drop' : 'Pick up';
+      take.hidden = !pick;
+      take.textContent = 'Pick up '+pickName;
+      dropButton.hidden = throwButton.hidden = !heldKind || !active;
+      if (!geometry) throwButton.hidden = true;
       toggle.disabled = !!down || !holding;
       toggle.textContent = l.on ? 'Light off' : 'Light on';
     }
+    const held = heldKind ? (heldKind === 'lamp' ? 'flashlight' : itemName(heldKind)) : '';
     if (!brief.hidden) prompt.textContent = solo ? '' : s.players.length === 2 ? 'Both seats occupied' : 'Waiting for a partner';
     else if (finished(s.mission?.stage)) prompt.textContent = 'Contract ended';
     else if (s.mission?.stage === 'settled') prompt.textContent = 'Expedition sold';
@@ -206,10 +291,11 @@ function start(render: ReturnType<typeof createScene>, mode?: Crew | 'solo', sce
     else if (task) prompt.textContent = touchMode ? task.label : 'Q  '+task.label;
     else if (down) prompt.textContent = 'Waiting for rescue';
     else if (door) prompt.textContent = touchMode ? 'Bulkhead within reach' : 'R  Open bulkhead';
-    else if (item) prompt.textContent = touchMode ? itemName(item.kind)+' within reach' : 'C  Collect '+itemName(item.kind);
-    else if (holding) prompt.textContent = touchMode ? 'You hold the flashlight' : 'E  Drop flashlight   ·   F  Switch ' + (l.on ? 'off' : 'on');
-    else if (l.owner) prompt.textContent = 'Operator ' + l.owner + ' holds the flashlight';
-    else prompt.textContent = reachable ? (touchMode ? 'Flashlight within reach' : 'E  Pick up flashlight') : '';
+    else if (pick) prompt.textContent = touchMode ? pickName[0].toUpperCase()+pickName.slice(1)+' within reach' : 'E  Pick up '+pickName;
+    else if (held) prompt.textContent = touchMode ? 'Holding the '+held : 'X  Drop '+held+'   ·   Hold T or click  Throw'+(holding ? '   ·   F  Switch '+(l.on ? 'off' : 'on') : '');
+    else if (holding) prompt.textContent = touchMode ? 'The flashlight is clipped on' : 'F  Switch the clipped flashlight '+(l.on ? 'off' : 'on');
+    else if (l.owner) prompt.textContent = 'Operator ' + l.owner + ' carries the flashlight';
+    else prompt.textContent = '';
     diagnostics?.update(s,layout,network?.metrics,crew,delay);
   }
   const events: Events = {
@@ -296,7 +382,9 @@ function start(render: ReturnType<typeof createScene>, mode?: Crew | 'solo', sce
     }
     if (playing && !document.hidden) soloSession?.tick(dt);
     if (prediction && state) prediction.step(now,dt,controls(),geometry,state.opened ?? [],frozen(state));
-    render(prediction && state ? prediction.view(state,id,geometry) : state,id,yaw,pitch,dt,layout,preferences.reducedMotion);
+    if (charging !== undefined) (charge.firstElementChild as HTMLElement).style.width = power()*100+'%';
+    const shown = state && withHand(state);
+    render(prediction && shown ? prediction.view(shown,id,geometry) : shown,id,yaw,pitch,dt,layout,preferences.reducedMotion);
     diagnostics?.frame(now,elapsed,!!state);
     requestAnimationFrame(frame);
   }

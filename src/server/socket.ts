@@ -5,7 +5,7 @@ import type { Duplex } from 'node:stream';
 import { WebSocketServer, WebSocket } from 'ws';
 import type { Layout } from '../layout.ts';
 import { Simulation } from './simulation.ts';
-import { actions } from '../room.ts';
+import { actions, command } from '../room.ts';
 import type { Input, ServerMessage } from '../room.ts';
 
 function validInput(value: Input | undefined) {
@@ -112,7 +112,7 @@ export function createLiveRoom(graceMs: number, onEmpty?: () => void, layout?: L
       }
       if (m.type === 'action' && Number.isSafeInteger(m.seq) && m.seq > seat.lastAction && actions.includes(m.action)) {
         seat.lastAction = m.seq;
-        room.act(seat.id,m.action);
+        room.act(seat.id,m.action,command(m));
         announce();
       }
     });

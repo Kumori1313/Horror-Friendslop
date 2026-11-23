@@ -45,7 +45,15 @@ pre { margin-bottom: 0; line-height: 1.5 }
 #live-leave { pointer-events: auto; padding: .45rem }
 
 #sector { display: block; color: #edc47d; letter-spacing: .03em; font-weight: normal }
-#pack { display: block; color: #c9d6cf; letter-spacing: .03em; font-weight: normal; font-size: .85em }
+#hotbar { position: absolute; left: 50%; bottom: 4.6rem; transform: translateX(-50%); display: flex; gap: .4rem; pointer-events: auto; user-select: none }
+#hotbar button { position: relative; width: 3.6rem; height: 3.6rem; padding: 0; background: #101917c4; border: 2px solid #69756b99; border-radius: 6px }
+#hotbar button[aria-pressed="true"] { border-color: #e7b667; background: #2a2c20d9; box-shadow: 0 0 0 1px #e7b66766 }
+#hotbar img { width: 100%; height: 100%; display: block; pointer-events: none }
+#hotbar .key { position: absolute; top: 1px; left: 4px; font-size: .7rem; color: #c9d6cf; text-shadow: 0 0 2px black }
+#hotbar .name { position: absolute; bottom: calc(100% + .35rem); left: 50%; transform: translateX(-50%); white-space: nowrap; font-size: .8rem; color: #f0d9a8; text-shadow: 0 0 3px black; pointer-events: none }
+#charge { position: absolute; left: 50%; top: calc(50% + 26px); width: 120px; height: 6px; transform: translateX(-50%); background: #0e1817cc; border: 1px solid #dddfcf88 }
+#charge span { display: block; height: 100%; width: 0; background: #e7b667 }
+@media (pointer: coarse) and (max-width: 640px) { #hotbar { bottom: calc(4.8rem + 118px) } }
 #receipt { list-style: none; padding: 0; margin: .8rem 0; font-variant-numeric: tabular-nums }
 #receipt li { display: flex; justify-content: space-between; gap: 1rem; padding: .15rem 0; border-bottom: 1px solid #2a3936 }
 #receipt li.total { font-weight: bold; color: #fff3d8; border-bottom: 0 }

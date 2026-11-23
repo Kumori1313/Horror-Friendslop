@@ -34,7 +34,7 @@
   <main>
     <canvas id="scene" aria-label="First-person view of the relay room"></canvas>
     <div id="top-hud">
-    <header><div><span class="lamp-icon" aria-hidden="true">◈</span> RELAY ROOM <span id="sector" hidden></span><span id="pack" hidden></span></div><div class="session-controls"><span id="connection" role="status">Connecting…</span><button id="settings" aria-haspopup="dialog">Settings</button></div></header>
+    <header><div><span class="lamp-icon" aria-hidden="true">◈</span> RELAY ROOM <span id="sector" hidden></span></div><div class="session-controls"><span id="connection" role="status">Connecting…</span><button id="settings" aria-haspopup="dialog">Settings</button></div></header>
     <aside id="mission" hidden><span id="warning" role="status"></span><small id="sound-caption"></small></aside>
     </div>
     <dialog id="preferences" aria-labelledby="preferences-title">
@@ -67,14 +67,16 @@
       <button id="replay">Return to lobbies</button>
     </section>
     <div id="reticle" hidden></div>
+    <div id="charge" hidden><span></span></div>
+    <div id="hotbar" role="toolbar" aria-label="Hotbar" hidden></div>
     <div id="touch-controls" hidden>
       <div id="move-pad" role="group" aria-label="Movement joystick"><span id="thumb"></span></div>
       <div id="touch-actions">
         <button id="operate" hidden></button>
         <button id="open-door" hidden>Open bulkhead</button>
-        <button id="collect" hidden>Collect</button>
-        <button id="drop-item" hidden>Drop item</button>
-        <button id="take" disabled>Pick up</button>
+        <button id="take" hidden>Pick up</button>
+        <button id="drop" hidden>Drop</button>
+        <button id="throw" hidden>Hold to throw</button>
         <button id="toggle" disabled>Light off</button>
       </div>
     </div>

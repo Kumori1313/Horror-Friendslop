@@ -1,6 +1,6 @@
 import type { Events } from './connection.ts';
 import { generatorVersion, stairwellLayout, type Layout } from './layout.ts';
-import type { Action, Input, Snapshot } from './room.ts';
+import type { Action, Command, Input, Snapshot } from './room.ts';
 import { generateLayout } from './server/generate-layout.ts';
 import { Simulation } from './server/simulation.ts';
 
@@ -46,8 +46,8 @@ export class SoloSession {
     this.save();
   }
   input(input: Input) { this.sim.inputs.set(1,input); }
-  action(action: Action) {
-    this.sim.act(1,action);
+  action(action: Action, extra: Command = {}) {
+    this.sim.act(1,action,extra);
     this.announceLayout();
     this.events.snapshot(this.sim.state,false);
     this.save();

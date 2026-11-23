@@ -1,10 +1,11 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { anchor } from '../src/layout.ts';
+import { anchor, lampSpawn } from '../src/layout.ts';
 import { assignment, items, kept, lossPercent, pack } from '../src/mission.ts';
 import type { Mission } from '../src/mission.ts';
+import { freeSlot, hotbarSize, lampSlot, slotsOf } from '../src/room.ts';
 import type { Player } from '../src/room.ts';
-import { expeditionSeed, facilityValue, liftOf, packSize, spawnSalvage } from '../src/salvage.ts';
+import { expeditionSeed, facilityValue, liftOf, spawnSalvage } from '../src/salvage.ts';
 import { generateLayout } from '../src/server/generate-layout.ts';
 import { expeditionsPerContract, newContract, quotaShare, settle } from '../src/server/mission.ts';
 import { Simulation } from '../src/server/simulation.ts';
@@ -15,14 +16,14 @@ function crew(seed = 19, mode: 'solo' | 'coop' = 'coop') {
   const mission = sim.state.mission!;
   const at = (p: Player, to: {x: number; y: number; z: number}) => Object.assign(p,{x:to.x,z:to.z,feetY:to.y});
   const player = (id: number) => sim.state.players.find(p => p.id === id)!;
-  // Stand on an item and collect it; when the pack is full, unload at the lift first.
+  // Stand on an item and pick it up; when the hotbar is full, unload at the lift first.
   function gather(id: number, limit = Infinity) {
     let taken = 0;
     for (const item of items(sim.layout!,mission)) {
       if (taken >= limit) break;
       if (item.owner !== null || item.loaded) continue;
-      if (pack(sim.layout!,mission,id).length >= packSize) load(id);
-      at(player(id),item); sim.act(id,'collect'); taken++;
+      if (freeSlot(player(id)) < 0) load(id);
+      at(player(id),item); sim.act(id,'take'); taken++;
     }
   }
   function load(id: number) { at(player(id),liftOf(sim.layout!)); sim.act(id,'operate'); }
@@ -47,20 +48,30 @@ test('every facility seeds the same reachable salvage, and the quota can be met'
   assert.notEqual(expeditionSeed(19,1),expeditionSeed(19,2));
 });
 
-test('a pack holds three items, the first pickup wakes the Diver, and loading puts them on the lift', () => {
+test('the flashlight takes a hotbar slot, the first pickup wakes the Diver, and loading keeps the light', () => {
   const {sim,mission,at,player,load,loadedValue} = crew();
   assert.equal(mission.diver.mode,'dormant');
+  at(player(1),{...lampSpawn,y:0});
+  sim.act(1,'take');
+  assert.deepEqual(slotsOf(player(1)),[lampSlot,null,null,null]);
+  assert.equal(sim.state.lamp.stowed,false,'a selected flashlight is in the hand');
   const salvage = spawnSalvage(sim.layout!);
-  for (const item of salvage.slice(0,4)) { at(player(1),item); sim.act(1,'collect'); }
-  assert.equal(pack(sim.layout!,mission,1).length,packSize,'the fourth item stays put');
+  for (const item of salvage.slice(0,hotbarSize)) { at(player(1),item); sim.act(1,'take'); }
+  assert.equal(pack(sim.layout!,mission,1).length,hotbarSize-1,'with the light, three slots are left for salvage');
+  assert.equal(player(1).hand,3,'a pickup selects its slot');
+  assert.equal(sim.state.lamp.stowed,true,'the light clips to the chest while salvage is in hand');
   assert.ok(mission.awake && sim.state.mission!.diver.mode === 'quiet','the first pickup wakes the Diver');
   const dropped = pack(sim.layout!,mission,1).at(-1)!;
   at(player(1),{x:1,y:0,z:4});
-  sim.act(1,'drop-item');
+  sim.act(1,'drop');
   const fallen = items(sim.layout!,mission).find(i => i.id === dropped.id)!;
   assert.deepEqual([fallen.owner,fallen.x,fallen.z],[null,1,4],'drops at the operator\'s feet');
+  assert.equal(slotsOf(player(1))[3],null);
+  sim.act(1,'select',{slot:0});
+  assert.equal(sim.state.lamp.stowed,false,'selecting the light brings it back to the hand');
   load(1);
   assert.equal(pack(sim.layout!,mission,1).length,0);
+  assert.deepEqual(slotsOf(player(1)),[lampSlot,null,null,null],'loading keeps the flashlight');
   assert.equal(loadedValue(mission),salvage.slice(0,2).reduce((s,i) => s+i.value,0));
 });
 

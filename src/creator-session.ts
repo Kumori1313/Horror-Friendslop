@@ -3,8 +3,8 @@ import type { Events } from './connection.ts';
 import { generatorVersion, type Layout } from './layout.ts';
 import { generateLayout } from './server/generate-layout.ts';
 import { Simulation } from './server/simulation.ts';
-import { actions } from './room.ts';
-import type { Action, Input, Snapshot } from './room.ts';
+import { actions, command } from './room.ts';
+import type { Action, Command, Input, Snapshot } from './room.ts';
 
 export interface Crew {
   client: SupabaseClient;
@@ -17,7 +17,7 @@ export interface Crew {
 }
 const grace = 20000;
 const idle = (): Input => ({forward:0,right:0,yaw:0,pitch:-0.12});
-type Control = {seq:number; action:Action};
+type Control = {seq:number; action:Action} & Command;
 type GuestFrame = {type:'hello'|'control'; version:number; peer:string; round:string; input:Input; action?:Control; sent:number};
 type HostFrame =
   | {type:'ready'}
@@ -161,7 +161,7 @@ export class CreatorSession {
     sim.state.players.find(p=>p.id===2)!.connected=true;
     sim.inputs.set(2,m.input);
     if (m.action && Number.isSafeInteger(m.action.seq) && m.action.seq===this.ack+1 && actions.includes(m.action.action)) {
-      sim.act(2,m.action.action); this.ack=m.action.seq;
+      sim.act(2,m.action.action,command(m.action)); this.ack=m.action.seq;
       this.afterAction();
     }
   }
@@ -250,10 +250,12 @@ export class CreatorSession {
     }
   }
   input(input: Input) { this.inputState=input; this.sim?.inputs.set(1,input); }
-  action(action: Action) {
+  action(action: Action, extra: Command = {}) {
     if (performance.now()<this.pausedUntil || !this.round) return;
-    if (this.sim) { this.sim.act(1,action); this.afterAction(); }
-    else if (this.pending.length<8) this.pending.push({seq:++this.seq,action});
+    if (this.sim) { this.sim.act(1,action,extra); this.afterAction(); }
+    // Scrolling through slots replaces a queued selection that hasn't been sent.
+    else if (action==='select' && this.pending.length>1 && this.pending.at(-1)!.action==='select') this.pending.at(-1)!.slot=extra.slot;
+    else if (this.pending.length<8) this.pending.push({seq:++this.seq,action,...extra});
   }
   // Save at once, so a refresh right after a sale cannot undo or repeat it.
   private afterAction() {

@@ -49,7 +49,7 @@ export function settle(layout: Layout, state: Snapshot, mission: Mission, leavin
   if (c.credited >= c.quota) { mission.stage = 'won'; mission.outcome = 'quota'; }
   else if (c.index+1 >= c.expeditions) { mission.stage = 'lost'; mission.outcome = 'deadline'; }
   else mission.stage = 'settled';
-  state.lamp.owner = null;
+  Object.assign(state.lamp,{owner:null,stowed:false});
   return receipt;
 }
 
@@ -96,7 +96,7 @@ export function advanceMission(layout: Layout, state: Snapshot, mission: Mission
   for (const p of state.players) {
     if (distance(p,bay) > strikeRadius || !sameStorey(p,bay) || mission.down.some(d => d.id === p.id)) continue;
     mission.down.push({id:p.id,seconds:75});
-    if (state.lamp.owner === p.id) Object.assign(state.lamp,{x:p.x,z:p.z,y:(p.feetY ?? 0)+0.14,owner:null,pitch:0});
+    if (state.lamp.owner === p.id) Object.assign(state.lamp,{x:p.x,z:p.z,y:(p.feetY ?? 0)+0.14,owner:null,pitch:0,stowed:false});
   }
   // A crew wipe ends the contract.
   if (mission.down.length === (mission.solo ? 1 : state.players.length)) { mission.stage = 'lost'; mission.outcome = 'wipe'; }

@@ -1,12 +1,14 @@
-import { canTake, clearAt, walls } from '../room.ts';
-import type { Action, Input, Player, Snapshot } from '../room.ts';
+import { clearAt, command, freeSlot, hotbarSize, lampSlot, selected, slotsOf, walls } from '../room.ts';
+import type { Action, Aim, Command, Input, Lamp, Player, Snapshot } from '../room.ts';
+import { launchFrom, trajectory } from '../flight.ts';
+import type { Body, Flight } from '../flight.ts';
 
 import { geometryFor, lampSpawn, nearbyDoor, playerRadius, spawnPoints } from '../layout.ts';
 import type { Layout, Geometry, Rect } from '../layout.ts';
 
 import { obstaclesAt, surfaceAt, surfaceHeight } from '../room-templates.ts';
-import { assignment, collectable, finished, onPad, pack } from '../mission.ts';
-import { expeditionSeed, liftOf } from '../salvage.ts';
+import { assignment, finished, nearestPickup, onPad } from '../mission.ts';
+import { bodyOf, expeditionSeed, itemKinds, liftOf, spawnSalvage } from '../salvage.ts';
 import { generateLayout } from './generate-layout.ts';
 import { advanceMission, newMission, settle, wake } from './mission.ts';
 
@@ -44,6 +46,29 @@ export function heldLamp(p: Player, solids: readonly Rect[]) {
   return { x: p.x+dx*reach, z: p.z+dz*reach, y: (p.feetY ?? 0)+1.28, yaw: p.yaw, pitch: p.pitch };
 }
 
+// A flashlight clipped to the chest while another slot is selected: inside
+// the operator's own radius, so always clear, facing where the body faces.
+export function stowedLamp(p: Player) {
+  return { x: p.x-0.12*Math.sin(p.yaw), z: p.z-0.12*Math.cos(p.yaw), y: (p.feetY ?? 0)+1.2, yaw: p.yaw, pitch: p.pitch*0.4-0.08 };
+}
+
+// Where a carried flashlight is, in the hand or on the chest.
+export function carriedLamp(p: Player, solids: readonly Rect[]) {
+  return selected(p) === lampSlot ? {...heldLamp(p,solids),stowed:false} : {...stowedLamp(p),stowed:true};
+}
+
+// Throw strength: 2.5 to 11.5 m/s, and a third less for heavy items.
+export function throwSpeed(power: number, heavy: boolean) {
+  return (2.5+9*power)*(heavy ? 0.65 : 1);
+}
+
+// Count a thrown item's flight down and end it once it has landed.
+function advance<T extends {flight?: Flight}>(thing: T, dt: number) {
+  if (!thing.flight) return;
+  thing.flight.t += dt;
+  if (thing.flight.t >= thing.flight.d) delete thing.flight;
+}
+
 export class Simulation {
   layout?: Layout;
   geometry?: Geometry;
@@ -64,14 +89,14 @@ export class Simulation {
     const seats = this.state.mission?.solo || this.layout?.tour ? [1] : [1,2];
     const id = seats.find(seat => (!assignedSeat || seat === assignedSeat) && !this.inputs.has(seat));
     if (!id) return;
-    this.state.players.push({ id, ...(this.geometry ? {feetY:0} : {}), connected: true, ...spawnPoints[id-1], yaw: 0, pitch: -0.12 });
+    this.state.players.push({ id, ...(this.geometry ? {feetY:0} : {}), connected: true, ...spawnPoints[id-1], yaw: 0, pitch: -0.12, slots: Array(hotbarSize).fill(null), hand: 0 });
     this.inputs.set(id, { forward: 0, right: 0, yaw: 0, pitch: -0.12 });
     return id;
   }
 
   leave(id: number) {
     const holder = this.state.players.find(p => p.id === id);
-    if (this.state.lamp.owner === id) Object.assign(this.state.lamp,{owner:null,y:(holder?.feetY ?? 0)+0.14,pitch:0});
+    if (this.state.lamp.owner === id) Object.assign(this.state.lamp,{owner:null,y:(holder?.feetY ?? 0)+0.14,pitch:0,stowed:false});
     const mission = this.state.mission;
     // Leaving never sells anything: the contract simply ends.
     if (mission && !finished(mission.stage)) { mission.stage = 'lost'; mission.outcome = 'left'; }
@@ -81,6 +106,7 @@ export class Simulation {
 
   tick(dt: number) {
     this.state.update++;
+    this.fillSlots();
     const mission = this.state.mission;
     if (finished(mission?.stage) || mission?.stage === 'settled') return;
     for (const p of this.state.players) {
@@ -93,6 +119,8 @@ export class Simulation {
       moveOperator(p,input,dt,this.geometry,this.state.opened);
       if (this.state.lamp.owner === p.id) this.hold(p);
     }
+    advance(this.state.lamp,dt);
+    for (const h of mission?.haul ?? []) advance(h,dt);
     if (mission && this.layout) advanceMission(this.layout,this.state,mission,dt,p => this.roomOf(p));
   }
 
@@ -106,13 +134,69 @@ export class Simulation {
   }
 
   hold(p: Player) {
-    Object.assign(this.state.lamp,heldLamp(p,this.solids(p)));
+    Object.assign(this.state.lamp,carriedLamp(p,this.solids(p)));
   }
 
-  act(id: number, action: Action) {
+  // Keep every hotbar in step with what its operator actually carries. A
+  // strike or a sale takes things away without asking the hotbar, and
+  // checkpoints from before the hotbar have no slots at all.
+  private fillSlots() {
+    const lamp = this.state.lamp, haul = this.state.mission?.haul ?? [];
+    for (const p of this.state.players) {
+      const owns = (item: string) => item === lampSlot ? lamp.owner === p.id : haul.some(h => h.id === item && h.owner === p.id);
+      if (!p.slots) {
+        const carried = [...(lamp.owner === p.id ? [lampSlot] : []),...haul.filter(h => h.owner === p.id).map(h => h.id)];
+        p.slots = Array.from({length:hotbarSize},(_,i) => carried[i] ?? null);
+        p.hand = 0;
+      } else if (p.slots.some(item => item !== null && !owns(item))) {
+        p.slots = p.slots.map(item => item !== null && owns(item) ? item : null);
+      }
+    }
+  }
+
+  private release(p: Player, item: string) {
+    p.slots = slotsOf(p).map(s => s === item ? null : s);
+  }
+
+  // Throw or drop the selected item. A throw is simulated to the end here;
+  // its flight lets every client draw the same arc on the way.
+  private letGo(p: Player, aim?: Aim) {
+    const item = selected(p), mission = this.state.mission, layout = this.layout;
+    if (!item) return;
+    const feet = {x:p.x,y:p.feetY ?? 0,z:p.z};
+    const kind = item === lampSlot ? 'lamp' : layout && spawnSalvage(layout).find(s => s.id === item)?.kind;
+    if (!kind) return;
+    let rest = feet, flight: Flight | undefined;
+    const body: Body = bodyOf(kind);
+    if (aim && this.geometry) {
+      // The aim travels with the command, so the throw goes where the thrower
+      // was looking even if their latest view hasn't reached the host yet.
+      const opened = this.state.opened ?? [];
+      const speed = throwSpeed(aim.power,kind !== 'lamp' && !!itemKinds[kind].heavy);
+      const start = launchFrom(this.geometry,opened,p,{fx:-Math.sin(aim.yaw),fz:-Math.cos(aim.yaw),up:Math.sin(aim.pitch),speed},body);
+      const path = trajectory(this.geometry,opened,start,body,feet);
+      rest = path.rest;
+      if (path.duration > 0) flight = {...start,t:0,d:path.duration};
+    }
+    this.release(p,item);
+    if (item === lampSlot) {
+      const lamp: Lamp = this.state.lamp;
+      Object.assign(lamp,{owner:null,x:rest.x,y:rest.y+body.h,z:rest.z,pitch:0,stowed:false});
+      if (flight) lamp.flight = flight; else delete lamp.flight;
+    } else if (mission) {
+      const h = mission.haul.find(entry => entry.id === item);
+      if (!h) return;
+      Object.assign(h,{owner:null,x:rest.x,y:rest.y,z:rest.z});
+      if (flight) h.flight = flight; else delete h.flight;
+    }
+  }
+
+  act(id: number, action: Action, extra: Command = {}) {
     const p = this.state.players.find(player => player.id === id);
     const mission = this.state.mission;
     if (!p?.connected || finished(mission?.stage)) return;
+    extra = command(extra);
+    this.fillSlots();
     if (mission?.stage === 'settled') {
       if (action === 'next') this.nextExpedition();
       return;
@@ -124,39 +208,50 @@ export class Simulation {
       if (task?.kind === 'revive') mission.down = [];
       else if (task?.kind === 'load') {
         const lift = liftOf(layout);
-        for (const h of mission.haul) if (h.owner === id) Object.assign(h,{owner:null,loaded:true,...lift});
+        for (const h of mission.haul) if (h.owner === id) { Object.assign(h,{owner:null,loaded:true,...lift}); this.release(p,h.id); }
       } else if (task?.kind === 'extract') {
         settle(layout,this.state,mission,this.state.players.filter(q => onPad(q,liftOf(layout))).map(q => q.id));
       } else if (task?.kind === 'abandon') settle(layout,this.state,mission,[id]);
       return;
     }
-    if (layout && mission && action === 'collect') {
-      const item = collectable(layout,mission,p,this.solids(p));
-      if (!item) return;
-      mission.haul = [...mission.haul.filter(h => h.id !== item.id),{id:item.id,owner:id,x:item.x,y:item.y,z:item.z}];
-      wake(layout,mission,this.roomOf(p) ?? item.room);
-      return;
-    }
-    if (layout && mission && action === 'drop-item') {
-      const last = pack(layout,mission,id).at(-1);
-      const h = last && mission.haul.find(h => h.id === last.id);
-      if (h) Object.assign(h,{owner:null,x:p.x,y:p.feetY ?? 0,z:p.z});
-      return;
-    }
     const lamp = this.state.lamp;
+    if (action === 'select' && extra.slot !== undefined) {
+      p.hand = extra.slot;
+      if (lamp.owner === id) this.hold(p);
+      return;
+    }
+    if (action === 'drop' || action === 'throw') {
+      const holding = lamp.owner === id;
+      this.letGo(p,action === 'throw' ? extra.aim ?? {yaw:p.yaw,pitch:p.pitch,power:0.5} : undefined);
+      if (holding && lamp.owner !== id) return;
+      if (lamp.owner === id) this.hold(p);
+      return;
+    }
+    if (action === 'take') {
+      // Pick up whichever is nearer: the flashlight or a piece of salvage.
+      const slot = freeSlot(p), choice = nearestPickup(layout,this.state,p,this.solids(p));
+      if (slot < 0 || !choice) return;
+      if ('lamp' in choice) {
+        p.slots = slotsOf(p).map((s,i) => i === slot ? lampSlot : s);
+        p.hand = slot;
+        lamp.owner = id;
+        this.hold(p);
+      } else if (layout && mission) {
+        const item = choice.item;
+        p.slots = slotsOf(p).map((s,i) => i === slot ? item.id : s);
+        p.hand = slot;
+        mission.haul = [...mission.haul.filter(h => h.id !== item.id),{id:item.id,owner:id,x:item.x,y:item.y,z:item.z}];
+        wake(layout,mission,this.roomOf(p) ?? item.room);
+        if (lamp.owner === id) this.hold(p);
+      }
+      return;
+    }
     if (action === 'open-door' && this.geometry && this.state.opened) {
       const door = nearbyDoor(p,this.geometry,this.state.opened);
       if (door) this.state.opened.push(door.id);
       return;
     }
-    if (action === 'take' && canTake(p, lamp,this.solids(p))) {
-      lamp.owner = id;
-      this.hold(p);
-    } else if (lamp.owner === id && action === 'drop') {
-      // Drop at the operator's feet so a lamp beside a gallery edge keeps its support.
-      if (this.geometry) Object.assign(lamp,{x:p.x,z:p.z});
-      Object.assign(lamp, { owner: null, y: (p.feetY ?? 0)+0.14, pitch: 0 });
-    } else if (lamp.owner === id && action === 'toggle') {
+    if (lamp.owner === id && action === 'toggle') {
       lamp.on = !lamp.on;
     }
   }
@@ -172,9 +267,10 @@ export class Simulation {
     this.geometry = geometryFor(this.layout);
     this.state.opened = [];
     Object.assign(mission,{stage:'explore',haul:[],down:[],awake:false,diver:{mode:'dormant',bay:'',seconds:0}});
-    Object.assign(this.state.lamp,{...lampSpawn,y:0.14,yaw:0,pitch:0,owner:null,on:true});
+    Object.assign(this.state.lamp,{...lampSpawn,y:0.14,yaw:0,pitch:0,owner:null,on:true,stowed:false});
+    delete this.state.lamp.flight;
     for (const q of this.state.players) {
-      Object.assign(q,{...spawnPoints[q.id-1],feetY:0,yaw:0,pitch:-0.12});
+      Object.assign(q,{...spawnPoints[q.id-1],feetY:0,yaw:0,pitch:-0.12,slots:Array(hotbarSize).fill(null),hand:0});
       this.inputs.set(q.id,{forward:0,right:0,yaw:0,pitch:-0.12});
     }
   }

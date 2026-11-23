@@ -1,6 +1,6 @@
 import { generatorVersion, type Layout } from './layout.ts';
 import { newerSnapshot } from './room.ts';
-import type { Action, Admission, ClientMessage, Input, ServerMessage, Snapshot, Ticket } from './room.ts';
+import type { Action, Admission, Command, ClientMessage, Input, ServerMessage, Snapshot, Ticket } from './room.ts';
 
 export interface Events {
   joined(id: number, ticket: Ticket, layout?: Layout): void;
@@ -104,8 +104,8 @@ export class RoomConnection {
   input(input: Input) {
     if (this.ticket && this.latest >= 0) this.send({type:'input',round:this.ticket.round,input});
   }
-  action(action: Action) {
-    if (this.ticket && this.latest >= 0) this.send({type:'action',round:this.ticket.round,seq:++this.seq,action});
+  action(action: Action, extra: Command = {}) {
+    if (this.ticket && this.latest >= 0) this.send({type:'action',round:this.ticket.round,seq:++this.seq,action,...extra});
   }
   private reset() {
     clearInterval(this.monitor);

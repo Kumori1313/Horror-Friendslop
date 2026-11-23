@@ -35,7 +35,7 @@ Type-checking is the only static check. There is no linter or formatter.
 
 ### One simulation, three hosts
 
-`src/server/simulation.ts` (`Simulation`) is the single authority for movement, collision, flashlight ownership, doors, salvage, and contract progress (`src/server/mission.ts`). Despite the `server/` directory, it runs in three places, so it and `generate-layout.ts` **must stay free of Node-only APIs**:
+`src/server/simulation.ts` (`Simulation`) is the single authority for movement, collision, flashlight ownership, each operator's hotbar, throws, doors, salvage, and contract progress (`src/server/mission.ts`). Despite the `server/` directory, it runs in three places, so it and `generate-layout.ts` **must stay free of Node-only APIs**:
 
 | Mode | Entry | Who runs `Simulation` | Transport |
 | --- | --- | --- | --- |
@@ -51,7 +51,7 @@ Clients without a local simulation (the Game Hub guest and both standalone-room 
 
 ### Shared protocol and state
 
-`src/room.ts` defines the wire types (`Snapshot`, `Input`, `Action`, `ClientMessage`/`ServerMessage`, `Ticket`, `Admission`) and shared collision helpers (`clearAt`, `canTake`) used by both client prediction/prompts and the simulation. Actions carry a `seq` for de-duplication of stale or replayed actions. Snapshots are ordered by `round` + `update` (`newerSnapshot`). The full `Layout` is sent only on join or resume. Regular snapshots carry live state (players, lamp, `opened` doors, `mission`).
+`src/room.ts` defines the wire types (`Snapshot`, `Input`, `Action`, `ClientMessage`/`ServerMessage`, `Ticket`, `Admission`) and shared collision helpers (`clearAt`, `canTake`) used by both client prediction/prompts and the simulation. Actions carry a `seq` for de-duplication of stale or replayed actions, plus an optional `Command` (`slot` for `select`, `aim` with yaw, pitch and power for `throw`) that `command()` sanitizes. Each `Player` has `slots` (the four-slot hotbar: salvage ids or `lampSlot`) and `hand` (the selected slot); `Simulation.fillSlots` keeps them in step with what the operator actually carries. A carried flashlight is `stowed` (clipped to the chest, dimmer) when another slot is selected; `carriedLamp` places it for host and prediction alike. Snapshots are ordered by `round` + `update` (`newerSnapshot`). The full `Layout` is sent only on join or resume. Regular snapshots carry live state (players, lamp, `opened` doors, `mission`).
 
 Seats are reserved for 20 s after disconnect (`grace`) and resumed with a `Ticket` stored in `sessionStorage`. Solo and creator-host checkpoints also restore from `sessionStorage` on reload.
 
@@ -63,6 +63,7 @@ Seats are reserved for 20 s after disconnect (`grace`) and resumed with a `Ticke
 - `src/route.ts` plans axis-aligned walking legs with Dijkstra and a turn penalty. It tries clearance margins from 0.85 m down to 0. Ramps are entered only along their slope. Tests and the Game Hub acceptance test use it to walk with keyboard controls; `tests/walk.ts` drives the simulation along it.
 - `src/salvage.ts` derives every facility's salvage from its layout seed: item kinds, values, and spawn spots on each template's open floor, reachable and clear of doorways. Clients compute the same list, so snapshots carry only `mission.haul`, the items that moved (carried, dropped or loaded). `expeditionSeed(contract, i)` gives each expedition's facility; expedition 0 is the contract seed itself. `liftOf` is Intake's pad, the cargo lift.
 - Contract rules: `src/mission.ts` holds the shared types and `assignment()` (what **Q** does: revive, load, extract, abandon). `src/server/mission.ts` holds `newContract` (quota = 45% of the three facilities' salvage), `settle` (receipt, compounding loss penalty `kept(gross, lost)` = gross × 0.8^lost for operators not extracting, won/lost/settled), the Diver waking on first pickup, and wipe and stranded losses. `Simulation.nextExpedition()` swaps `layout`/`geometry` mid-round; sessions announce the new layout (solo and host re-emit `joined`, the hub guest re-handshakes when `mission.contract.layout` changes, and `socket.ts` resends `joined`). Hosts checkpoint immediately after every action, so a refresh cannot repeat or undo a sale.
+- Throws: `src/flight.ts` simulates a thrown item in fixed 1/120 s steps on the collision geometry (walls, props, rails, roofs, closed bulkheads, floor slabs), bouncing, sliding off props, and falling between storeys. The host runs `trajectory` once at launch and stores the rest spot plus a `Flight` (launch, elapsed `t`, duration `d`) on the haul entry or the lamp; clients replay the same launch through the same steps, so a throw costs no extra messages. The loop uses only arithmetic, never trigonometry, so every browser computes the same arc. Like `Simulation`, it must stay free of Node-only APIs.
 - Collision depends on height: use `obstaclesAt(geometry, feetY, opened)`, or `Simulation.solids(p)`, never one flat list. Mission pads and strikes require the same storey (`sameStorey`).
 
 ### Rendering

@@ -1,4 +1,6 @@
-import type { Geometry } from './layout.ts';
+import { walkable, type Geometry } from './layout.ts';
+import { obstaclesAt, surfaceAt } from './room-templates.ts';
+import { clearAt } from './room.ts';
 import type { Point3, RoomWall } from './room-templates.ts';
 
 // An operator, the flashlight or a piece of salvage is in one of three
@@ -55,6 +57,8 @@ export interface Outdoors {
   // facility stands outside it.
   building: {x: number; z: number; w: number; d: number; h: number};
   door: Point3; exit: Stand;
+  // The bell in front of the façade, and where to stand to ring it.
+  bell: Point3; ringing: Stand;
   rises: Rise[];
   rocks: {x: number; z: number; w: number; d: number; h: number}[];
 }
@@ -70,6 +74,8 @@ export function outdoors(seed: number): Outdoors {
   g.walls.push({...wall(room,building.x-building.w/2,building.z-building.d/2,building.x+building.w/2,building.z+building.d/2,0,building.h)});
   const door = {x:0,y:0,z:building.z+building.d/2};
   const arrival = {x:0,y:0,z:32};
+  const bell = {x:door.x+5,y:0,z:door.z+7};
+  g.props.push({x:bell.x,z:bell.z,w:1.3,d:1.3,y:0,h:2.7,kind:'bell',room});
   // Keep the walk from the rift to the door, and the ground around both, clear.
   const keepClear = (x: number, z: number, w: number, d: number) =>
     Math.abs(x) < w/2+5 && z > door.z-1 && z < arrival.z+6 ||
@@ -116,7 +122,8 @@ export function outdoors(seed: number): Outdoors {
     g.props.push({x,z,w,d,y:0,h,kind:'rock',room});
   }
   const world: Outdoors = {
-    seed,geometry:g,size:outdoorSize,arrival,building,door,rises,rocks,
+    seed,geometry:g,size:outdoorSize,arrival,building,door,rises,rocks,bell,
+    ringing:{x:bell.x,y:0,z:bell.z+1.5,yaw:0},
     spawns:[{x:-1.2,y:0,z:arrival.z-2,yaw:0},{x:1.2,y:0,z:arrival.z-2,yaw:0}],
     exit:{x:door.x,y:0,z:door.z+1.4,yaw:Math.PI},
   };
@@ -145,6 +152,34 @@ function without(outer: Area, holes: Area[]): Area[] {
   }
   return pieces;
 }
+
+// Where the exit rift may open: open ground on a 2 m grid, reachable on foot
+// from the bell, at least 30 m from where the crew arrived and 18 m from
+// the façade and the bell, with room around it.
+const zoneCache = new Map<number,Point3[]>();
+export function riftZones(seed: number): Point3[] {
+  const found = zoneCache.get(seed);
+  if (found) return found;
+  const map = outdoors(seed), g = map.geometry, reached = walkable(g,map.ringing), zones: Point3[] = [];
+  const half = map.size/2-6;
+  for (let x=-half;x<=half;x+=2) for (let z=-half;z<=half;z+=2) {
+    const here = {x,y:0,z}, far = (p: Point3, d: number) => Math.hypot(p.x-x,p.z-z) >= d;
+    if (!far(map.arrival,30) || !far(map.door,18) || !far(map.bell,18)) continue;
+    const ground = surfaceAt(g,x,z,0);
+    if (!ground || ground.y !== 0 || ground.rise || !clearAt(x,z,2,obstaclesAt(g,0)) || !reached(here)) continue;
+    zones.push(here);
+  }
+  if (zoneCache.size > 4) zoneCache.clear();
+  zoneCache.set(seed,zones);
+  return zones;
+}
+// The spot a ring opens the rift at, fixed for each expedition's map.
+export function riftSpot(seed: number): Point3 {
+  const zones = riftZones(seed);
+  return zones[Math.floor(random(seed ^ 0x51f7a3)()*zones.length)];
+}
+// How long the exit rift stays open, in seconds.
+export const riftOpen = 180;
 
 // Intake's door to the outside, in its south wall, and where an operator
 // coming in from the façade stands.

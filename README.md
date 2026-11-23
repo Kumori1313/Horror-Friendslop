@@ -1,6 +1,6 @@
 # Relay Room
 
-Two operators share one flashlight across a salvage contract. Each expedition is a fresh, seeded industrial facility: collect salvage, haul it back to the cargo lift in Intake, survive the Bell Diver, and extract to sell it. Meet the quota before the last expedition. The standalone synchronization test uses a fixed maintenance room. A local TypeScript simulation owns movement, collision, and the light. Both browser windows send inputs and receive the same room state over WebSocket.
+Two operators share one flashlight across a salvage contract. Each expedition is a fresh, seeded industrial facility on an outdoor map: collect salvage, survive the Bell Diver, ring the bell outside, and get the salvage and yourselves through the exit rift to sell it. Meet the quota before the last expedition. The standalone synchronization test uses a fixed maintenance room. A local TypeScript simulation owns movement, collision, and the light. Both browser windows send inputs and receive the same room state over WebSocket.
 
 ## Play solo
 
@@ -38,7 +38,7 @@ npm run dev
 | X | Drop the selected item at your feet |
 | Hold T or hold the left mouse button | Throw the selected item; hold longer to throw harder |
 | F | Switch the flashlight you carry off and on |
-| Q | Load your salvage onto the lift, extract, or revive a downed partner |
+| Q | Ring the bell outside, or revive a downed partner |
 | G | Show or hide room diagnostics in developer builds |
 | Escape | Release controls. Click the scene to resume. |
 
@@ -89,14 +89,15 @@ Run `npm run test:layouts` to check seeds 0–999. The check covers both storeys
 
 ### Work the salvage contract
 
-A contract runs three expeditions, each in a new facility generated from the contract seed. The quota is 45% of all the salvage the three facilities hold, so a crew that hauls steadily can meet it. The terminal in Intake shows the quota, credited earnings, the expedition number, and every item loaded on the lift with its sale value.
+A contract runs three expeditions, each in a new facility generated from the contract seed. The quota is 45% of all the salvage the three facilities hold, so a crew that hauls steadily can meet it. The terminal in the home dimension shows the quota, credited earnings, the expedition number, and the last sale.
 
 1. The contract starts in the home dimension. Take the flashlight with **E** or **Pick up**, then walk into the rift. It drops you on the outdoor map, and it closes once everyone is through. Walk north to the lit façade and press **R**, or tap **Enter facility**, at its door to reach Intake. **R** at Intake's **Exit** door leads back out. Operators can split up: home, outdoors, and inside each keep their own things, and a refresh resumes where you were. Both can explore. Loot rooms such as the Parts store, Loot closet, Locker room, Cold store, Foreman's office, and Workshop always hold salvage. No room holds more than two items: a loot room holds two 30% of the time, and any other room is empty 65% of the time, holds one 30% of the time, and two only 5%.
 2. Press **E**, or tap **Pick up**, beside an item to put it in your hotbar. The hotbar has four slots, and the flashlight takes one of them. Select a slot with **1–4**, the scroll wheel, or a tap, and the item shows in your hands and your partner's view. With salvage selected, the flashlight clips to your chest: still lit, but dimmer, shorter, and pointing where your body faces. Press **X** to drop the selected item, or hold **T** or the left mouse button and release to throw it. A throw arcs, bounces off walls and floors, slides to rest, falls off galleries and down stairwells, and stops at closed bulkheads. Heavy items (coils, battery cells, toolboxes) throw shorter. A thrown flashlight stays lit.
 3. The first item lifted wakes the Bell Diver in the room farthest away. Knocks, a warning naming the room, and a glowing floor circle give four seconds to get clear. It drops inside the circle. On later passes it targets the room of the conscious operator carrying the lit lamp. It follows the doors and stairs between rooms, scraping overhead in each room it passes. The scrape carries up to three connections and fades with each one, so a room directly above or below can still be out of earshot. Without a lit carrier it follows a conscious operator.
-4. A struck operator drops the light and keeps their salvage. A teammate has 75 seconds to reach them and press **Q** or **Revive partner**. A crew wipe, or a rescue timing out, ends the whole contract.
-5. Back at the hazard-striped lift in Intake, press **Q** to **Load** your salvage, then watch the terminal list each item's value. Haul again, or extract: with both operators on the lift, choose **Extract crew**. If your partner is down, **Extract alone (−20%)** sells the lift for a fifth less, and the salvage they carry is lost. In larger crews the reduction compounds: each operator left behind keeps 80% of what remains, so the crew keeps x × 0.80^d. A partner who is only reconnecting, or a tap on **Leave to hub**, never triggers a sale.
-6. Extraction sells the lift and the salvage the extracting operators carry. The receipt lists each item and any deduction. **Continue** returns both operators to the home dimension, where the rift opens the next facility. Meeting the quota wins the contract at once, and missing it after the third expedition loses it. **Return to lobbies** releases the seats at any receipt.
+4. A struck operator drops the light and keeps their salvage. A teammate has 75 seconds to reach them and press **Q** or **Revive partner**; after that the operator dies, dropping what they carried where they fell. The body stays there, and until the expedition ends the dead operator watches through their partner's eyes. In Game Hub, alerts and the status bar name operators by the names chosen in the lobby.
+5. To leave, anyone rings the bell in front of the façade with **Q**, once per expedition. A rift opens somewhere else outdoors, marked by a pillar of light you can see from anywhere, and stays open for three minutes. The bell also enrages the Bell Diver for the rest of the expedition: it warns sooner, moves faster, and strikes a wider circle. You can still go back inside for more.
+6. Throw salvage into the rift, or carry it in: walking into the rift takes you home with everything you hold. The expedition ends when the rift closes, or as soon as nobody is left outside who could still act. As long as one operator escaped, the crew keeps everything that went in, less a fifth for each operator who didn't make it, compounding: the crew keeps x × 0.80^d. What they carried is lost. If nobody escapes, the crew is wiped and **Continue** starts a fresh contract with nothing credited. A tap on **Leave to hub** never pays out.
+7. The receipt waits at home and lists each item and any deduction. **Continue** readies the next facility; walk into the home rift to go. Meeting the quota wins the contract at once, and missing it after the third expedition loses it. **Return to lobbies** releases the seats at any receipt.
 
 ### Phase 6 playtest
 

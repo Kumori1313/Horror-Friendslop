@@ -44,7 +44,7 @@ export function drawMap(canvas: HTMLCanvasElement, layout: Layout, state: Snapsh
   if (state.mission) {
     ctx.fillStyle = '#e8b04f';
     for (const i of items(layout,state.mission)) {
-      if (i.owner !== null || i.loaded) continue;
+      if (i.owner !== null || i.banked || i.place !== 'inside') continue;
       ctx.fillRect(x(i.x,i.y)-1.5,z(i.z)-1.5,3,3);
     }
   }

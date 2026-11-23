@@ -1,5 +1,5 @@
 import { bindPreferences } from './preferences.ts';
-import { assignment, finished, itemName, nearestPickup } from './mission.ts';
+import { assignment, finished, gone, itemName, nearestPickup } from './mission.ts';
 import { spawnSalvage, type ItemKind } from './salvage.ts';
 import { missionHud } from './mission-hud.ts';
 import { mountDiagnostics } from './diagnostics.ts';
@@ -14,7 +14,7 @@ import type { Action, Command, Input, Player, Ticket, Snapshot } from './room.ts
 import { bindDrag } from './touch.ts';
 import { createScene } from './scene.ts';
 import { Prediction } from './prediction.ts';
-import { home, outdoors, placeNames, placeOf, type Place } from './places.ts';
+import { doorReach, home, outdoors, placeNames, placeOf, type Place } from './places.ts';
 import { passageFor } from './server/simulation.ts';
 
 function element<T extends HTMLElement>(id: string) {
@@ -44,7 +44,9 @@ function start(render: ReturnType<typeof createScene>, mode?: Crew | 'solo', sce
   let state: Snapshot | undefined;
   // Clients without the simulation on hand predict their own operator.
   let prediction: Prediction | undefined;
-  const frozen = (s: Snapshot) => !!s.mission && (finished(s.mission.stage) || s.mission.stage === 'settled' || s.mission.down.some(d => d.id === id));
+  const frozen = (s: Snapshot) => !!s.mission && (finished(s.mission.stage) || s.mission.stage === 'settled' || s.mission.down.some(d => d.id === id) || !!s.mission.dead?.includes(id));
+  // A dead operator watches a partner still in the expedition.
+  const watched = (s: Snapshot) => s.mission?.dead?.includes(id) ? s.players.find(p => p.id !== id && !gone(s.mission!,p.id)) : undefined;
   let layout: Layout | undefined, geometry: Geometry | undefined;
   // This operator's place, and the collision geometry for it. The facility's
   // is built only once someone is inside it.
@@ -54,7 +56,9 @@ function start(render: ReturnType<typeof createScene>, mode?: Crew | 'solo', sce
   const openedHere = (s: Snapshot) => place === 'inside' ? s.opened ?? [] : [];
   const doorButton = element<HTMLButtonElement>('open-door');
   const { preferences, open: openSettings } = bindPreferences(pause);
-  const hud = missionHud(preferences);
+  // Game Hub crews go by the names chosen in the lobby.
+  const operator = (seat: number) => crew?.names[seat] ?? 'Operator '+seat;
+  const hud = missionHud(preferences,operator);
   const diagnostics = import.meta.env.DEV || import.meta.env.MODE === 'diagnostics'
     ? mountDiagnostics(sceneStarted,solo ? undefined : () => { if (state) network?.interrupt(2000); },render.stats)
     : undefined;
@@ -90,6 +94,7 @@ function start(render: ReturnType<typeof createScene>, mode?: Crew | 'solo', sce
     diagnostics?.setTouch(touchMode);
   }
   function look(dx: number, dy: number, sensitivity: number) {
+    if (state && watched(state)) return;
     sensitivity *= preferences.sensitivity;
     yaw -= dx * sensitivity;
     pitch = Math.max(-1.35,Math.min(1.35,pitch-dy*sensitivity));
@@ -260,14 +265,17 @@ function start(render: ReturnType<typeof createScene>, mode?: Crew | 'solo', sce
   function updateHud(s: Snapshot) {
     const p = s.players.find(player => player.id === id);
     if (!p) return;
-    status.textContent = solo ? 'Solo operator' : 'Operator ' + id + '  ·  ' + s.players.filter(player => player.connected).length + '/2 online';
+    status.textContent = solo ? 'Solo operator' : operator(id) + '  ·  ' + s.players.filter(player => player.connected).length + '/2 online';
     const l = s.lamp;
     const holding = l.owner === id;
     const opened = openedHere(s);
     const door = place === 'inside' && geometry ? nearbyDoor(p,geometry,opened) : undefined;
-    const down = s.mission?.down.some(d => d.id === id);
+    const down = s.mission?.down.some(d => d.id === id) || !!s.mission?.dead?.includes(id);
     // The façade door from outside, or Intake's outer door from inside.
-    const way = layout && s.mission?.stage === 'explore' && !down ? passageFor(p,layout.seed) : undefined;
+    const way = layout && s.mission?.stage === 'explore' && !down ? passageFor(p,layout.seed,s.mission.arrival === 'closed') : undefined;
+    // At the façade door or the bell before everyone is through the rift.
+    const map = layout && s.mission?.arrival === 'open' && place === 'outside' ? outdoors(layout.seed) : undefined;
+    const waiting = !!map && (Math.hypot(p.x-map.door.x,p.z-map.door.z) <= doorReach || Math.hypot(p.x-map.bell.x,p.z-map.bell.z) <= doorReach+0.4);
     doorButton.hidden = (!door && !way) || !!down;
     doorButton.textContent = way === 'enter' ? 'Enter facility' : way === 'leave' ? 'Leave facility' : 'Open bulkhead';
     const solids = geometry ? solidsAt(geometry,p.feetY ?? 0,opened) : walls;
@@ -307,14 +315,19 @@ function start(render: ReturnType<typeof createScene>, mode?: Crew | 'solo', sce
     else if (s.mission?.stage === 'settled') prompt.textContent = 'Expedition sold';
     else if (!playing) prompt.textContent = touchMode ? 'Tap the room to resume' : 'Click the room to resume';
     else if (task) prompt.textContent = touchMode ? task.label : 'Q  '+task.label;
-    else if (down) prompt.textContent = 'Waiting for rescue';
+    else if (down) {
+      const partner = watched(s);
+      prompt.textContent = !s.mission?.dead?.includes(id) ? 'Waiting for rescue' : partner ? 'You died · Watching '+operator(partner.id) : 'You died';
+    }
+    else if (waiting) prompt.textContent = 'Waiting for the whole crew to come through the rift';
     else if (way) prompt.textContent = (touchMode ? '' : 'R  ')+(way === 'enter' ? 'Enter the facility' : 'Leave the facility');
     else if (door) prompt.textContent = touchMode ? 'Bulkhead within reach' : 'R  Open bulkhead';
     else if (pick) prompt.textContent = touchMode ? pickName[0].toUpperCase()+pickName.slice(1)+' within reach' : 'E  Pick up '+pickName;
     else if (held) prompt.textContent = touchMode ? 'Holding the '+held : 'X  Drop '+held+'   ·   Hold T or click  Throw'+(holding ? '   ·   F  Switch '+(l.on ? 'off' : 'on') : '');
     else if (holding) prompt.textContent = touchMode ? 'The flashlight is clipped on' : 'F  Switch the clipped flashlight '+(l.on ? 'off' : 'on');
+    else if (place === 'outside' && s.mission?.rift && Math.hypot(p.x-s.mission.rift.x,p.z-s.mission.rift.z) < 6) prompt.textContent = 'Walk into the rift to leave, or throw salvage in';
     else if (riftOpen) prompt.textContent = s.mission?.stage === 'home' ? 'Walk into the rift to start the expedition' : 'Walk into the rift to follow your crew';
-    else if (l.owner) prompt.textContent = 'Operator ' + l.owner + ' carries the flashlight';
+    else if (l.owner) prompt.textContent = operator(l.owner) + ' carries the flashlight';
     else prompt.textContent = '';
     diagnostics?.update(s,layout,network?.metrics,crew,delay);
   }
@@ -415,7 +428,14 @@ function start(render: ReturnType<typeof createScene>, mode?: Crew | 'solo', sce
     if (prediction && state) prediction.step(now,dt,controls(),geometry,openedHere(state),frozen(state));
     if (charging !== undefined) (charge.firstElementChild as HTMLElement).style.width = power()*100+'%';
     const shown = state && withHand(state);
-    render(prediction && shown ? prediction.view(shown,id,geometry) : shown,id,yaw,pitch,dt,layout,preferences.reducedMotion);
+    const partner = state && watched(state);
+    if (partner) {
+      // Turn smoothly with the partner, whose view arrives once per snapshot.
+      const blend = 1-Math.exp(-10*dt);
+      yaw += Math.atan2(Math.sin(partner.yaw-yaw),Math.cos(partner.yaw-yaw))*blend;
+      pitch += (partner.pitch-pitch)*blend;
+    }
+    render(prediction && shown ? prediction.view(shown,id,geometry) : shown,partner?.id ?? id,yaw,pitch,dt,layout,preferences.reducedMotion,!!partner);
     diagnostics?.frame(now,elapsed,!!state);
     requestAnimationFrame(frame);
   }

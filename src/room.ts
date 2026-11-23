@@ -17,7 +17,8 @@ export interface Input { forward: number; right: number; yaw: number; pitch: num
 export interface Player extends Point { feetY?: number; connected: boolean; id: number; yaw: number; pitch: number; slots?: (string | null)[]; hand?: number; place?: Place; transit?: {n: number; yaw: number} }
 // A carried flashlight is `stowed` (clipped to the chest, dimmer) when its
 // holder has another slot selected. `flight` is set while it is thrown.
-export interface Lamp extends Point { owner: number | null; on: boolean; y: number; yaw: number; pitch: number; stowed?: boolean; flight?: Flight; place?: Place }
+// `homeward` marks a flashlight thrown into the exit rift: it goes home once its flight ends.
+export interface Lamp extends Point { owner: number | null; on: boolean; y: number; yaw: number; pitch: number; stowed?: boolean; flight?: Flight; place?: Place; homeward?: boolean }
 export interface Snapshot { round: string; update: number; players: Player[]; lamp: Lamp; opened?: string[]; mission?: Mission }
 // `take` picks up the nearest item, the flashlight included; `drop` and
 // `throw` act on the selected slot; `select` chooses a slot.

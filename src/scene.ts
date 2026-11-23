@@ -1,5 +1,5 @@
 import * as T from 'three';
-import { itemName, items, strikeRadius } from './mission.ts';
+import { itemName, items, pace, strikeRadius } from './mission.ts';
 import { buildFacility } from './facility-scene.ts';
 import { environment, materialLibrary } from './materials.ts';
 import { anchor, geometryFor, type Geometry, type Layout } from './layout.ts';
@@ -140,15 +140,17 @@ export function createScene(canvas: HTMLCanvasElement, generated = false) {
   inHand.visible = false; scene.add(inHand);
   function avatar(id: number) {
     const g = new T.Group(); scene.add(g);
+    // The body, which tips over onto the floor when its operator dies.
+    const pose = new T.Group(); pose.name = 'pose'; g.add(pose);
     const suit = material(id === 1 ? 0xa76531 : 0x487b79);
-    box(0,1.05,0,0.44,0.62,0.29,suit,g);
-    box(0,1.65,0,0.34,0.35,0.32,dark,g);
-    box(0,1.66,-0.16,0.28,0.09,0.04,teal,g);
-    for (const x of [-0.13,0.13]) box(x,0.39,0,0.18,0.78,0.22,dark,g);
-    for (const x of [-0.28,0.28]) box(x,1.01,-0.04,0.13,0.54,0.16,suit,g);
-    box(0,1.23,0,0.45,0.055,0.30,yellow,g);
+    box(0,1.05,0,0.44,0.62,0.29,suit,pose);
+    box(0,1.65,0,0.34,0.35,0.32,dark,pose);
+    box(0,1.66,-0.16,0.28,0.09,0.04,teal,pose);
+    for (const x of [-0.13,0.13]) box(x,0.39,0,0.18,0.78,0.22,dark,pose);
+    for (const x of [-0.28,0.28]) box(x,1.01,-0.04,0.13,0.54,0.16,suit,pose);
+    box(0,1.23,0,0.45,0.055,0.30,yellow,pose);
     // Held salvage sits where a held flashlight would: ahead and to the right.
-    const held = box(0.24,1.28,-0.38,1,1,1,steel,g);
+    const held = box(0.24,1.28,-0.38,1,1,1,steel,pose);
     held.name = 'held'; held.visible = false;
     people.set(id,g); return g;
   }
@@ -313,7 +315,9 @@ export function createScene(canvas: HTMLCanvasElement, generated = false) {
   let outside: ReturnType<typeof buildOutdoors> | undefined;
   // Salvage lying outdoors or at home: a few meshes, made as needed.
   const loose = new Map<string,T.Mesh>();
-  function render(state: Snapshot | undefined, self: number, yaw: number, pitch: number, dt: number, layout?: Layout, reducedMotion = false) {
+  // `self` is whose eyes the camera looks through: your own operator, or the
+  // partner a dead operator is watching.
+  function render(state: Snapshot | undefined, self: number, yaw: number, pitch: number, dt: number, layout?: Layout, reducedMotion = false, watching = false) {
     const me = state?.players.find(p => p.id === self);
     // Without a contract everything is inside, as it always was.
     const here: Place | undefined = !state?.mission ? (layout ? 'inside' : undefined) : me ? placeOf(me) : undefined;
@@ -341,7 +345,7 @@ export function createScene(canvas: HTMLCanvasElement, generated = false) {
     if (homeWorld) homeWorld.root.visible = here === 'home';
     const time = performance.now()/1000;
     homeWorld?.update(time);
-    outside?.update(time,state?.mission?.arrival === 'open');
+    outside?.update(time,state?.mission?.arrival === 'open',state?.mission?.rift,state?.mission?.bell !== undefined);
     if (!document.hidden) adapt(dt);
     if (facility && state) facility.update(state.opened ?? []);
     if (state) {
@@ -354,6 +358,8 @@ export function createScene(canvas: HTMLCanvasElement, generated = false) {
       const room = layout?.rooms.find(r => r.id === creature?.bay);
       const target = room && anchor(room);
       diver.visible = here === 'inside' && !!target && (creature?.mode === 'warning' || creature?.mode === 'strike');
+      // An enraged Diver strikes a wider circle.
+      if (state.mission) ring.scale.setScalar(pace(state.mission).radius/strikeRadius);
       if (target && creature && diver.visible) {
         diver.position.set(target.x,target.y,target.z);
         tines.position.y = creature.mode === 'strike' ? 0.75 : 2.8+Math.cos(creature.seconds*7)*0.12;
@@ -366,27 +372,44 @@ export function createScene(canvas: HTMLCanvasElement, generated = false) {
       };
       for (const p of state.players) {
         const down = state.mission?.down.some(d => d.id === p.id);
+        const dead = !!state.mission?.dead?.includes(p.id);
         if (p.id === self) {
+          // No body for whoever the camera looks through. One drawn earlier
+          // (a partner you now watch, or your own body before the next
+          // expedition) would otherwise stay frozen where it was last seen.
+          const body = people.get(p.id);
+          if (body) body.visible = false;
           // Your own held salvage, kept clear of walls like a held flashlight.
-          const kind = down ? undefined : heldKind(p);
+          const kind = down || dead ? undefined : heldKind(p);
           // Smaller and lower than the partner sees it, so it doesn't fill the view.
           holdItem(inHand,kind,0.55);
+          const eyeHeight=(p.feetY??0)+(dead ? 0.3 : down && !reducedMotion ? 0.45 : 1.59);
+          if (watching) {
+            // A partner's position arrives once per snapshot: glide between them.
+            camera.position.copy(glide('view'+p.id,state.update,p.x,eyeHeight,p.z,performance.now(),camera.position));
+          } else {
+            camera.position.y = reducedMotion ? eyeHeight : T.MathUtils.lerp(camera.position.y,eyeHeight,blend);
+            camera.position.x = T.MathUtils.lerp(camera.position.x,p.x,blend);
+            camera.position.z = T.MathUtils.lerp(camera.position.z,p.z,blend);
+          }
+          camera.rotation.set(pitch,yaw,0,'YXZ');
+          // Held from where the camera is and where it looks, not from the
+          // simulation's stepped position, so it stays steady in the hand.
           if (kind) {
             const g = placeGeometry(placeOf(p));
             const solids = g ? obstaclesAt(g,p.feetY ?? 0,placeOf(p) === 'inside' ? state.opened : []) : walls;
-            const at = heldLamp(p,solids);
-            inHand.position.set(at.x,at.y-0.1,at.z); inHand.rotation.set(0,p.yaw,0);
+            const at = heldLamp({...p,x:camera.position.x,z:camera.position.z,yaw},solids);
+            inHand.position.set(at.x,camera.position.y-1.59+1.18,at.z); inHand.rotation.set(0,yaw,0);
           }
-          const eyeHeight=(p.feetY??0)+(down && !reducedMotion ? 0.45 : 1.59);
-          camera.position.y = reducedMotion ? eyeHeight : T.MathUtils.lerp(camera.position.y,eyeHeight,blend);
-          camera.position.x = T.MathUtils.lerp(camera.position.x,p.x,blend);
-          camera.position.z = T.MathUtils.lerp(camera.position.z,p.z,blend);
-          camera.rotation.set(pitch,yaw,0,'YXZ');
         } else {
           let g = people.get(p.id);
           if (!g) { g = avatar(p.id); g.position.set(p.x,p.feetY ?? 0,p.z); }
-          g.scale.y = down ? 0.35 : 1;
-          holdItem(g.getObjectByName('held') as T.Mesh,down ? undefined : heldKind(p));
+          g.scale.y = down && !dead ? 0.35 : 1;
+          // A dead operator lies face down where they fell.
+          const pose = g.getObjectByName('pose')!;
+          pose.rotation.x = dead ? -Math.PI/2 : 0;
+          pose.position.set(0,dead ? 0.18 : 0,dead ? 0.9 : 0);
+          holdItem(g.getObjectByName('held') as T.Mesh,down || dead ? undefined : heldKind(p));
           // Someone in another place jumps rather than glides when they come back.
           if (!sameHere(p)) tracks.delete('p'+p.id);
           g.position.copy(glide('p'+p.id,state.update,p.x,p.feetY ?? 0,p.z,performance.now(),g.position));
@@ -406,7 +429,7 @@ export function createScene(canvas: HTMLCanvasElement, generated = false) {
         torch.position.set(at.x,at.y,at.z);
         torch.rotation.x = -at.t*9;
         tracks.delete('lamp');
-      } else if (l.owner !== null && l.owner !== self && previousOwner === l.owner) {
+      } else if (l.owner !== null && (l.owner !== self || watching) && previousOwner === l.owner) {
         torch.position.copy(glide('lamp',state.update,l.x,l.y,l.z,performance.now(),torch.position));
       } else {
         tracks.delete('lamp');
@@ -440,15 +463,13 @@ export function createScene(canvas: HTMLCanvasElement, generated = false) {
         const shown = (x: number,z: number,y: number) => !drawn || drawn.has(surfaceAt(g,x,z,y)?.room ?? '');
         for (const p of state.players) {
           const g2 = people.get(p.id);
-          if (g2) g2.visible = sameHere(p) && shown(p.x,p.z,p.feetY ?? 0);
+          if (g2) g2.visible = p.id !== self && sameHere(p) && shown(p.x,p.z,p.feetY ?? 0);
         }
         if (diver.visible && drawn && room) diver.visible = drawn.has(room.id);
         const mission = state.mission;
         if (mission) {
-          // Salvage on the floor or stacked on the lift; packs are not drawn.
-          const lift = facility.lift, all = items(layout,mission);
-          const loaded = all.filter(i => i.loaded);
-          facility.salvage(all.filter(i => i.owner === null && i.place === 'inside').map(i => {
+          // Salvage lying in the facility; carried items are drawn in hand.
+          facility.salvage(items(layout,mission).filter(i => i.owner === null && i.place === 'inside').map(i => {
             if (i.flight) {
               const at = inFlight(g,state.opened ?? [],i.id,i.flight,i.kind,i,now), [,h] = itemKinds[i.kind].size;
               // Cull it with the room whose floor is below it.
@@ -459,16 +480,9 @@ export function createScene(canvas: HTMLCanvasElement, generated = false) {
               }
               return {...i,x:at.x,y:at.y-h/2,z:at.z,room:under ?? i.room};
             }
-            if (i.loaded && lift) {
-              const n = loaded.indexOf(i);
-              return {...i,room:'intake',x:lift.x+(n%3-1)*0.45,y:lift.y+0.07+Math.floor(n/9)*0.45,z:lift.z+(Math.floor(n/3)%3-1)*0.45};
-            }
             const moved = mission.haul.some(h => h.id === i.id);
             return {...i,room:moved ? surfaceAt(g,i.x,i.z,i.y)?.room ?? i.room : i.room};
           }));
-          const c = mission.contract, value = loaded.reduce((sum,i) => sum+i.value,0);
-          facility.terminal(['SALVAGE CONTRACT','Quota  '+c.credited+' / '+c.quota,'Expedition  '+(c.index+1)+' / '+c.expeditions,
-            'On lift  '+loaded.length+' · value '+value,...loaded.slice(-3).reverse().map(i => '+ '+itemName(i.kind)+'  '+i.value)]);
         }
       }
     }
@@ -478,7 +492,8 @@ export function createScene(canvas: HTMLCanvasElement, generated = false) {
       if (here !== 'inside') {
         const g = here === 'home' ? home().geometry : outdoors(layout.seed).geometry;
         for (const i of items(layout,mission)) {
-          if (i.owner !== null || i.loaded || i.place !== here) continue;
+          // Banked salvage is drawn only while it flies into the rift.
+          if (i.owner !== null || (i.banked && !i.flight) || i.place !== here) continue;
           let mesh = loose.get(i.id);
           if (!mesh) { mesh = new T.Mesh(cube,itemMaterial(i.kind)); loose.set(i.id,mesh); scene.add(mesh); }
           const [w,h,d] = itemKinds[i.kind].size;

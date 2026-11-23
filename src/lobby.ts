@@ -114,7 +114,11 @@ export async function mountLobby(launch: (crew: Crew) => (reason: string) => voi
       main.hidden = false; lobby.hidden = true; el('live-leave').hidden = false;
       try {
         if (room.host_id === actor) hostCheckpoint = ['relay-host-v1',room.id,room.round,actor].join('/');
-        halt = launch({client,actor,host:actor===room.host_id,lobby:room.id,round:room.round,
+        const host = room.members.find(m => m.user_id === room.host_id), guest = room.members.find(m => m.user_id !== room.host_id);
+        const names: Record<number,string> = {};
+        if (host?.display_name) names[1] = host.display_name;
+        if (guest?.display_name) names[2] = guest.display_name;
+        halt = launch({client,actor,names,host:actor===room.host_id,lobby:room.id,round:room.round,
           lastVerified:() => verified,closeRound:() => { closing = true; leave('/relay-room/?ended=1'); }});
         launched = true;
       } catch (failure) { main.hidden = true; lobby.hidden = false; throw failure; }

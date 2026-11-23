@@ -164,11 +164,46 @@ export function buildOutdoors(map: Outdoors, library: Library) {
   const arrival = rift(0x9b7bff);
   arrival.group.position.set(map.arrival.x,1.2,map.arrival.z);
   root.add(arrival.group);
+  // The bell: a dark iron frame in front of the façade, its bell hung from
+  // the crossbar. Rung, it swings for a while.
+  const iron = new T.MeshStandardMaterial({color:0x2b2a28,roughness:0.6,metalness:0.7});
+  const frame = new T.Group();
+  frame.position.set(map.bell.x,0,map.bell.z);
+  for (const side of [-1,1]) { const post = new T.Mesh(new T.BoxGeometry(0.16,2.7,0.16),iron); post.position.set(side*0.6,1.35,0); frame.add(post); }
+  const bar = new T.Mesh(new T.BoxGeometry(1.4,0.16,0.18),iron); bar.position.y = 2.62; frame.add(bar);
+  const hanger = new T.Group(); hanger.position.y = 2.55; frame.add(hanger);
+  const bell = new T.Mesh(new T.CylinderGeometry(0.16,0.42,0.62,16,1,true),new T.MeshStandardMaterial({color:0xb08d57,roughness:0.35,metalness:0.9,side:T.DoubleSide,envMap:library.reflections ?? null}));
+  bell.position.y = -0.4; hanger.add(bell);
+  const crown = new T.Mesh(new T.SphereGeometry(0.17,12,8),bell.material); crown.position.y = -0.1; hanger.add(crown);
+  root.add(frame);
+  // The exit rift, with a pillar of light that shows from anywhere: it
+  // ignores the fog that hides everything else at a distance.
+  const exit = rift(0xc9a8ff);
+  root.add(exit.group);
+  const beam = new T.MeshBasicMaterial({color:0xcbb8ff,transparent:true,opacity:0.22,blending:T.AdditiveBlending,depthWrite:false,fog:false,side:T.DoubleSide});
+  const pillar = new T.Group();
+  for (const [r,o] of [[0.9,0.22],[0.35,0.5]] as const) {
+    const m = beam.clone(); m.opacity = o;
+    const shaft = new T.Mesh(new T.CylinderGeometry(r,r,90,16,1,true),m); shaft.position.y = 45; pillar.add(shaft);
+  }
+  root.add(pillar);
+  let rungAt: number | undefined;
   return {
     root,seed:map.seed,
-    update(time: number, arrivalOpen: boolean) {
+    update(time: number, arrivalOpen: boolean, open?: {x: number; z: number}, rung = false) {
       arrival.group.visible = arrivalOpen;
       if (arrivalOpen) arrival.spin(time);
+      exit.group.visible = pillar.visible = !!open;
+      if (open) {
+        exit.group.position.set(open.x,1.2,open.z); pillar.position.set(open.x,0,open.z);
+        // The portal turns to face the façade, where the crew comes from.
+        exit.group.rotation.y = Math.atan2(map.door.x-open.x,map.door.z-open.z);
+        exit.spin(time);
+      }
+      if (rung && rungAt === undefined) rungAt = time;
+      if (!rung) rungAt = undefined;
+      const swing = rungAt === undefined ? 0 : Math.max(0,1-(time-rungAt)/6);
+      hanger.rotation.x = Math.sin((time-(rungAt ?? 0))*5)*0.5*swing;
     },
     dispose() {
       const geometries = new Set<T.BufferGeometry>(), materials = new Set<T.Material>();

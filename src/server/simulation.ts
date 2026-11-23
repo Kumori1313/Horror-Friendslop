@@ -1,18 +1,18 @@
 import { clearAt, command, freeSlot, hotbarSize, lampSlot, selected, slotsOf, walls } from '../room.ts';
 import type { Action, Aim, Command, Input, Lamp, Player, Snapshot } from '../room.ts';
-import { launchFrom, trajectory } from '../flight.ts';
+import { flightStep, launchFrom, trajectory } from '../flight.ts';
 import type { Body, Flight } from '../flight.ts';
 
 import { geometryFor, nearbyDoor, playerRadius, spawnPoints } from '../layout.ts';
 import type { Layout, Geometry, Rect } from '../layout.ts';
 
 import { obstaclesAt, surfaceAt, surfaceHeight } from '../room-templates.ts';
-import { assignment, distance, finished, nearestPickup, onPad } from '../mission.ts';
-import { doorReach, home, intakeDoor, intakeEntry, outdoors, placeOf, riftReach } from '../places.ts';
+import { assignment, distance, finished, gone, nearestPickup } from '../mission.ts';
+import { doorReach, home, intakeDoor, intakeEntry, outdoors, placeOf, riftOpen, riftReach, riftSpot } from '../places.ts';
 import type { Place, Stand } from '../places.ts';
-import { bodyOf, expeditionSeed, itemKinds, liftOf, spawnSalvage } from '../salvage.ts';
+import { bodyOf, expeditionSeed, itemKinds, spawnSalvage } from '../salvage.ts';
 import { generateLayout } from './generate-layout.ts';
-import { advanceMission, newMission, settle, wake } from './mission.ts';
+import { advanceMission, newContract, newMission, wake, wipeSeed } from './mission.ts';
 
 // Operator movement shared by the host and by clients predicting their own
 // operator, so both agree on walls, stairs and closed bulkheads.
@@ -101,10 +101,16 @@ export function throwSpeed(power: number, heavy: boolean) {
 
 // Count a thrown item's flight down and end it once it has landed.
 function advance<T extends {flight?: Flight}>(thing: T, dt: number) {
-  if (!thing.flight) return;
+  if (!thing.flight) return false;
   thing.flight.t += dt;
-  if (thing.flight.t >= thing.flight.d) delete thing.flight;
+  if (thing.flight.t < thing.flight.d) return false;
+  delete thing.flight;
+  return true;
 }
+
+// The exit rift is a column about an operator wide and a little taller.
+const riftRadius = 1;
+const inRift = (rift: {x: number; z: number}, x: number, y: number, z: number) => (x-rift.x)**2+(z-rift.z)**2 < riftRadius*riftRadius && y > -0.2 && y < 2.6;
 
 // Where an operator stands on arriving somewhere: side by side, by seat.
 const beside = (at: Stand, id: number): Stand => ({...at,x:at.x+(id === 1 ? -0.6 : 0.6)*Math.cos(at.yaw),z:at.z-(id === 1 ? -0.6 : 0.6)*Math.sin(at.yaw)});
@@ -122,6 +128,8 @@ export class Simulation {
       this.state.opened = [];
       if (!layout.tour) this.state.mission = newMission(layout);
       if (this.state.mission && mode === 'solo') this.state.mission.solo = true;
+      // Starting inside, the whole crew is already through the arrival rift.
+      if (this.state.mission && this.start === 'inside') this.state.mission.arrival = 'closed';
       if (this.state.mission && this.start === 'home') {
         this.state.mission.stage = 'home';
         Object.assign(this.state.lamp,{...home().lamp,y:0.14,place:'home'});
@@ -171,6 +179,8 @@ export class Simulation {
     if (finished(mission?.stage) || mission?.stage === 'settled') return;
     for (const p of this.state.players) {
       const input = this.inputs.get(p.id)!;
+      // A body lies as it fell, however its operator looks around.
+      if (mission?.dead?.includes(p.id)) continue;
       if (mission?.down.some(d => d.id === p.id)) {
         p.yaw = input.yaw;
         p.pitch = input.pitch;
@@ -178,13 +188,21 @@ export class Simulation {
       }
       const place = placeOf(p);
       moveOperator(p,input,dt,this.geometryAt(place),this.openedAt(place));
-      // Walking into the home rift goes through it.
+      // Walking into the home rift goes through it; walking into the exit rift escapes.
       if (mission && place === 'home' && distance(p,home().rift) <= riftReach) this.depart(p);
+      else if (mission?.rift && place === 'outside' && distance(p,mission.rift) <= riftReach) this.escape(p);
       if (this.state.lamp.owner === p.id) this.hold(p);
     }
-    advance(this.state.lamp,dt);
+    // A flashlight thrown into the exit rift turns up at home.
+    if (advance(this.state.lamp,dt) && this.state.lamp.homeward) {
+      Object.assign(this.state.lamp,{...home().lamp,y:0.14,pitch:0,place:'home'});
+      delete this.state.lamp.homeward;
+    }
     for (const h of mission?.haul ?? []) advance(h,dt);
-    if (mission?.stage === 'explore' && this.layout) advanceMission(this.layout,this.state,mission,dt,p => this.roomOf(p));
+    if (mission?.stage === 'explore' && this.layout) {
+      advanceMission(this.layout,this.state,mission,dt,p => this.roomOf(p));
+      if (mission.stage !== 'explore') this.returnHome();
+    }
   }
 
   // The facility room an operator stands in; nothing outside the facility.
@@ -223,10 +241,31 @@ export class Simulation {
     if (this.state.players.every(q => placeOf(q) !== 'home')) mission.arrival = 'closed';
   }
 
+  // Into the exit rift: the operator escapes home, and everything they carry
+  // is banked. They wait at home for the rift to close.
+  private escape(p: Player) {
+    const mission = this.state.mission, rift = mission?.rift;
+    if (!mission || !rift || gone(mission,p.id)) return;
+    for (const h of mission.haul) if (h.owner === p.id) Object.assign(h,{owner:null,banked:true,x:rift.x,y:0,z:rift.z,place:'outside'});
+    (mission.escaped ??= []).push(p.id);
+    this.moveTo(p,'home',home().spawns[p.id-1] ?? home().spawns[0]);
+  }
+
+  // Ring the bell: the exit rift opens at this expedition's spot, and every
+  // creature is enraged for the rest of the expedition.
+  private ring(p: Player) {
+    const mission = this.state.mission;
+    if (!mission || !this.layout || mission.bell !== undefined) return;
+    mission.bell = p.id;
+    mission.enraged = true;
+    const spot = riftSpot(this.layout.seed);
+    mission.rift = {x:spot.x,z:spot.z,seconds:riftOpen};
+  }
+
   // The façade door and Intake's door to the outside, within reach.
   passage(p: Player): 'enter' | 'leave' | undefined {
     if (!this.state.mission || !this.layout || this.state.mission.stage !== 'explore') return;
-    return passageFor(p,this.layout.seed);
+    return passageFor(p,this.layout.seed,this.state.mission.arrival === 'closed');
   }
 
   // After a sale everyone is back home, with the flashlight in its place.
@@ -265,7 +304,7 @@ export class Simulation {
     const feet = {x:p.x,y:p.feetY ?? 0,z:p.z};
     const kind = item === lampSlot ? 'lamp' : layout && spawnSalvage(layout).find(s => s.id === item)?.kind;
     if (!kind) return;
-    let rest = feet, flight: Flight | undefined;
+    let rest = feet, flight: Flight | undefined, banked = false;
     const body: Body = bodyOf(kind), place = placeOf(p), g = this.geometryAt(place);
     if (aim && g) {
       // The aim travels with the command, so the throw goes where the thrower
@@ -276,17 +315,30 @@ export class Simulation {
       const path = trajectory(g,opened,start,body,feet);
       rest = path.rest;
       if (path.duration > 0) flight = {...start,t:0,d:path.duration};
+      // A throw whose arc passes through the exit rift ends there, banked.
+      const rift = mission?.rift;
+      if (rift && place === 'outside' && flight) {
+        for (let i=0;i<path.points.length/3;i++) {
+          if (!inRift(rift,path.points[i*3],path.points[i*3+1],path.points[i*3+2])) continue;
+          flight.d = Math.max(flightStep,i*flightStep);
+          rest = {x:rift.x,y:0,z:rift.z};
+          banked = true;
+          break;
+        }
+      }
     }
     this.release(p,item);
     if (item === lampSlot) {
       const lamp: Lamp = this.state.lamp;
       Object.assign(lamp,{owner:null,x:rest.x,y:rest.y+body.h,z:rest.z,pitch:0,stowed:false},mission ? {place} : {});
       if (flight) lamp.flight = flight; else delete lamp.flight;
+      if (banked) lamp.homeward = true;
     } else if (mission) {
       const h = mission.haul.find(entry => entry.id === item);
       if (!h) return;
       Object.assign(h,{owner:null,x:rest.x,y:rest.y,z:rest.z,place});
       if (flight) h.flight = flight; else delete h.flight;
+      if (banked) h.banked = true;
     }
   }
 
@@ -302,18 +354,12 @@ export class Simulation {
     }
     // The receipt is read at home; the rift there starts the next expedition.
     if (mission?.stage === 'home' && action !== 'select' && action !== 'take' && action !== 'drop' && action !== 'throw' && action !== 'toggle') return;
-    if (mission?.down.some(d => d.id === id)) return;
+    if (mission?.down.some(d => d.id === id) || (mission && gone(mission,id))) return;
     const layout = this.layout;
     if (layout && mission && action === 'operate') {
       const task = assignment(layout,this.state,p,this.solids(p));
-      if (task?.kind === 'revive') mission.down = [];
-      else if (task?.kind === 'load') {
-        const lift = liftOf(layout);
-        for (const h of mission.haul) if (h.owner === id) { Object.assign(h,{owner:null,loaded:true,...lift}); this.release(p,h.id); }
-      } else if (task?.kind === 'extract') {
-        settle(layout,this.state,mission,this.state.players.filter(q => onPad(q,liftOf(layout))).map(q => q.id));
-      } else if (task?.kind === 'abandon') settle(layout,this.state,mission,[id]);
-      if (mission.stage !== 'explore') this.returnHome();
+      if (task?.kind === 'revive') mission.down = mission.down.filter(d => !this.state.players.some(q => q.id === d.id && q.id !== id && distance(q,p) <= 1.7));
+      else if (task?.kind === 'ring') this.ring(p);
       return;
     }
     const lamp = this.state.lamp;
@@ -364,26 +410,32 @@ export class Simulation {
     }
   }
 
-  // After the receipt, plan the contract's next facility. The crew stays home
-  // until someone steps into the rift; nothing of the facility is built yet.
+  // After the receipt, plan the contract's next facility, or after a wipe a
+  // fresh contract. The crew stays home until someone steps into the rift;
+  // nothing of the facility is built yet.
   nextExpedition() {
     const mission = this.state.mission;
     if (!mission || mission.stage !== 'settled') return;
-    const c = mission.contract;
-    c.index++;
-    c.layout = expeditionSeed(c.seed,c.index);
-    this.layout = generateLayout(c.layout);
+    if (mission.outcome === 'wipe') {
+      mission.contract = newContract(wipeSeed(mission.contract.seed));
+      delete mission.outcome;
+    } else {
+      mission.contract.index++;
+      mission.contract.layout = expeditionSeed(mission.contract.seed,mission.contract.index);
+    }
+    this.layout = generateLayout(mission.contract.layout);
     this.state.opened = [];
     Object.assign(mission,{stage:'home',haul:[],down:[],awake:false,diver:{mode:'dormant',bay:'',seconds:0}});
-    delete mission.arrival;
+    for (const key of ['arrival','bell','rift','enraged','escaped','dead'] as const) delete mission[key];
     for (const q of this.state.players) Object.assign(q,{slots:Array(hotbarSize).fill(null),hand:0});
   }
 }
 
 // Which door an operator can use from where they stand: the façade door
-// from outside, or Intake's outer door from inside.
-export function passageFor(p: Player, seed: number): 'enter' | 'leave' | undefined {
+// from outside, or Intake's outer door from inside. The façade stays shut
+// until the whole crew has come through the arrival rift.
+export function passageFor(p: Player, seed: number, crewOut: boolean): 'enter' | 'leave' | undefined {
   const place = placeOf(p);
-  if (place === 'outside' && distance(p,outdoors(seed).door) <= doorReach) return 'enter';
+  if (place === 'outside' && crewOut && distance(p,outdoors(seed).door) <= doorReach) return 'enter';
   if (place === 'inside' && Math.abs(p.feetY ?? 0) < 1 && distance(p,intakeDoor) <= doorReach) return 'leave';
 }

@@ -141,19 +141,8 @@ export function buildFacility(layout: Layout, library: Library) {
     }
     for (const side of [-1,1]) box(a.id,'paint',0xb69c60,o.x+nz*side*0.8,o.y+0.009,o.z+nx*side*0.8,nx?1.2:0.07,0.018,nz?1.2:0.07);
   }
-  // The cargo lift: a hazard-striped frame around Intake's pad.
+  // Salvage leaves through the exit rift outdoors; Intake keeps only its doors.
   const intake = layout.rooms.find(r => r.kind === 'intake');
-  const lift = intake && anchor(intake);
-  if (intake && lift) {
-    for (const [dx,dz,w,d] of [[0,-0.86,1.84,0.12],[0,0.86,1.84,0.12],[-0.86,0,0.12,1.84],[0.86,0,0.12,1.84]]) {
-      box(intake.id,'metal',0x3a4444,lift.x+dx,lift.y+0.03,lift.z+dz,w,0.06,d);
-      const long = w > d ? w : d;
-      for (let i=0;i<6;i++) {
-        const t = -long/2+(i+0.5)*long/6;
-        box(intake.id,'matte',colors.intake,lift.x+dx+(w > d ? t : 0),lift.y+0.062,lift.z+dz+(w > d ? 0 : t),w > d ? 0.14 : 0.12,0.006,w > d ? 0.12 : 0.14);
-      }
-    }
-  }
   // Intake's outer door in its south wall leads back outside to the façade.
   if (intake && !layout.tour) {
     const d = intakeDoor;
@@ -173,27 +162,6 @@ export function buildFacility(layout: Layout, library: Library) {
     const passage = layout.passages.find(p => p.id === d.id)!;
     return {id:d.id,mesh,rooms:[passage.a,passage.b]};
   });
-  // The contract terminal's screen faces into Intake from the west wall.
-  const desk = geometry.props.find(p => p.kind === 'terminal');
-  const screenCanvas = document.createElement('canvas'); screenCanvas.width = 512; screenCanvas.height = 320;
-  const screenTexture = new T.CanvasTexture(screenCanvas); screenTexture.colorSpace = T.SRGBColorSpace;
-  const screen = new T.Mesh(new T.PlaneGeometry(1.25,0.78),new T.MeshBasicMaterial({map:screenTexture}));
-  if (desk) {
-    screen.position.set(desk.x+desk.w/2+0.012,desk.y+desk.h+0.45,desk.z);
-    screen.rotation.y = Math.PI/2;
-    groups.get(desk.room)!.add(screen);
-  }
-  let screenText = '';
-  function terminal(lines: string[]) {
-    const text = lines.join('\n');
-    if (text === screenText) return;
-    screenText = text;
-    const g = screenCanvas.getContext('2d')!;
-    g.fillStyle = '#0d1a17'; g.fillRect(0,0,512,320);
-    g.fillStyle = '#7ee0b5'; g.font = 'bold 30px monospace'; g.textBaseline = 'top';
-    lines.forEach((l,i) => { g.fillStyle = i ? '#bfe8d4' : '#7ee0b5'; g.fillText(l,22,18+i*38,468); });
-    screenTexture.needsUpdate = true;
-  }
   // One instanced box per kind of salvage, so any number of items costs one
   // draw each. Items in rooms the camera cannot see are left out.
   const salvageMeshes = new Map((Object.keys(itemKinds) as ItemKind[]).map(kind => {
@@ -235,10 +203,9 @@ export function buildFacility(layout: Layout, library: Library) {
     for (const shared of [matte,glow,...library.surfaces.values()]) materials.delete(shared);
     panel.map?.dispose();
     for (const mesh of salvageMeshes.values()) mesh.dispose();
-    screenTexture.dispose();
     for (const mat of labels.values()) mat.map?.dispose();
     for (const resource of [...geometries,...materials]) resource.dispose();
     root.removeFromParent();
   }
-  return {root,update,show,dispose,terminal,salvage,lift,rooms:groups.size};
+  return {root,update,show,dispose,salvage,rooms:groups.size};
 }

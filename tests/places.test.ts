@@ -8,6 +8,7 @@ import { route } from '../src/route.ts';
 import { liftOf, spawnSalvage } from '../src/salvage.ts';
 import { generateLayout } from '../src/server/generate-layout.ts';
 import { Simulation } from '../src/server/simulation.ts';
+import { escape, ring } from './travel.ts';
 import type { Player } from '../src/room.ts';
 
 function crew(seed = 19, mode: 'solo' | 'coop' = 'coop') {
@@ -98,16 +99,16 @@ test('the façade door leads to Intake and back, and each place keeps its own th
   assert.ok(surfaceAt(map.geometry,thrown.x,thrown.z,thrown.y),'rests on the outdoor ground');
 });
 
-test('a sale brings everyone home, the receipt waits there, and the rift starts the next facility', () => {
+test('escaping brings everyone home, the receipt waits there, and the rift starts the next facility', () => {
   const {sim,player,at,mission} = crew();
   for (const id of [1,2]) { at(player(id),home().rift); sim.tick(1/30); }
   const map = outdoors(sim.layout!.seed);
   for (const id of [1,2]) { at(player(id),{x:map.door.x,z:map.door.z+1}); sim.act(id,'open-door'); }
   const item = spawnSalvage(sim.layout!)[0];
   at(player(1),item); sim.act(1,'take');
-  for (const id of [1,2]) at(player(id),liftOf(sim.layout!));
-  sim.act(1,'operate'); sim.act(1,'operate');
+  ring(sim,2); escape(sim,1); escape(sim,2);
   assert.equal(mission.stage,'settled');
+  assert.equal(mission.contract.receipts[0].credited,item.value,'carried out through the rift');
   assert.deepEqual(sim.state.players.map(placeOf),['home','home']);
   assert.deepEqual([placeOf(sim.state.lamp),sim.state.lamp.owner],['home',null]);
   const first = sim.layout;
@@ -131,20 +132,40 @@ test('a refresh in any place resumes there', () => {
   };
   at(player(1),home().rift); sim.tick(1/30);
   const map = outdoors(sim.layout!.seed);
-  at(player(1),{x:map.door.x,z:map.door.z+1}); sim.act(1,'open-door');
-  // One operator inside, one still at home: each resumes in their place.
+  // One operator outside, one still at home: each resumes in their place.
   const r1 = resume();
-  assert.deepEqual(r1.state.players.map(placeOf),['inside','home']);
-  assert.equal(r1.roomOf(r1.state.players[0]),'intake');
+  assert.deepEqual(r1.state.players.map(placeOf),['outside','home']);
   assert.equal(r1.state.mission!.arrival,'open');
   const p2 = r1.state.players[1];
   Object.assign(p2,home().rift); r1.tick(1/30);
   assert.deepEqual([placeOf(p2),r1.state.mission!.arrival],['outside','closed']);
-  // Outside, too.
+  // Outside and inside, too.
   at(player(2),home().rift); sim.tick(1/30);
+  at(player(1),{x:map.door.x,z:map.door.z+1}); sim.act(1,'open-door');
   const r2 = resume();
-  assert.equal(placeOf(r2.state.players[1]),'outside');
+  assert.deepEqual(r2.state.players.map(placeOf),['inside','outside']);
+  assert.equal(r2.roomOf(r2.state.players[0]),'intake');
   Object.assign(r2.state.players[1],{x:map.door.x,z:map.door.z+1});
   r2.act(2,'open-door');
   assert.equal(placeOf(r2.state.players[1]),'inside');
+});
+
+test('the façade door and the bell stay shut until the whole crew is through the rift', () => {
+  const {sim,player,at,mission} = crew();
+  at(player(1),home().rift); sim.tick(1/30);
+  const map = outdoors(sim.layout!.seed);
+  at(player(1),{x:map.door.x,z:map.door.z+1});
+  assert.equal(sim.passage(player(1)),undefined,'the partner is still at home');
+  sim.act(1,'open-door');
+  assert.equal(placeOf(player(1)),'outside');
+  at(player(1),map.ringing);
+  sim.act(1,'operate');
+  assert.equal(mission.bell,undefined,'the bell waits too');
+  at(player(2),home().rift); sim.tick(1/30);
+  assert.equal(mission.arrival,'closed');
+  sim.act(1,'operate');
+  assert.equal(mission.bell,1,'rung once everyone is out');
+  at(player(1),{x:map.door.x,z:map.door.z+1});
+  sim.act(1,'open-door');
+  assert.equal(placeOf(player(1)),'inside');
 });

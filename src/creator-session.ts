@@ -12,6 +12,8 @@ export interface Crew {
   lobby: string;
   round: number;
   actor: string;
+  // Display names from the Game Hub lobby, by seat: the host is 1, the guest 2.
+  names: Record<number,string>;
   lastVerified: () => number;
   closeRound: () => void;
 }

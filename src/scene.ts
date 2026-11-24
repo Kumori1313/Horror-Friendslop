@@ -1,15 +1,15 @@
 import * as T from 'three';
-import { itemName, items, pace, strikeRadius } from './mission.ts';
+import { itemName, items, pace, stunTime, type Diver } from './mission.ts';
 import { buildFacility } from './facility-scene.ts';
 import { environment, materialLibrary } from './materials.ts';
 import { anchor, geometryFor, type Geometry, type Layout } from './layout.ts';
 import { home, outdoors, placeOf, type Place } from './places.ts';
 import { buildHome, buildOutdoors } from './world-scene.ts';
-import { obstaclesAt, surfaceAt } from './room-templates.ts';
+import { obstaclesAt, roomTemplates, socketAt, surfaceAt } from './room-templates.ts';
 import { portalGraph, visibleRooms, type PortalGraph } from './visibility.ts';
 import { lampSlot, selected, walls } from './room.ts';
 import type { Snapshot } from './room.ts';
-import { positionAt, trajectory } from './flight.ts';
+import { gravity, positionAt, trajectory } from './flight.ts';
 import type { Flight } from './flight.ts';
 import { bodyOf, itemKinds, spawnSalvage, type ItemKind } from './salvage.ts';
 import { heldLamp } from './server/simulation.ts';
@@ -154,23 +154,40 @@ export function createScene(canvas: HTMLCanvasElement, generated = false) {
     held.name = 'held'; held.visible = false;
     people.set(id,g); return g;
   }
-  // The diver hangs from the ceiling bell, then folds its tines down to the floor.
-  const diver = new T.Group();
-  const tines = new T.Group();
-  const alarm = new T.MeshBasicMaterial({color:0xff6445});
-  const bell = new T.Mesh(new T.ConeGeometry(0.58,0.65,10),material(0x463832));
-  bell.position.y = 0.7;
-  const ring = new T.Mesh(new T.RingGeometry(strikeRadius-0.08,strikeRadius,64),
-    new T.MeshBasicMaterial({color:0xff774e,side:T.DoubleSide}));
-  ring.rotation.x = -Math.PI/2; ring.position.y = 0.025;
-  tines.add(bell);
+  // The Bell Diver clings to the ceiling: a bell, mouth down, gripping with
+  // six limbs spread along the ceiling, six tines hanging from its rim, and two
+  // faint red glints in its mouth that a glance upward can catch in the dark.
+  // `diver` sits at its hook on the ceiling; `swing` tilts its lower body
+  // back while it drags itself along; `body` lowers on its chain to strike
+  // and climbs back.
+  const diver = new T.Group(), swing = new T.Group(), body = new T.Group();
+  swing.rotation.order = 'YXZ';
+  diver.add(swing); swing.add(body); scene.add(diver); diver.visible = false;
+  // The chain it hangs from, paid out link by link as it falls.
+  const linkStep = 0.13, chain = new T.InstancedMesh(new T.TorusGeometry(0.055,0.016,6,10),
+    new T.MeshStandardMaterial({color:0x2c2a27,metalness:0.85,roughness:0.4}),90);
+  chain.count = 0; chain.frustumCulled = false; diver.add(chain);
+  const linkPose = new T.Object3D();
+  const hide = new T.MeshStandardMaterial({color:0x0b0909,roughness:0.3,metalness:0.4,side:T.DoubleSide});
+  const glintMat = new T.MeshBasicMaterial({color:0x5a120c});
+  const bell = new T.Mesh(new T.ConeGeometry(0.55,0.7,10,1,true),hide);
+  bell.position.y = -0.35; body.add(bell);
+  const limbs: T.Group[] = [], tines: T.Mesh[] = [];
   for (let i=0;i<6;i++) {
+    // Each limb pivots where it joins the bell, so it can fold down.
+    const grip = new T.Group(); grip.rotation.y = i*Math.PI/3+Math.PI/6; body.add(grip);
+    const limb = new T.Group(); limb.position.y = -0.06; grip.add(limb); limbs.push(limb);
+    box(0,0,-0.6,0.07,0.06,1.1,hide,limb);
     const angle = i*Math.PI/3, x = Math.cos(angle), z = Math.sin(angle);
-    const tine = box(x*0.43,-0.07,z*0.43,0.095,1.3,0.095,dark,tines);
-    tine.rotation.z = z*0.16; tine.rotation.x = x*0.16;
-    box(x*0.48,0.38,z*0.48,0.13,0.09,0.13,alarm,tines);
+    // Each tine hangs from its top, so scaling it lengthens it downward.
+    const pivot = new T.Group(); pivot.position.set(x*0.5,-0.62,z*0.5); body.add(pivot);
+    const tine = box(0,-0.6,0,0.07,1.2,0.07,hide,pivot);
+    tines.push(tine);
   }
-  diver.add(tines,ring); scene.add(diver); diver.visible = false;
+  for (const x of [-0.13,0.13]) box(x,-0.6,0.05,0.06,0.03,0.06,glintMat,body);
+  // Tines hang 1.2 m below the rim, shortened under low ceilings so they
+  // stay above head height.
+  const rim = 0.62, tineLength = 1.2;
   const torch = new T.Group(); torch.rotation.order = 'YXZ'; scene.add(torch);
   const barrel = new T.Mesh(new T.CylinderGeometry(0.085,0.064,0.32,12),yellow);
   barrel.rotation.x = -Math.PI/2; torch.add(barrel);
@@ -202,8 +219,13 @@ export function createScene(canvas: HTMLCanvasElement, generated = false) {
   }
   // Where a thrown item is now, as its centre, from the shared flight rules.
   function inFlight(g: Geometry, opened: readonly string[], id: string, f: Flight, kind: ItemKind | 'lamp', rest: {x: number; y: number; z: number}, now: number) {
-    const path = trajectory(g,opened,f,bodyOf(kind),rest);
-    return {...positionAt(path,flown(id,f,now)),t:flown(id,f,now)};
+    const path = trajectory(g,opened,f,bodyOf(kind),rest), t = flown(id,f,now);
+    // Stopped by the Bell Diver: it drops from where it struck to its rest spot.
+    if (f.cut !== undefined && t > f.cut) {
+      const at = positionAt(path,f.cut), u = t-f.cut, h = bodyOf(kind).h, k = Math.min(1,u/Math.max(1e-3,f.d-f.cut));
+      return {x:at.x+(rest.x-at.x)*k,y:Math.max(rest.y+h,at.y-gravity*u*u/2),z:at.z+(rest.z-at.z)*k,t};
+    }
+    return {...positionAt(path,t),t};
   }
   // Each kind's hotbar picture, rendered once in a small off-screen scene.
   let previewImages: Record<string,string> | undefined;
@@ -315,6 +337,87 @@ export function createScene(canvas: HTMLCanvasElement, generated = false) {
   let outside: ReturnType<typeof buildOutdoors> | undefined;
   // Salvage lying outdoors or at home: a few meshes, made as needed.
   const loose = new Map<string,T.Mesh>();
+  // The Diver's timers arrive once per snapshot; count them down locally in
+  // between so its drag and fall move smoothly.
+  let diverClock = {update:-1,mode:'',seconds:0,travel:0,at:0};
+  let tilt = 0, tiltSpeed = 0, heading = 0;
+  const ceiling = (r: Layout['rooms'][number]) => r.y+roomTemplates[r.template].height-0.03;
+  // Its drag from where it was: along the ceiling to the doorway, through
+  // the wiring above it, and on to where it settles.
+  function dragPath(layout: Layout, creature: Diver, room: Layout['rooms'][number]) {
+    const from = creature.from!, start = layout.rooms.find(r => r.id === from.bay) ?? room;
+    const a = new T.Vector3(from.x,ceiling(start),from.z), b = new T.Vector3(creature.x!,ceiling(room),creature.z!);
+    const link = layout.passages.find(l => (l.a === from.bay && l.b === room.id) || (l.b === from.bay && l.a === room.id));
+    const door = link && socketAt(layout.rooms.find(r => r.id === link.a)!,link.from);
+    return door ? [a,new T.Vector3(door.x,a.y,door.z),new T.Vector3(door.x,b.y,door.z),b] : [a,b];
+  }
+  function along(points: T.Vector3[], f: number) {
+    const lengths = points.slice(1).map((p,i) => p.distanceTo(points[i])), total = lengths.reduce((x,y) => x+y,0);
+    let left = f*total;
+    for (let i=0;i<lengths.length;i++) {
+      if (left <= lengths[i] || i === lengths.length-1) {
+        const t = lengths[i] ? Math.min(1,left/lengths[i]) : 1;
+        return {at:points[i].clone().lerp(points[i+1],t),dir:points[i+1].clone().sub(points[i])};
+      }
+      left -= lengths[i];
+    }
+    return {at:points.at(-1)!.clone(),dir:new T.Vector3()};
+  }
+  function poseDiver(layout: Layout, room: Layout['rooms'][number], creature: Diver, mission: NonNullable<Snapshot['mission']>, update: number, now: number, dt: number, reducedMotion: boolean) {
+    if (update !== diverClock.update) diverClock = {update,mode:creature.mode,seconds:creature.seconds,travel:creature.travel ?? 0,at:now};
+    const elapsed = (now-diverClock.at)/1000;
+    const seconds = Math.max(0,diverClock.seconds-elapsed), travelling = Math.max(0,diverClock.travel-elapsed);
+    const p = pace(mission), top = ceiling(room), a = anchor(room);
+    const floor = creature.y ?? a.y, time = now/1000;
+    const reach = Math.max(0.3,Math.min(1,(top-floor-2.1-rim)/tineLength));
+    // Dragging between spots: its lower body trails behind it.
+    let moving = false;
+    if (creature.from && creature.travel !== undefined && travelling > 0) {
+      const f = 1-travelling/p.travel, eased = f*f*(3-2*f);
+      const {at,dir} = along(dragPath(layout,creature,room),Math.max(0,Math.min(1,eased)));
+      diver.position.copy(at);
+      if (Math.hypot(dir.x,dir.z) > 1e-3) heading = Math.atan2(-dir.x,-dir.z);
+      moving = true;
+    } else diver.position.set(creature.x ?? a.x,top,creature.z ?? a.z);
+    // A damped swing: tilted back while dragging, settling once it stops.
+    const want = moving && !reducedMotion ? -0.45 : 0;
+    tiltSpeed += ((want-tilt)*40-tiltSpeed*5)*dt; tilt += tiltSpeed*dt;
+    if (reducedMotion) { tilt = 0; tiltSpeed = 0; }
+    swing.rotation.set(tilt,heading,0);
+    // Lowered on its chain: a quick fall, a pause on the floor, a slow climb.
+    const depth = Math.max(0,top-floor-rim-tineLength*reach);
+    let lowered = 0;
+    if (creature.mode === 'falling') { const f = 1-seconds/p.fall; lowered = depth*Math.min(1,f*f); }
+    else if (creature.mode === 'strike') lowered = depth;
+    else if (creature.mode === 'rising') { const f = Math.min(1,seconds/p.rise); lowered = depth*f*f*(3-2*f); }
+    body.position.y = -lowered;
+    chain.count = lowered > 0.05 ? Math.min(90,Math.floor(lowered/linkStep)) : 0;
+    for (let k=0;k<chain.count;k++) {
+      linkPose.position.set(0,-k*linkStep-linkStep/2,0);
+      linkPose.rotation.set(0,k%2 ? Math.PI/2 : 0,0);
+      linkPose.scale.set(1,1.5,1);
+      linkPose.updateMatrix(); chain.setMatrixAt(k,linkPose.matrix);
+    }
+    chain.instanceMatrix.needsUpdate = true;
+    // Its tines reach down and twitch faster as the drop nears, and its
+    // glints brighten. Stunned, it shudders, then hangs limp and dark.
+    const falling = creature.mode === 'falling' || creature.mode === 'strike';
+    const stunned = creature.stun !== undefined, jolt = stunned ? Math.max(0,creature.stun!-(stunTime-0.7))/0.7 : 0;
+    const urgency = stunned ? 0 : falling ? 1 : creature.drop === undefined ? 0 : 1-Math.max(0,creature.drop)/p.wait;
+    tines.forEach((t,i) => {
+      const pivot = t.parent!;
+      const limp = stunned ? 0.25 : 1;
+      pivot.rotation.x = Math.sin(time*(1.3+9*urgency)+i*1.7)*(0.06+0.3*urgency)*limp;
+      pivot.rotation.z = Math.cos(time*(1.1+8*urgency)+i*2.3)*(0.06+0.3*urgency)*limp;
+      pivot.scale.y = reach*(1+0.5*urgency*Number(!falling));
+    });
+    if (!reducedMotion) swing.rotation.z = Math.sin(time*38)*0.18*jolt;
+    // Limbs grip the ceiling, and fold down into legs once it lets go.
+    const fold = lowered > 0.3 ? -1.1 : 0;
+    limbs.forEach((l,i) => { l.rotation.x += (fold+Math.sin(time*0.7+i)*0.04-l.rotation.x)*Math.min(1,dt*12); });
+    if (stunned) glintMat.color.setRGB(0.06,0.02,0.02);
+    else glintMat.color.setRGB(0.35+0.65*urgency,0.07+0.1*urgency,0.05);
+  }
   // `self` is whose eyes the camera looks through: your own operator, or the
   // partner a dead operator is watching.
   function render(state: Snapshot | undefined, self: number, yaw: number, pitch: number, dt: number, layout?: Layout, reducedMotion = false, watching = false) {
@@ -358,16 +461,8 @@ export function createScene(canvas: HTMLCanvasElement, generated = false) {
       const sameHere = (thing: {place?: Place}) => !state.mission || placeOf(thing) === here;
       const blend = 1 - Math.exp(-18 * dt);
       const creature = state.mission?.diver;
-      const room = layout?.rooms.find(r => r.id === creature?.bay);
-      const target = room && anchor(room);
-      diver.visible = here === 'inside' && !!target && (creature?.mode === 'warning' || creature?.mode === 'strike');
-      // An enraged Diver strikes a wider circle.
-      if (state.mission) ring.scale.setScalar(pace(state.mission).radius/strikeRadius);
-      if (target && creature && diver.visible) {
-        diver.position.set(target.x,target.y,target.z);
-        tines.position.y = creature.mode === 'strike' ? 0.75 : 2.8+Math.cos(creature.seconds*7)*0.12;
-        tines.rotation.y = creature.seconds*0.45;
-      }
+      const room = creature && creature.mode !== 'dormant' ? layout?.rooms.find(r => r.id === creature.bay) : undefined;
+      diver.visible = here === 'inside' && !!room;
       const salvageKind = new Map(layout && state.mission ? spawnSalvage(layout).map(s => [s.id,s.kind]) : []);
       const heldKind = (p: Snapshot['players'][number]) => {
         const item = selected(p);
@@ -468,7 +563,10 @@ export function createScene(canvas: HTMLCanvasElement, generated = false) {
           const g2 = people.get(p.id);
           if (g2) g2.visible = p.id !== self && sameHere(p) && shown(p.x,p.z,p.feetY ?? 0);
         }
-        if (diver.visible && drawn && room) diver.visible = drawn.has(room.id);
+        // While it drags itself out of a room, it shows from that room too.
+        if (diver.visible && drawn && room) diver.visible = drawn.has(room.id) || (!!creature?.from && drawn.has(creature.from.bay));
+        // Pose the Diver only while it is drawn.
+        if (diver.visible && room && creature && state.mission) poseDiver(layout,room,creature,state.mission,state.update,now,dt,reducedMotion);
         const mission = state.mission;
         if (mission) {
           // Salvage lying in the facility; carried items are drawn in hand.

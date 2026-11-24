@@ -1,13 +1,14 @@
-import { distances, roomLabel } from './layout.ts';
+import chainOne from './audio/chain-1.wav?url';
+import chainTwo from './audio/chain-2.wav?url';
 import type { Layout } from './layout.ts';
 import type { Player, Snapshot } from './room.ts';
 import type { Preferences } from './preferences.ts';
-import { finished, itemName, lossPercent } from './mission.ts';
+import { finished, hears, itemName, listen, lossPercent } from './mission.ts';
 import { placeOf } from './places.ts';
 
 const el = (id: string) => document.getElementById(id)!;
 
-// Build the audio context on the Enter gesture so mobile browsers can play the warning.
+// Build the audio context on the Enter gesture so mobile browsers can play sound.
 export function missionHud(preferences: Preferences, operator = (id: number) => 'Operator '+id) {
   let audio: AudioContext | undefined;
   const reference = document.querySelector<HTMLInputElement>('#report-reference')!;
@@ -23,15 +24,32 @@ export function missionHud(preferences: Preferences, operator = (id: number) => 
       copy.textContent = 'Select and copy';
     }
   };
-  let lastBeat = '', caption = '', captionUntil = 0;
+  let caption = '', captionUntil = 0;
   function subtitle(label: string) {
     caption = label;
     captionUntil = performance.now()+2500;
   }
+  // The Bell Diver's chains, fetched and decoded once, reused for every move.
+  // Kept subtle. The second clip is recorded about 3 dB quieter than the first.
+  const chains: (AudioBuffer | undefined)[] = [];
+  const chainLevel = [0.2,0.28];
   function enableSound() {
     if (!window.AudioContext) return;
+    const first = !audio;
     audio ??= new AudioContext();
     void audio.resume().catch(() => {});
+    if (first) [chainOne,chainTwo].forEach((url,i) => {
+      void fetch(url).then(r => r.arrayBuffer()).then(data => audio!.decodeAudioData(data)).then(b => { chains[i] = b; }).catch(() => {});
+    });
+  }
+  function chain(clip: number) {
+    const buffer = chains[clip];
+    if (!audio || !buffer || audio.state !== 'running' || preferences.volume === 0 || document.hidden) return;
+    const source = audio.createBufferSource(), gain = audio.createGain();
+    source.buffer = buffer;
+    gain.gain.value = chainLevel[clip]*preferences.volume;
+    source.connect(gain).connect(audio.destination);
+    source.start();
   }
   function tone(hz: number, endHz: number, duration: number, level: number) {
     if (audio?.state !== 'running' || preferences.volume === 0 || document.hidden) return;
@@ -45,8 +63,6 @@ export function missionHud(preferences: Preferences, operator = (id: number) => 
     source.connect(gain).connect(audio.destination);
     source.start(now); source.stop(now+duration+0.01);
   }
-  // Scraping carries through doors and stairs, fading over four connections.
-  const hearing = [1,0.6,0.35,0.2];
   const outcomes = {quota:'Quota met',deadline:'Quota missed',wipe:'Crew lost',left:'Contract abandoned'};
   const clock = (seconds: number) => Math.floor(seconds/60)+':'+String(Math.floor(seconds%60)).padStart(2,'0');
   function line(label: string, value: string, kind = '') {
@@ -55,7 +71,11 @@ export function missionHud(preferences: Preferences, operator = (id: number) => 
     li.append(Object.assign(document.createElement('span'),{textContent:label}),Object.assign(document.createElement('span'),{textContent:value}));
     return li;
   }
-  let lastBanked = 0, wasAwake = false, wasRung = false, shownReport = '';
+  let lastBanked = 0, wasRung = false, shownReport = '';
+  // The Diver's moves already heard, so each rattles once; undefined until
+  // the first snapshot, so joining or refreshing replays nothing.
+  let heardMoves: number | undefined;
+  let wasStunned = false;
   function update(layout: Layout, state: Snapshot, self: Player, room: string | undefined, briefing: boolean) {
     const m = state.mission!;
     const c = m.contract;
@@ -103,8 +123,21 @@ export function missionHud(preferences: Preferences, operator = (id: number) => 
       subtitle(placeOf(self) === 'inside' ? 'The bell tolls outside. Something stirs, enraged' : 'The bell tolls. A rift opens, marked by light');
     }
     wasRung = rung;
-    if (m.awake && !wasAwake) { tone(120,60,0.9,0.22); subtitle('Something shifts in the ceiling wiring'); }
-    wasAwake = !!m.awake;
+    // Each move of the Diver rattles its chains for operators within two room
+    // connections of the room it enters.
+    const heard = listen(layout,placeOf(self) === 'inside' ? room : undefined,m.diver,heardMoves);
+    if (heard.clip !== undefined) {
+      chain(heard.clip);
+      subtitle('Chains rattle through the ceiling nearby');
+    }
+    heardMoves = heard.heard;
+    // A thrown item rings off its bell as it stuns it.
+    const stunned = m.diver.stun !== undefined;
+    if (stunned && !wasStunned && placeOf(self) === 'inside' && hears(layout,room,m.diver)) {
+      tone(1180,1120,0.7,0.07); tone(1770,1700,0.45,0.035);
+      subtitle('A clang rings off the bell. It hangs still');
+    }
+    wasStunned = stunned;
     const alerts: string[] = [];
     if (m.rift) alerts.push('Rift closes in '+clock(m.rift.seconds));
     if (m.escaped?.includes(self.id)) alerts.push('You made it out. Waiting for the rift to close');
@@ -113,26 +146,6 @@ export function missionHud(preferences: Preferences, operator = (id: number) => 
     for (const id of m.escaped ?? []) if (id !== self.id) alerts.push(operator(id)+' made it out');
     for (const d of m.down) alerts.push((d.id === self.id ? 'You are down. Your partner can revive you' :
       operator(d.id)+' is down. Reach them and revive')+' · '+Math.ceil(d.seconds)+'s');
-    const diver = m.diver;
-    const bay = layout.rooms.find(r => r.id === diver.bay);
-    if (bay && diver.mode === 'tracking') {
-      const beat = 'wire/'+bay.id;
-      const hops = beat !== lastBeat && room ? distances(layout.rooms,layout.passages,bay.id).get(room) : undefined;
-      if (hops !== undefined && hops < hearing.length) {
-        tone(250,75,0.42,0.17*hearing[hops]);
-        subtitle(hops <= 1 ? 'Scraping in the wiring above '+roomLabel(bay) : 'Scraping in the wiring nearby');
-      }
-      lastBeat = beat;
-    } else if (bay && (diver.mode === 'warning' || diver.mode === 'strike')) {
-      const label = roomLabel(bay);
-      alerts.push(diver.mode === 'warning' ? 'Knocking above '+label+'! Clear the marked circle.' : 'Bell Diver striking '+label+'!');
-      const beat = diver.mode === 'warning' ? bay.id+'/'+Math.ceil(diver.seconds) : '';
-      if (beat && beat !== lastBeat) {
-        tone(160,48,0.2,0.35);
-        subtitle('Ceiling knock · '+roomLabel(bay));
-      }
-      lastBeat = beat;
-    } else lastBeat = '';
     const text = preferences.captions && performance.now() < captionUntil ? caption : '';
     if (el('sound-caption').textContent !== text) el('sound-caption').textContent = text;
     const warning = alerts.join(' · ');

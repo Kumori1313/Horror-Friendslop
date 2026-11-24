@@ -87,15 +87,52 @@ export function distances(rooms: {id: string}[], passages: {a: string; b: string
   return steps;
 }
 
+// Room connections between every pair of rooms, worked out once per layout,
+// so pursuit and hearing checks are a table lookup.
+const tables = new WeakMap<Layout,{steps: Map<string,Map<string,number>>; next: Map<string,string[]>}>();
+function table(layout: Layout) {
+  let t = tables.get(layout);
+  if (!t) {
+    const next = new Map(layout.rooms.map(room => [room.id,[] as string[]]));
+    for (const {a,b} of layout.passages) { next.get(a)!.push(b); next.get(b)!.push(a); }
+    t = {steps:new Map(layout.rooms.map(r => [r.id,distances(layout.rooms,layout.passages,r.id)])),next};
+    tables.set(layout,t);
+  }
+  return t;
+}
+export function connections(layout: Layout) {
+  const {steps} = table(layout);
+  return (a: string, b: string) => steps.get(a)?.get(b) ?? Infinity;
+}
+export const neighbours = (layout: Layout, room: string) => table(layout).next.get(room) ?? [];
+
+// The Bell Diver strikes one zone of a room at a time: the room's bounding
+// box split into equal tiles no more than `zoneSize` metres a side, so a long
+// tunnel or a large hall can be escaped without crossing the whole room.
+export const zoneSize = 8;
+const boxes = new WeakMap<Layout,Map<string,{x0: number; z0: number; w: number; d: number; nx: number; nz: number}>>();
+export function zoneAt(layout: Layout, room: string, x: number, z: number) {
+  let all = boxes.get(layout);
+  if (!all) boxes.set(layout,all = new Map());
+  let b = all.get(room);
+  if (!b) {
+    const r = layout.rooms.find(m => m.id === room);
+    if (!r) return room;
+    const parts = orient(r.template,r.turn).footprint;
+    const x0 = Math.min(...parts.map(p => r.x+p.x-p.w/2)), x1 = Math.max(...parts.map(p => r.x+p.x+p.w/2));
+    const z0 = Math.min(...parts.map(p => r.z+p.z-p.d/2)), z1 = Math.max(...parts.map(p => r.z+p.z+p.d/2));
+    const w = x1-x0, d = z1-z0;
+    all.set(room,b = {x0,z0,w,d,nx:Math.max(1,Math.ceil(w/zoneSize-1e-6)),nz:Math.max(1,Math.ceil(d/zoneSize-1e-6))});
+  }
+  const i = Math.max(0,Math.min(b.nx-1,Math.floor((x-b.x0)/(b.w/b.nx)))), j = Math.max(0,Math.min(b.nz-1,Math.floor((z-b.z0)/(b.d/b.nz))));
+  return room+'#'+i+','+j;
+}
+
 // The Bell Diver follows ceiling wiring through the same doors and stairs as the crew.
 export function nextWiredBay(layout: Layout, from: string, target: string) {
   if (from === target) return from;
-  const steps = distances(layout.rooms,layout.passages,target);
-  for (const {a,b} of layout.passages) {
-    const next = a === from ? b : b === from ? a : undefined;
-    if (next && steps.get(next)! < steps.get(from)!) return next;
-  }
-  return from;
+  const hops = connections(layout);
+  return neighbours(layout,from).find(next => hops(next,target) < hops(from,target)) ?? from;
 }
 
 // Grid cells a placed room fills, one key per cell and storey.

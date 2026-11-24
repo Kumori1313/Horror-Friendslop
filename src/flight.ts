@@ -11,7 +11,9 @@ import type { Point3, Solid } from './room-templates.ts';
 // Where a throw starts (the item's centre) and how fast it leaves the hand.
 export interface Launch { x: number; y: number; z: number; vx: number; vy: number; vz: number }
 // A throw in progress: its launch, seconds flown (`t`), and its length (`d`).
-export interface Flight extends Launch { t: number; d: number }
+// `cut`: the flight struck something (the Bell Diver) this many seconds in,
+// and the item falls from there to its rest spot for the remaining time.
+export interface Flight extends Launch { t: number; d: number; cut?: number }
 // Half the item's width and half its height.
 export interface Body { r: number; h: number }
 export interface Path { points: number[]; rest: Point3; duration: number }

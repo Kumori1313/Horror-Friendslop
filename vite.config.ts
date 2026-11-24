@@ -28,6 +28,7 @@ export default defineConfig(({mode, command}) => {
           source:JSON.stringify({revision,generatorVersion,players:2,modes:['solo','co-op'],game:'relay-room'})+'\n',
         });
         this.emitFile({type:'asset',fileName:'LICENSE.txt',source:readFileSync(new URL('./LICENSE',import.meta.url),'utf8')});
+        this.emitFile({type:'asset',fileName:'AUDIO-CREDITS.md',source:readFileSync(new URL('./src/audio/CREDITS.md',import.meta.url),'utf8')});
       },
       configureServer(s) { if (s.httpServer) attach(s.httpServer); },
       configurePreviewServer(s) { attach(s.httpServer); },

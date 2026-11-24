@@ -1,6 +1,7 @@
-import { anchor, distances, nextWiredBay, type Layout } from '../layout.ts';
-import { distance, gone, items, kept, pace, sameStorey } from '../mission.ts';
-import type { Contract, Mission, Receipt } from '../mission.ts';
+import { anchor, connections, nextWiredBay, neighbours, zoneAt, type Layout } from '../layout.ts';
+import { storey } from '../room-templates.ts';
+import { gone, items, kept, pace, sameStorey, sprawl, stunTime } from '../mission.ts';
+import type { Contract, Diver, Mission, Receipt } from '../mission.ts';
 import type { Player, Snapshot } from '../room.ts';
 import { expeditionSeed, facilityValue } from '../salvage.ts';
 import { generateLayout } from './generate-layout.ts';
@@ -20,10 +21,6 @@ export function newMission(layout: Layout, contract = newContract(layout.seed)):
   return {stage:'explore',contract,haul:[],down:[],diver:{mode:'dormant',bay:'',seconds:0}};
 }
 
-export function warn(mission: Mission, bay: string) {
-  mission.diver = {mode:'warning',bay,seconds:pace(mission).warning};
-}
-
 // A fresh contract after a wipe: new facilities and quota, nothing credited.
 // Its seed follows from the old one, so a reported wipe can be replayed.
 export const wipeSeed = (seed: number) => expeditionSeed(seed,7919);
@@ -32,9 +29,117 @@ export const wipeSeed = (seed: number) => expeditionSeed(seed,7919);
 export function wake(layout: Layout, mission: Mission, room: string) {
   if (mission.awake) return;
   mission.awake = true;
-  const steps = distances(layout.rooms,layout.passages,room);
-  const far = layout.rooms.reduce((a,b) => (steps.get(b.id) ?? 0) > (steps.get(a.id) ?? 0) ? b : a);
-  mission.diver = {mode:'quiet',bay:far.id,seconds:6};
+  const hops = connections(layout);
+  const far = layout.rooms.reduce((a,b) => hops(room,b.id) > hops(room,a.id) ? b : a);
+  const a = anchor(far);
+  mission.diver = {mode:'quiet',bay:far.id,seconds:6,x:a.x,y:a.y,z:a.z,moves:0};
+}
+
+// The storey whose floor an operator stands on.
+const storeyOf = (p: Player) => Math.round((p.feetY ?? 0)/storey)*storey;
+
+// Drag into a room through the wiring, choosing this move's chain clip. It
+// settles above an operator in that room, or above the room's pad, taking
+// `travel` seconds to get there from where it was.
+function enter(layout: Layout, diver: Diver, room: string, over: Player | undefined, travel: number, random: () => number) {
+  const a = anchor(layout.rooms.find(r => r.id === room)!);
+  const to = over ? {x:over.x,y:storeyOf(over),z:over.z} : {x:a.x,y:a.y,z:a.z};
+  const zone = zoneAt(layout,diver.bay,diver.x ?? a.x,diver.z ?? a.z);
+  diver.from = {bay:diver.bay,x:diver.x ?? a.x,y:diver.y ?? a.y,z:diver.z ?? a.z};
+  diver.travel = travel;
+  Object.assign(diver,to);
+  // Crossing to another zone of the same room is a move too, and rattles.
+  if (room === diver.bay && zoneAt(layout,room,to.x,to.z) === zone) return;
+  diver.bay = room;
+  diver.moves = (diver.moves ?? 0)+1;
+  diver.clip = random() < 0.5 ? 0 : 1;
+}
+
+// A struck operator goes down and drops the flashlight; they keep their salvage.
+function strike(state: Snapshot, mission: Mission, p: Player) {
+  mission.down.push({id:p.id,seconds:75});
+  if (state.lamp.owner === p.id) Object.assign(state.lamp,{x:p.x,z:p.z,y:(p.feetY ?? 0)+0.14,owner:null,pitch:0,stowed:false});
+}
+
+// A thrown item reached it: no drops or moves for `stunTime` seconds, and a
+// fall in progress turns into a climb from where it is.
+function stun(mission: Mission) {
+  const diver = mission.diver, p = pace(mission);
+  diver.stun = stunTime;
+  delete diver.drop;
+  if (diver.mode === 'falling') {
+    const lowered = (1-Math.max(0,diver.seconds)/p.fall)**2;
+    diver.mode = 'rising'; diver.seconds = p.rise*lowered;
+  }
+}
+
+// Once it has arrived and someone shares its zone and storey, the Diver waits
+// `pace.wait` seconds, resetting if they all leave, then falls for
+// `pace.fall` seconds whatever they do and strikes everyone beneath it when
+// it lands. It lies there, climbs back and rests. Otherwise, every
+// `pace.step` seconds it drags itself one room toward the nearest operator no
+// more than `pace.reach` connections away, rechecking after each move; with
+// nobody in reach it wanders to a random neighbouring room every
+// `pace.wander` seconds.
+function hunt(layout: Layout, state: Snapshot, mission: Mission, dt: number, locate: (p: Player) => string | undefined, random: () => number) {
+  const diver = mission.diver, p = pace(mission);
+  if (diver.mode === 'dormant') return;
+  // It hunts only inside the facility; operators elsewhere are out of reach.
+  const prey = state.players.filter(q => q.connected && placeOf(q) === 'inside' && !gone(mission,q.id) && !mission.down.some(d => d.id === q.id));
+  const here = () => zoneAt(layout,diver.bay,diver.x ?? 0,diver.z ?? 0);
+  const beneath = () => prey.filter(q => locate(q) === diver.bay && sameStorey(q,{y:diver.y ?? 0}) && zoneAt(layout,diver.bay,q.x,q.z) === here());
+  if (diver.incoming !== undefined) {
+    diver.incoming -= dt;
+    if (diver.incoming <= 0) { delete diver.incoming; stun(mission); }
+  }
+  if (diver.stun !== undefined) {
+    diver.stun -= dt;
+    if (diver.stun <= 0) delete diver.stun;
+  }
+  if (diver.mode !== 'hanging') {
+    diver.seconds -= dt;
+    if (diver.seconds > 0) return;
+    switch (diver.mode) {
+      case 'falling':
+        for (const q of beneath()) strike(state,mission,q);
+        diver.mode = 'strike'; diver.seconds = sprawl; return;
+      case 'strike': diver.mode = 'rising'; diver.seconds = p.rise; return;
+      case 'rising': diver.mode = 'quiet'; diver.seconds = p.quiet; return;
+      default: diver.mode = 'hanging'; diver.seconds = 0;
+    }
+  }
+  // Still dragging itself into place.
+  if (diver.travel !== undefined) {
+    diver.travel -= dt; diver.seconds -= dt;
+    if (diver.travel > 0) return;
+    delete diver.travel; delete diver.from;
+    return;
+  }
+  // Stunned: it hangs where it is until it comes round.
+  if (diver.stun !== undefined) return;
+  if (beneath().length) {
+    diver.drop = (diver.drop ?? p.wait)-dt;
+    if (diver.drop > 0) return;
+    delete diver.drop;
+    diver.mode = 'falling'; diver.seconds = p.fall;
+    return;
+  }
+  delete diver.drop;
+  diver.seconds -= dt;
+  if (diver.seconds > 0) return;
+  const hops = connections(layout);
+  const chase = prey.map(q => ({q,room:locate(q)}))
+    .filter((t): t is {q: Player; room: string} => t.room !== undefined && hops(diver.bay,t.room) <= p.reach)
+    .sort((a,b) => hops(diver.bay,a.room)-hops(diver.bay,b.room) || Number(b.q.id === state.lamp.owner)-Number(a.q.id === state.lamp.owner))[0];
+  if (chase) {
+    const next = nextWiredBay(layout,diver.bay,chase.room);
+    enter(layout,diver,next,next === chase.room ? chase.q : undefined,p.travel,random);
+    diver.seconds = p.step;
+  } else {
+    const around = neighbours(layout,diver.bay);
+    if (around.length) enter(layout,diver,around[Math.min(around.length-1,Math.floor(random()*around.length))],undefined,p.travel,random);
+    diver.seconds = p.wander;
+  }
 }
 
 // Sell what went into the rift. Every operator who didn't escape, whether
@@ -83,7 +188,7 @@ function die(state: Snapshot, mission: Mission, id: number) {
 }
 
 // `locate` names the room whose floor an operator stands on.
-export function advanceMission(layout: Layout, state: Snapshot, mission: Mission, dt: number, locate: (p: Player) => string | undefined) {
+export function advanceMission(layout: Layout, state: Snapshot, mission: Mission, dt: number, locate: (p: Player) => string | undefined, random: () => number = Math.random) {
   for (const down of mission.down) down.seconds = Math.max(0,down.seconds-dt);
   for (const d of mission.down.filter(d => d.seconds === 0)) die(state,mission,d.id);
   if (mission.rift) {
@@ -93,43 +198,5 @@ export function advanceMission(layout: Layout, state: Snapshot, mission: Mission
   // Once nobody is left who could still act, the expedition ends at once.
   const active = state.players.filter(p => !gone(mission,p.id) && !mission.down.some(d => d.id === p.id));
   if (!active.length) { endExpedition(layout,state,mission); return; }
-  const diver = mission.diver;
-  if (diver.mode === 'dormant') return;
-  diver.seconds -= dt;
-  if (diver.seconds <= 0) {
-    switch (diver.mode) {
-      case 'warning':
-        diver.mode = 'strike'; diver.seconds = 1.5;
-        break;
-      case 'strike':
-        diver.mode = 'quiet'; diver.seconds = pace(mission).quiet;
-        break;
-      case 'quiet':
-      case 'tracking': {
-        // It hunts only inside the facility; operators elsewhere are out of reach.
-        const crew = state.players.filter(p => p.connected && placeOf(p) === 'inside' && !gone(mission,p.id) && !mission.down.some(d => d.id === p.id));
-        const target = crew.find(p => p.id === state.lamp.owner && state.lamp.on) ?? crew[0];
-        if (target) {
-          const bay = locate(target) ?? layout.rooms.reduce((a,b) => {
-            const pa = anchor(a), pb = anchor(b), feet = target.feetY ?? 0;
-            return Math.hypot(pa.x-target.x,pa.y-feet,pa.z-target.z) < Math.hypot(pb.x-target.x,pb.y-feet,pb.z-target.z) ? a : b;
-          }).id;
-          if (bay === diver.bay) warn(mission,bay);
-          else {
-            diver.bay = nextWiredBay(layout,diver.bay,bay);
-            diver.mode = 'tracking';
-            diver.seconds = pace(mission).step;
-          }
-        }
-        return;
-      }
-    }
-  }
-  if (diver.mode !== 'strike') return;
-  const bay = anchor(layout.rooms.find(r => r.id === diver.bay)!);
-  for (const p of state.players) {
-    if (placeOf(p) !== 'inside' || gone(mission,p.id) || distance(p,bay) > pace(mission).radius || !sameStorey(p,bay) || mission.down.some(d => d.id === p.id)) continue;
-    mission.down.push({id:p.id,seconds:75});
-    if (state.lamp.owner === p.id) Object.assign(state.lamp,{x:p.x,z:p.z,y:(p.feetY ?? 0)+0.14,owner:null,pitch:0,stowed:false});
-  }
+  hunt(layout,state,mission,dt,locate,random);
 }

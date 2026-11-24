@@ -75,7 +75,7 @@ test('the façade door leads to Intake and back, and each place keeps its own th
   const bay = sim.layout!.rooms.find(r => r.kind !== 'intake' && r.kind !== 'corridor')!;
   at(player(1),anchor(bay)); at(player(2),anchor(bay));
   mission.awake = true;
-  mission.diver = {mode:'warning',bay:bay.id,seconds:0.05};
+  mission.diver = {mode:'falling',bay:bay.id,seconds:0.05,y:anchor(bay).y};
   for (let i=0;i<10;i++) sim.tick(1/30);
   assert.deepEqual(mission.down.map(d => d.id),[1],'only the operator inside is struck');
   mission.down = [];

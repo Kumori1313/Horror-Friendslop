@@ -1,13 +1,13 @@
 import { clearAt, command, freeSlot, hotbarSize, lampSlot, selected, slotsOf, walls } from '../room.ts';
 import type { Action, Aim, Command, Input, Lamp, Player, Snapshot } from '../room.ts';
-import { flightStep, launchFrom, trajectory } from '../flight.ts';
+import { flightStep, gravity, launchFrom, trajectory } from '../flight.ts';
 import type { Body, Flight } from '../flight.ts';
 
 import { geometryFor, nearbyDoor, playerRadius, spawnPoints } from '../layout.ts';
 import type { Layout, Geometry, Rect } from '../layout.ts';
 
 import { obstaclesAt, surfaceAt, surfaceHeight } from '../room-templates.ts';
-import { assignment, distance, finished, gone, nearestPickup } from '../mission.ts';
+import { assignment, distance, diverBody, finished, gone, nearestPickup } from '../mission.ts';
 import { doorReach, home, intakeDoor, intakeEntry, outdoors, placeOf, riftOpen, riftReach, riftSpot } from '../places.ts';
 import type { Place, Stand } from '../places.ts';
 import { bodyOf, expeditionSeed, itemKinds, spawnSalvage } from '../salvage.ts';
@@ -150,6 +150,8 @@ export class Simulation {
   openedAt(place: Place): readonly string[] { return place === 'inside' ? this.state.opened ?? [] : []; }
   state: Snapshot = { round: crypto.randomUUID(), update: 0, players: [], lamp: { x: 0, y: 0.14, z: 2, yaw: 0, pitch: 0, on: true, owner: null } };
   inputs = new Map<number, Input>();
+  // Where the Diver wanders and which chain clip it rattles. Tests replace it.
+  random: () => number = Math.random;
 
   join(assignedSeat?: number) {
     const seats = this.state.mission?.solo || this.layout?.tour ? [1] : [1,2];
@@ -200,7 +202,7 @@ export class Simulation {
     }
     for (const h of mission?.haul ?? []) advance(h,dt);
     if (mission?.stage === 'explore' && this.layout) {
-      advanceMission(this.layout,this.state,mission,dt,p => this.roomOf(p));
+      advanceMission(this.layout,this.state,mission,dt,p => this.roomOf(p),this.random);
       if (mission.stage !== 'explore') this.returnHome();
     }
   }
@@ -323,6 +325,28 @@ export class Simulation {
           flight.d = Math.max(flightStep,i*flightStep);
           rest = {x:rift.x,y:0,z:rift.z};
           banked = true;
+          break;
+        }
+      }
+      // A throw that reaches the Bell Diver stops there, drops to the floor
+      // beneath it, and stuns it when it lands on it.
+      const diver = mission?.diver, hit = diver && layout && place === 'inside' && flight ? diverBody(layout,diver) : undefined;
+      if (hit && diver) {
+        for (let i=1;i<path.points.length/3;i++) {
+          const x = path.points[i*3], y = path.points[i*3+1], z = path.points[i*3+2];
+          if ((x-hit.x)**2+(z-hit.z)**2 > hit.r**2 || y+body.h < hit.bottom || y-body.h > hit.top) continue;
+          // The walking surface under it nearest its storey, ramps included.
+          const cut = i*flightStep;
+          let floor = diver.y ?? 0, best = Infinity;
+          for (const s of g.surfaces) {
+            if (Math.abs(hit.x-s.x) > s.w/2 || Math.abs(hit.z-s.z) > s.d/2) continue;
+            const h = surfaceHeight(s,hit.x,hit.z);
+            if (h <= y && Math.abs(h-(diver.y ?? 0)) < best) { best = Math.abs(h-(diver.y ?? 0)); floor = h; }
+          }
+          rest = {x:hit.x,y:floor,z:hit.z};
+          flight!.cut = cut;
+          flight!.d = cut+Math.sqrt(2*Math.max(0,y-body.h-floor)/gravity);
+          diver.incoming = diver.incoming === undefined ? cut : Math.min(diver.incoming,cut);
           break;
         }
       }

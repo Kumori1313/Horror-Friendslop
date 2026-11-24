@@ -1,4 +1,5 @@
-import type { Layout } from './layout.ts';
+import { anchor, connections, type Layout } from './layout.ts';
+import { roomTemplates } from './room-templates.ts';
 import { canTake, clearAt, freeSlot } from './room.ts';
 import type { Flight } from './flight.ts';
 import { doorReach, outdoors, placeOf } from './places.ts';
@@ -42,14 +43,61 @@ export interface Mission {
   contract: Contract;
   haul: Haul[];
   awake?: boolean;
-  diver: { mode: 'dormant' | 'warning' | 'strike' | 'quiet' | 'tracking'; bay: string; seconds: number };
+  diver: Diver;
   down: { id: number; seconds: number }[];
 }
-export const strikeRadius = 2.4;
-// Once the bell rings, every creature is enraged: the Diver warns sooner,
-// rests less, moves through the wiring faster, and strikes a wider circle.
+// The Bell Diver clings to the ceiling of one room (`bay`), above x, z, over
+// the storey whose floor is at y. It drags itself one room connection at a
+// time through the ceiling wiring: each move starts at `from` and takes
+// `travel` seconds, counting down. Once it has arrived and an operator stands
+// on its storey of its room, `drop` counts down (the wait); leaving resets it.
+// At zero it falls on its chain (`falling`), committed: whoever is beneath it
+// when it lands goes down (`strike`, on the floor), then it climbs back
+// (`rising`) and rests (`quiet`). `seconds` is the time to its next move
+// while it hangs, or what remains of the current mode. Every move to a new
+// room or zone counts in `moves`, with the chain clip the host chose for it in
+// `clip`. It strikes only its zone of the room (`zoneAt`). A thrown item that
+// reaches it lands after `incoming` seconds and stuns it for `stun` seconds:
+// no drops, no moves, and a fall in progress turns into a climb.
+export interface Diver {
+  mode: 'dormant' | 'hanging' | 'falling' | 'strike' | 'rising' | 'quiet';
+  bay: string; seconds: number;
+  x?: number; y?: number; z?: number;
+  from?: {bay: string; x: number; y: number; z: number}; travel?: number;
+  drop?: number; moves?: number; clip?: number;
+  stun?: number; incoming?: number;
+}
+export const stunTime = 6;
+// The volume a thrown item has to reach to hit it: its bell and upper tines
+// under the ceiling, or the whole drop while it falls, lies or climbs.
+export function diverBody(layout: Layout, diver: Diver) {
+  const room = layout.rooms.find(r => r.id === diver.bay);
+  if (!room || diver.mode === 'dormant') return;
+  const a = anchor(room), top = room.y+roomTemplates[room.template].height;
+  const low = diver.mode === 'falling' || diver.mode === 'strike' || diver.mode === 'rising';
+  return {x:diver.x ?? a.x,z:diver.z ?? a.z,r:0.7,bottom:low ? diver.y ?? a.y : top-1.3,top};
+}
+// Once the bell rings, every creature is enraged: the Diver waits and falls
+// sooner, moves faster, rests less, and chases from one connection farther.
+// From someone stepping beneath it to the impact takes wait + fall.
 export const pace = (mission: Mission) => mission.enraged ?
-  {warning:2.5,quiet:5,step:0.7,radius:3} : {warning:4,quiet:9,step:1.1,radius:strikeRadius};
+  {wait:1.75,fall:0.75,step:1.4,travel:0.9,wander:5.6,rise:2.5,quiet:1.5,reach:3} :
+  {wait:3,fall:1,step:2,travel:1.2,wander:8,rise:2.5,quiet:3.5,reach:2};
+// Lying on the floor after a strike.
+export const sprawl = 1.5;
+// The chains of each move carry up to two room connections from the room it
+// enters, that room included, and no farther.
+export const hearingRange = 2;
+export const hears = (layout: Layout, room: string | undefined, diver: Diver) =>
+  diver.mode !== 'dormant' && room !== undefined && connections(layout)(room,diver.bay) <= hearingRange;
+// A listener in `room` who has heard the Diver's moves up to `heard` hears
+// the clip of a newer move once. Undefined `heard` means the listener just
+// joined or refreshed, so nothing replays.
+export function listen(layout: Layout, room: string | undefined, diver: Diver, heard: number | undefined) {
+  const moves = diver.moves ?? 0;
+  const clip = heard !== undefined && moves > heard && hears(layout,room,diver) ? diver.clip ?? 0 : undefined;
+  return {clip,heard:moves};
+}
 // Each operator who doesn't make it out keeps 80% of what remains, so the
 // crew keeps gross × 0.8^lost and never falls to nothing in a larger lobby.
 export const keptPerLoss = 0.8;

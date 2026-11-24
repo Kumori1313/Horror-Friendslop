@@ -80,12 +80,12 @@ test('the flashlight takes a hotbar slot, the first pickup wakes the Diver, and 
 
 test('either operator can ring the bell, once: it opens the rift and enrages the Diver', () => {
   const {sim,mission,player,run} = crew();
-  assert.equal(pace(mission()).warning,4);
+  assert.equal(pace(mission()).wait+pace(mission()).fall,4);
   ring(sim,2);
   assert.deepEqual([mission().bell,mission().enraged],[2,true]);
   const spot = riftSpot(sim.layout!.seed);
   assert.deepEqual(mission().rift,{x:spot.x,z:spot.z,seconds:riftOpen});
-  assert.deepEqual(pace(mission()),{warning:2.5,quiet:5,step:0.7,radius:3},'faster and wider for the rest of the expedition');
+  assert.deepEqual(pace(mission()),{wait:1.75,fall:0.75,step:1.4,travel:0.9,wander:5.6,rise:2.5,quiet:1.5,reach:3},'faster, and chasing from farther, for the rest of the expedition');
   run(1);
   ring(sim,1);
   assert.equal(mission().bell,2,'a second ring changes nothing');
@@ -200,7 +200,7 @@ test('if nobody escapes, the crew is wiped and a fresh contract follows with not
   const room = sim.layout!.rooms.find(r => r.kind !== 'intake' && r.kind !== 'corridor')!;
   for (const p of sim.state.players) Object.assign(p,{...anchor(room),feetY:anchor(room).y});
   mission().awake = true;
-  mission().diver = {mode:'warning',bay:room.id,seconds:0.05};
+  mission().diver = {mode:'falling',bay:room.id,seconds:0.05,y:anchor(room).y};
   run(0.4);
   assert.deepEqual([mission().stage,mission().outcome],['settled','wipe']);
 });

@@ -50,10 +50,12 @@ export function drawMap(canvas: HTMLCanvasElement, layout: Layout, state: Snapsh
   }
   const diver = state.mission?.diver;
   const lair = diver && byId.get(diver.bay);
-  if (lair && ['tracking','warning','strike'].includes(diver.mode)) {
-    const a = anchor(lair);
-    ctx.strokeStyle = '#ff714d'; ctx.lineWidth = 2;
-    ctx.strokeRect(x(a.x,a.y)-8,z(a.z)-8,16,16);
+  if (lair && diver.mode !== 'dormant') {
+    // Where it hangs; filled from the start of a drop until it lands.
+    const a = anchor(lair), dx = diver.x ?? a.x, dy = diver.y ?? a.y, dz = diver.z ?? a.z;
+    ctx.strokeStyle = ctx.fillStyle = '#ff714d'; ctx.lineWidth = 2;
+    if (diver.drop !== undefined || diver.mode === 'falling' || diver.mode === 'strike') ctx.fillRect(x(dx,dy)-6,z(dz)-6,12,12);
+    else ctx.strokeRect(x(dx,dy)-6,z(dz)-6,12,12);
   }
   for (const p of state.players) {
     const px = x(p.x,p.feetY ?? 0), pz = z(p.z);

@@ -30,9 +30,10 @@ export function missionHud(preferences: Preferences, operator = (id: number) => 
     captionUntil = performance.now()+2500;
   }
   // The Bell Diver's chains, fetched and decoded once, reused for every move.
-  // Kept subtle. The second clip is recorded about 3 dB quieter than the first.
+  // Kept subtle, and balanced by ear in playtests: the short pickup clip
+  // sounds quieter than the long pull, so it plays about 4 dB louder.
   const chains: (AudioBuffer | undefined)[] = [];
-  const chainLevel = [0.2,0.28];
+  const chainLevel = [0.32,0.28];
   function enableSound() {
     if (!window.AudioContext) return;
     const first = !audio;

@@ -5,13 +5,13 @@ import { groundAt, outdoors, riftZones } from '../src/places.ts';
 import { climbable, fieldGrade, maxGrade } from '../src/room-templates.ts';
 import { route } from '../src/route.ts';
 
-test('every map has its riverbed and fords, ruins, wrecks and trails, clear of the building and the arrival', () => {
+test('every map has its riverbed and fords, plenty of ruins and wrecks of several kinds, and trails, clear of the building and the arrival', () => {
   for (let seed=1;seed<=24;seed++) {
     const map = outdoors(seed), b = map.building;
     assert.ok(map.fords.length >= 2 && map.fords.length <= 3,'seed '+seed+': '+map.fords.length+' fords');
-    assert.ok(map.ruins.length >= 2 && map.ruins.length <= 3,'seed '+seed+': '+map.ruins.length+' ruins');
-    assert.ok(map.wrecks.length >= 2 && map.wrecks.length <= 4,'seed '+seed+': '+map.wrecks.length+' wrecks');
-    assert.ok(map.wrecks.some(w => w.lit),'seed '+seed+': a wreck keeps a lamp');
+    assert.ok(map.ruins.length >= 3 && map.ruins.length <= 6,'seed '+seed+': '+map.ruins.length+' ruins');
+    assert.ok(map.wrecks.length >= 6 && map.wrecks.length <= 10,'seed '+seed+': '+map.wrecks.length+' wrecks');
+    assert.ok(new Set(map.wrecks.map(w => w.kind)).size >= 4,'seed '+seed+': several kinds of wreck');
     assert.equal(map.trails.length,map.doors.length,'a trail to every door');
     for (const t of map.trails) assert.ok(t.length > 20,'seed '+seed+': a trail');
     for (const at of [...map.ruins,...map.wrecks]) {

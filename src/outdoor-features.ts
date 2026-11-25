@@ -77,10 +77,10 @@ const block = (f: Heightfield, x: number, z: number, w: number, d: number, tall:
 // at heights from knee to over the head, with rubble about.
 export interface Ruin { x: number; z: number; w: number; d: number; pieces: Block[]; rubble: Block[] }
 export function placeRuins(next: Rng, f: Heightfield, half: number, clear: (x: number, z: number, r: number) => boolean, claim: (x: number, z: number, r: number) => void): Ruin[] {
-  const ruins: Ruin[] = [], want = next() < 0.5 ? 2 : 3;
-  for (let tries=0;tries<200 && ruins.length < want;tries++) {
-    const w = 8+Math.round(next()*3), d = 6+Math.round(next()*2), x = (next()-0.5)*(2*half-40), z = (next()-0.5)*(2*half-40);
-    if (!clear(x,z,Math.hypot(w,d)/2+4) || !gentle(f,x,z,w,d,2,0.45)) continue;
+  const ruins: Ruin[] = [], want = 4+Math.floor(next()*3);
+  for (let tries=0;tries<500 && ruins.length < want;tries++) {
+    const w = 8+Math.round(next()*3), d = 6+Math.round(next()*2), x = (next()-0.5)*(2*half-36), z = (next()-0.5)*(2*half-36);
+    if (!clear(x,z,Math.hypot(w,d)/2+2.5) || !gentle(f,x,z,w,d,2,0.45)) continue;
     const pieces: Block[] = [], door = Math.floor(next()*4);
     const sides = [[x-w/2,z-d/2,x+w/2,z-d/2],[x+w/2,z-d/2,x+w/2,z+d/2],[x+w/2,z+d/2,x-w/2,z+d/2],[x-w/2,z+d/2,x-w/2,z-d/2]];
     sides.forEach(([x0,z0,x1,z1],side) => {
@@ -99,40 +99,47 @@ export function placeRuins(next: Rng, f: Heightfield, half: number, clear: (x: n
       rubble.push(block(f,rx,rz,s,s*0.8,0.3+next()*0.4));
     }
     ruins.push({x,z,w,d,pieces,rubble});
-    claim(x,z,Math.hypot(w,d)/2+4);
+    claim(x,z,Math.hypot(w,d)/2+2.5);
   }
   return ruins;
 }
 
-// Wrecked machinery, square to the map so it collides as boxes: a toppled
-// crane, a tank lying on its side, a derelict truck, a stack of pipes. Some
-// still carry a faint warning lamp.
-export type WreckKind = 'crane' | 'tank' | 'truck' | 'pipes';
-export interface Wreck { kind: WreckKind; x: number; z: number; y: number; along: 'x' | 'z'; lit: boolean; boxes: Block[] }
+// Wrecked machinery and debris, square to the map so it collides as boxes:
+// a toppled crane, a tank on its side, a derelict truck, a stack of pipes, a
+// shipping container, a fallen pylon, a standing silo, a cluster of barrels,
+// a collapsed shed, a car. Containers, barrels and cars may repeat.
+export type WreckKind = 'crane' | 'tank' | 'truck' | 'pipes' | 'container' | 'pylon' | 'silo' | 'barrels' | 'shed' | 'car';
+export interface Wreck { kind: WreckKind; x: number; z: number; y: number; along: 'x' | 'z'; boxes: Block[] }
+// Parts along the wreck's length (u) and across it (v): centre, length, width, height.
+export const wreckParts: Record<WreckKind,[number,number,number,number,number][]> = {
+  crane:[[0,0,13,0.9,0.9],[7.8,0,3,2.8,2.6],[-6.8,0,1.6,2.2,1.4]],
+  tank:[[0,0,7,3,3]],
+  truck:[[0.8,0,6,2.4,2.6],[-3.4,0,2.2,2.4,2.3]],
+  pipes:[[0,0,6,2.2,1.6]],
+  container:[[0,0,6,2.4,2.6]],
+  pylon:[[0,0,14,1.5,1.5],[-7.6,0,2.4,2.4,0.7]],
+  silo:[[0,0,3.8,3.8,6.5]],
+  barrels:[[0,0,2.6,2.6,1]],
+  shed:[[0,1.4,4.4,0.25,2.4],[-2.1,0,0.25,3,2],[0.6,-0.4,3.4,2.4,0.35]],
+  car:[[0,0,4.2,1.9,1.4]],
+};
 export function placeWrecks(next: Rng, f: Heightfield, half: number, clear: (x: number, z: number, r: number) => boolean, claim: (x: number, z: number, r: number) => void): Wreck[] {
-  const kinds: WreckKind[] = ['crane','tank','truck','pipes'];
-  for (let i=kinds.length-1;i>0;i--) { const k = Math.floor(next()*(i+1)); [kinds[i],kinds[k]] = [kinds[k],kinds[i]]; }
-  const chosen = kinds.slice(0,next() < 0.5 ? 3 : 4), wrecks: Wreck[] = [];
-  // Parts along the wreck's length (u) and across it (v): centre, size, height.
-  const parts: Record<WreckKind,[number,number,number,number,number][]> = {
-    crane:[[0,0,13,0.9,0.9],[7.8,0,3,2.8,2.6],[-6.8,0,1.6,2.2,1.4]],
-    tank:[[0,0,7,3,3]],
-    truck:[[0.8,0,6,2.4,2.6],[-3.4,0,2.2,2.4,2.3]],
-    pipes:[[0,0,6,2.2,1.6]],
-  };
+  const unique: WreckKind[] = ['crane','tank','truck','pipes','pylon','silo','shed'], common: WreckKind[] = ['container','barrels','car'];
+  for (let i=unique.length-1;i>0;i--) { const k = Math.floor(next()*(i+1)); [unique[i],unique[k]] = [unique[k],unique[i]]; }
+  // Four or five of the big ones, and three to five common pieces.
+  const chosen = [...unique.slice(0,4+Math.floor(next()*2)),...Array.from({length:3+Math.floor(next()*3)},() => common[Math.floor(next()*common.length)])];
+  const wrecks: Wreck[] = [];
   for (const kind of chosen) {
     for (let tries=0;tries<400;tries++) {
-      const along = next() < 0.5 ? 'x' : 'z', x = (next()-0.5)*(2*half-40), z = (next()-0.5)*(2*half-40);
-      const length = Math.max(...parts[kind].map(([u,,l]) => Math.abs(u)+l/2))*2;
-      if (!clear(x,z,length/2+4) || !gentle(f,x,z,along === 'x' ? length : 3,along === 'x' ? 3 : length,1.5,0.45)) continue;
-      const boxes = parts[kind].map(([u,v,l,w,h]) => along === 'x' ? block(f,x+u,z+v,l,w,h) : block(f,x+v,z+u,w,l,h));
-      wrecks.push({kind,x,z,y:lowest(f,x,z,3,3),along,lit:false,boxes});
-      claim(x,z,length/2+4);
+      const along = next() < 0.5 ? 'x' : 'z', x = (next()-0.5)*(2*half-36), z = (next()-0.5)*(2*half-36);
+      const parts = wreckParts[kind], length = Math.max(...parts.map(([u,,l]) => Math.abs(u)+l/2))*2, width = Math.max(...parts.map(([,v,,w]) => Math.abs(v)+w/2))*2;
+      if (!clear(x,z,length/2+2.5) || !gentle(f,x,z,along === 'x' ? length : width,along === 'x' ? width : length,1.5,0.45)) continue;
+      const boxes = parts.map(([u,v,l,w,h]) => along === 'x' ? block(f,x+u,z+v,l,w,h) : block(f,x+v,z+u,w,l,h));
+      wrecks.push({kind,x,z,y:lowest(f,x,z,3,3),along,boxes});
+      claim(x,z,length/2+2.5);
       break;
     }
   }
-  // Two of them still have a lamp.
-  for (const w of wrecks.filter(w => w.kind !== 'pipes').slice(0,2)) w.lit = true;
   return wrecks;
 }
 

@@ -166,8 +166,15 @@ function terrain(map: Outdoors) {
     return new T.Mesh(g,material);
   }
   for (let z0=-half;z0<half;z0+=chunk) for (let x0=-half;x0<half;x0+=chunk) {
-    const lod = new T.LOD();
-    lod.addLevel(mesh(x0,z0,1),0); lod.addLevel(mesh(x0,z0,4),56);
+    // Each chunk sits at its own centre, so it switches to its coarse level
+    // by its own distance from the camera, not the map's.
+    const cx = x0+chunk/2, cz = z0+chunk/2, cy = h(cx,cz), lod = new T.LOD();
+    for (const [step,distance] of [[1,0],[4,60]]) {
+      const m = mesh(x0,z0,step);
+      m.geometry.translate(-cx,-cy,-cz); m.geometry.computeBoundingSphere();
+      lod.addLevel(m,distance);
+    }
+    lod.position.set(cx,cy,cz);
     group.add(lod);
   }
   return group;
@@ -228,34 +235,30 @@ export function buildOutdoors(map: Outdoors, library: Library) {
   // Ruins: broken concrete walls, standing in the ground.
   const concrete = b.surface('concrete');
   for (const r of map.ruins) for (const p of r.pieces) b.box(concrete,0x8c8a80,p.x,p.y+p.h/2,p.z,p.w,p.h,p.d);
-  // Wrecks, rusted through. The lit ones keep a faint lamp, glowing only.
-  const rustMat = new T.MeshStandardMaterial({color:0x6a4a36,roughness:0.85,metalness:0.4,map:rust.map ?? null});
-  const lamps: {mesh: T.Mesh; base: T.Color; phase: number}[] = [];
-  const lampAt = (x: number, y: number, z: number, color: number) => {
-    const m = new T.Mesh(new T.SphereGeometry(0.13,10,6),new T.MeshBasicMaterial({color}));
-    m.position.set(x,y,z); root.add(m); lamps.push({mesh:m,base:new T.Color(color),phase:x*1.7+z});
+  // Wrecks and debris, rusted through: boxes batched with the rest, and
+  // cylinders (tanks, pipes, silos, barrels) as a few merged meshes.
+  const rustMat = new T.MeshStandardMaterial({color:0x6a4a36,roughness:0.85,metalness:0.4,map:rust.map ?? null,side:T.DoubleSide});
+  const cylinders: T.BufferGeometry[] = [];
+  const cylinder = (x: number, y: number, z: number, radius: number, length: number, axis: 'x' | 'y' | 'z', open = false) => {
+    const c = new T.CylinderGeometry(radius,radius,length,14,1,open);
+    if (axis === 'x') c.rotateZ(Math.PI/2); else if (axis === 'z') c.rotateX(Math.PI/2);
+    c.translate(x,y,z); cylinders.push(c);
   };
+  const paint: Partial<Record<string,number>> = {truck:0x5b6b55,container:0x7a3a2c,car:0x4a5560,shed:0x6d665a};
   for (const w of map.wrecks) {
-    const [main] = w.boxes, top = (k: number) => w.boxes[k].y+w.boxes[k].h;
-    if (w.kind === 'tank' || w.kind === 'pipes') {
-      // Cylinders lying along the wreck's length.
-      const length = w.along === 'x' ? main.w : main.d;
-      const rows = w.kind === 'tank' ? [[0,1.5]] : [[-0.55,0.5],[0.55,0.5],[0,0.5]];
-      rows.forEach(([offset,radius],i) => {
-        const cyl = new T.Mesh(new T.CylinderGeometry(radius,radius,length,w.kind === 'tank' ? 20 : 12,1,w.kind === 'pipes'),rustMat);
-        if (w.kind === 'pipes') (cyl.material as T.Material).side = T.DoubleSide;
-        const lift = w.kind === 'tank' ? 1.5 : i < 2 ? 0.5 : 1.36;
-        cyl.position.set(main.x+(w.along === 'z' ? offset : 0),top(0)-main.h+0.3+lift-0.3,main.z+(w.along === 'x' ? offset : 0));
-        cyl.rotation.set(w.along === 'z' ? Math.PI/2 : 0,0,w.along === 'x' ? Math.PI/2 : 0);
-        root.add(cyl);
-      });
-      if (w.lit) lampAt(main.x,top(0)+0.1,main.z,0xff3b2a);
-    } else {
-      // Boxes: the crane's boom, cab and counterweight; the truck's body and cab.
-      w.boxes.forEach((p,i) => b.box(i === 0 && w.kind === 'crane' ? b.surface('grating') : rust,w.kind === 'truck' && i === 0 ? 0x5b6b55 : 0x8a6a52,p.x,p.y+p.h/2,p.z,p.w,p.h,p.d));
-      const cab = w.boxes[1];
-      if (w.lit && cab) lampAt(cab.x,cab.y+cab.h+0.12,cab.z,0xffa236);
-    }
+    const [main] = w.boxes, foot = main.y+0.3, length = w.along === 'x' ? main.w : main.d;
+    if (w.kind === 'tank') cylinder(main.x,foot+1.2,main.z,1.5,length,w.along);
+    else if (w.kind === 'pipes') for (const [offset,lift] of [[-0.55,0.5],[0.55,0.5],[0,1.36]]) cylinder(main.x+(w.along === 'z' ? offset : 0),foot+lift-0.2,main.z+(w.along === 'x' ? offset : 0),0.5,length,w.along,true);
+    else if (w.kind === 'silo') { cylinder(main.x,main.y+main.h/2,main.z,1.85,main.h,'y'); cylinder(main.x,main.y+main.h+0.25,main.z,0.9,0.5,'y'); }
+    // Five upright barrels in two rows.
+    else if (w.kind === 'barrels') for (const [bx,bz] of [[-0.8,-0.5],[0,-0.5],[0.8,-0.5],[-0.4,0.5],[0.4,0.5]]) cylinder(main.x+bx,foot+0.45,main.z+bz,0.32,0.9,'y');
+    else w.boxes.forEach((p,i) => b.box(
+      (w.kind === 'crane' && i === 0) || (w.kind === 'pylon' && i === 0) ? b.surface('grating') : w.kind === 'shed' ? b.surface('wood') : rust,
+      paint[w.kind] ?? 0x8a6a52,p.x,p.y+p.h/2,p.z,p.w,p.h,p.d));
+  }
+  if (cylinders.length) {
+    root.add(new T.Mesh(mergeGeometries(cylinders),rustMat));
+    for (const c of cylinders) c.dispose();
   }
   b.build(root);
   const arrival = rift(0x9b7bff);
@@ -290,11 +293,6 @@ export function buildOutdoors(map: Outdoors, library: Library) {
   return {
     root,seed:map.seed,
     update(time: number, arrivalOpen: boolean, open?: {x: number; y?: number; z: number}, rung = false) {
-      // The wrecks' lamps flicker, now and then going nearly out.
-      for (const l of lamps) {
-        const f = Math.sin(time*3.1+l.phase)*Math.sin(time*7.3+l.phase*2) > 0.6 ? 0.25 : 0.85+0.15*Math.sin(time*11+l.phase);
-        (l.mesh.material as T.MeshBasicMaterial).color.copy(l.base).multiplyScalar(f);
-      }
       arrival.group.visible = arrivalOpen;
       if (arrivalOpen) arrival.spin(time);
       exit.group.visible = pillar.visible = !!open;

@@ -167,7 +167,7 @@ export function outdoors(seed: number): Outdoors {
     const clear = (x: number, z: number, r: number) =>
       !(Math.abs(x-building.x) < building.w/2+14+r && Math.abs(z-building.z-2) < building.d/2+15+r) && Math.hypot(x-ax,z-az) > 16+r &&
       Math.max(Math.abs(x),Math.abs(z))+r < half-16 && river.points.every(p => Math.hypot(p.x-x,p.z-z) > r+riverFloor+9) &&
-      taken.every(t => Math.hypot(t.x-x,t.z-z) > t.r+r+3);
+      taken.every(t => Math.hypot(t.x-x,t.z-z) > t.r+r+1.5);
     const claim = (x: number, z: number, r: number) => { taken.push({x,z,r}); };
     const ruins = placeRuins(pick,ground,half,clear,claim), wrecks = placeWrecks(pick,ground,half,clear,claim);
     for (const r of ruins) {

@@ -6,9 +6,9 @@ import { clearAt } from './room.ts';
 
 // Salvage is part of the facility: every client derives the same items from
 // the layout seed, and snapshots only carry the ones that have moved.
-export type ItemKind = 'valve' | 'gauge' | 'fuse' | 'coil' | 'board' | 'battery' | 'toolbox' | 'bell' | 'cell';
+export type ItemKind = 'valve' | 'gauge' | 'fuse' | 'coil' | 'board' | 'battery' | 'toolbox' | 'bell' | 'cell' | 'flare' | 'baton';
 // Bought, never found: these never spawn in a facility and are worth nothing at the rift.
-export const shopOnly: ItemKind[] = ['cell'];
+export const shopOnly: ItemKind[] = ['cell','flare','baton'];
 // Heavy items throw shorter.
 export const itemKinds: Record<ItemKind,{name: string; value: [number,number]; size: [number,number,number]; color: number; rare?: boolean; heavy?: boolean}> = {
   valve:{name:'Brass valve',value:[15,30],size:[0.36,0.2,0.36],color:0xb08d57},
@@ -21,6 +21,10 @@ export const itemKinds: Record<ItemKind,{name: string; value: [number,number]; s
   bell:{name:'Signal bell',value:[60,90],size:[0.34,0.42,0.34],color:0xd9b44a,rare:true},
   // A spare cell refills the flashlight's battery.
   cell:{name:'Spare cell',value:[0,0],size:[0.12,0.26,0.12],color:0x4fd18b},
+  // A flare burns red for a minute once thrown or dropped.
+  flare:{name:'Flare',value:[0,0],size:[0.07,0.34,0.07],color:0xd8452f},
+  // A stun baton stuns the Bell Diver when it is within arm's reach.
+  baton:{name:'Stun baton',value:[0,0],size:[0.06,0.62,0.06],color:0x39414a},
 };
 // Half the width and height that a thrown item collides with. The flashlight
 // is the lamp slot's item.

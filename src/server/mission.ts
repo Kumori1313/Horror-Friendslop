@@ -63,8 +63,9 @@ function strike(state: Snapshot, mission: Mission, p: Player) {
 
 // A thrown item reached it: no drops or moves for `stunTime` seconds, and a
 // fall in progress turns into a climb from where it is.
-function stun(mission: Mission) {
+export function stun(mission: Mission) {
   const diver = mission.diver, p = pace(mission);
+  if (diver.mode === 'dormant') return;
   diver.stun = stunTime;
   delete diver.drop;
   if (diver.mode === 'falling') {
@@ -142,6 +143,17 @@ function hunt(layout: Layout, state: Snapshot, mission: Mission, dt: number, loc
   }
 }
 
+// When an expedition ends, gear comes home only if it is there already or
+// carried by an operator who escaped; the rest is lost, the flashlight too.
+// The facility's salvage was sold or is lost with it.
+function bringHome(state: Snapshot, mission: Mission) {
+  const escaped = mission.escaped ?? [];
+  const safe = (owner: number | null, place: string) => owner !== null ? escaped.includes(owner) : place === 'home';
+  mission.haul = mission.haul.filter(h => h.kind && !h.used && !h.banked && safe(h.owner,placeOf(h)));
+  const lamp = state.lamp;
+  if (!lamp.lost && !lamp.homeward && !safe(lamp.owner,placeOf(lamp))) Object.assign(lamp,{lost:true,on:false});
+}
+
 // Sell what went into the rift. Every operator who didn't escape, whether
 // dead, downed, or outside when it closed, multiplies the haul by 0.8; what
 // they carried is lost.
@@ -156,7 +168,7 @@ export function settle(layout: Layout, state: Snapshot, mission: Mission) {
   const receipt: Receipt = {expedition:c.index,items:sold.map(i => ({kind:i.kind,value:i.value})),gross,deduction:gross-credited,credited,lost};
   c.receipts.push(receipt);
   c.credited += receipt.credited;
-  mission.haul = [];
+  bringHome(state,mission);
   mission.down = [];
   mission.diver = {mode:'dormant',bay:'',seconds:0};
   if (c.credited >= c.quota) { mission.stage = 'won'; mission.outcome = 'quota'; }
@@ -171,7 +183,8 @@ export function settle(layout: Layout, state: Snapshot, mission: Mission) {
 export function endExpedition(layout: Layout, state: Snapshot, mission: Mission) {
   if (mission.escaped?.length) return settle(layout,state,mission);
   mission.stage = 'settled'; mission.outcome = 'wipe';
-  mission.haul = []; mission.down = [];
+  bringHome(state,mission);
+  mission.down = [];
   mission.diver = {mode:'dormant',bay:'',seconds:0};
   Object.assign(state.lamp,{owner:null,stowed:false});
 }

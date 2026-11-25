@@ -123,7 +123,7 @@ export function createScene(canvas: HTMLCanvasElement, generated = false) {
     let m = itemMaterials.get(kind);
     if (!m) {
       const k = itemKinds[kind], metal = kind !== 'board' && kind !== 'toolbox';
-      m = new T.MeshStandardMaterial({color:k.color,roughness:metal ? 0.32 : 0.6,metalness:metal ? 0.85 : 0.2,envMap:metal ? library?.reflections ?? null : null,emissive:k.color,emissiveIntensity:kind === 'cell' ? 0.55 : 0.08,envMapIntensity:0.3});
+      m = new T.MeshStandardMaterial({color:k.color,roughness:metal ? 0.32 : 0.6,metalness:metal ? 0.85 : 0.2,envMap:metal ? library?.reflections ?? null : null,emissive:k.color,emissiveIntensity:kind === 'cell' ? 0.55 : kind === 'flare' ? 0.45 : 0.08,envMapIntensity:0.3});
       itemMaterials.set(kind,m);
     }
     return m;
@@ -208,6 +208,13 @@ export function createScene(canvas: HTMLCanvasElement, generated = false) {
     scene.add(light,light.target);
     return light;
   });
+  // A baton swing: a quick chop down and back, 0.3 s. Your own starts when
+  // you press; partners' when their swing count rises.
+  let ownSwing = -Infinity;
+  const swungAt = new Map<number,{n: number; at: number}>();
+  const chop = (start: number, now: number) => { const f = (now-start)/300; return f >= 0 && f < 1 ? -Math.sin(f*Math.PI)*1.3 : 0; };
+  // Lit flares: a fixed pool of red point lights, so shaders never change.
+  const flareLights = Array.from({length:2},() => { const light = new T.PointLight(0xff5a3a,0,9,1.2); scene.add(light); return light; });
   function lightRooms(lamps: Map<string,{x: number; y: number; z: number; height: number; reach: number}> | undefined, drawn: Set<string> | undefined, dt: number) {
     const near = lamps ? [...lamps].filter(([room]) => !drawn || drawn.has(room))
       .sort((a,b) => camera.position.distanceToSquared(new T.Vector3(a[1].x,a[1].y,a[1].z))-camera.position.distanceToSquared(new T.Vector3(b[1].x,b[1].y,b[1].z)))
@@ -545,7 +552,7 @@ export function createScene(canvas: HTMLCanvasElement, generated = false) {
             const g = placeGeometry(placeOf(p));
             const solids = g ? obstaclesAt(g,p.feetY ?? 0,placeOf(p) === 'inside' ? state.opened : []) : walls;
             const at = heldLamp({...p,x:camera.position.x,z:camera.position.z,yaw},solids);
-            inHand.position.set(at.x,camera.position.y-1.59+1.18,at.z); inHand.rotation.set(0,yaw,0);
+            inHand.position.set(at.x,camera.position.y-1.59+1.18,at.z); inHand.rotation.set(chop(ownSwing,performance.now()),yaw,0,'YXZ');
           }
         } else {
           let g = people.get(p.id);
@@ -555,7 +562,11 @@ export function createScene(canvas: HTMLCanvasElement, generated = false) {
           const pose = g.getObjectByName('pose')!;
           pose.rotation.x = dead ? -Math.PI/2 : 0;
           pose.position.set(0,dead ? 0.18 : 0,dead ? 0.9 : 0);
-          holdItem(g.getObjectByName('held') as T.Mesh,down || dead ? undefined : heldKind(p));
+          const held = g.getObjectByName('held') as T.Mesh;
+          holdItem(held,down || dead ? undefined : heldKind(p));
+          const swing = swungAt.get(p.id);
+          if (!swing || swing.n !== (p.swings ?? 0)) swungAt.set(p.id,{n:p.swings ?? 0,at:swing ? performance.now() : -Infinity});
+          held.rotation.x = chop(swungAt.get(p.id)!.at,performance.now());
           // Someone in another place jumps rather than glides when they come back.
           if (!sameHere(p)) tracks.delete('p'+p.id);
           g.position.copy(glide('p'+p.id,state.update,p.x,p.feetY ?? 0,p.z,performance.now(),g.position));
@@ -568,7 +579,8 @@ export function createScene(canvas: HTMLCanvasElement, generated = false) {
       const t = previousOwner === l.owner ? blend : 1;
       const now = performance.now();
       const lampWorld = placeGeometry(placeOf(l));
-      torch.visible = sameHere(l);
+      // A flashlight left behind is gone until the crew buys another.
+      torch.visible = sameHere(l) && !l.lost;
       if (l.flight && lampWorld) {
         // A thrown flashlight tumbles end over end, still lit.
         const at = inFlight(lampWorld,placeOf(l) === 'inside' ? state.opened ?? [] : [],'lamp',l.flight,'lamp',{x:l.x,y:l.y-0.14,z:l.z},now);
@@ -594,7 +606,21 @@ export function createScene(canvas: HTMLCanvasElement, generated = false) {
       beam.intensity = (stowed ? 32 : 85)*power; beam.distance = stowed ? 10 : 17; beam.angle = stowed ? 0.5 : 0.43;
       (cone.material as T.MeshBasicMaterial).opacity = (stowed ? 0.02 : 0.045)*power;
       barrel.visible = head.visible = lens.visible = !(stowed && l.owner === self);
-      beam.visible = l.on; cone.visible = l.on && !(stowed && l.owner === self);
+      beam.visible = l.on && !l.lost; cone.visible = l.on && !l.lost && !(stowed && l.owner === self);
+      // Lit flares nearby, in this place: on the floor, in flight, or in hand.
+      const burning = layout && state.mission ? items(layout,state.mission).filter(i => i.kind === 'flare' && state.mission!.haul.find(h => h.id === i.id)?.burn !== undefined && (i.owner === null ? i.place === here : sameHere(state.players.find(q => q.id === i.owner) ?? {}))) : [];
+      const spots = burning.map(i => {
+        const holder = i.owner !== null ? state.players.find(q => q.id === i.owner) : undefined;
+        if (holder) return holder.id === self ? inHand.position.clone() : new T.Vector3(holder.x,(holder.feetY ?? 0)+1.2,holder.z);
+        const g = placeGeometry(i.place);
+        if (i.flight && g) { const at = inFlight(g,i.place === 'inside' ? state.opened ?? [] : [],i.id,i.flight,'flare',i,now); return new T.Vector3(at.x,at.y,at.z); }
+        return new T.Vector3(i.x,i.y+0.15,i.z);
+      }).sort((a,b) => a.distanceToSquared(camera.position)-b.distanceToSquared(camera.position));
+      flareLights.forEach((light,k) => {
+        const at = spots[k];
+        light.intensity = at ? 7*(0.85+0.15*Math.sin(now*0.023+k*2)*Math.sin(now*0.041)) : 0;
+        if (at) light.position.copy(at);
+      });
       lensMat.color.setHex(l.on ? 0xffe7a6 : 0x646951);
       previousOwner = l.owner;
       // Draw the camera's room and the rooms visible through its doorways.
@@ -672,5 +698,5 @@ export function createScene(canvas: HTMLCanvasElement, generated = false) {
     camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix();
   }
   resize(); window.addEventListener('resize',resize);
-  return Object.assign(render,{stats,previews});
+  return Object.assign(render,{stats,previews,swing:() => { ownSwing = performance.now(); }});
 }

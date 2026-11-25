@@ -92,3 +92,12 @@ pre { margin-bottom: 0; line-height: 1.5 }
 #hotbar .battery { position: absolute; left: 5px; right: 5px; bottom: 4px; height: 4px; background: #000a; border-radius: 2px; overflow: hidden; pointer-events: none }
 #hotbar .battery i { display: block; height: 100%; background: #9bd98a }
 #hotbar .battery.low i { background: #e2694a }
+/* The supply terminal at home. */
+#shop { width: min(25rem,92vw); max-height: 90dvh; overflow: auto; border: 1px solid #ac9c72; color: #f2efe3; background: #14211e; padding: 1.25rem }
+#shop::backdrop { background: #070c0cc9 }
+#shop-funds { font-family: monospace; color: #e7d6ad }
+#wares { list-style: none; padding: 0; margin: .8rem 0 }
+#wares li { display: grid; grid-template-columns: 1fr auto; gap: .2rem .8rem; padding: .7rem 0; border-top: 1px solid #ffffff1a }
+#wares strong { color: #fff3d8 }
+#wares small { grid-column: 1; color: #b9c4bd }
+#wares button { grid-column: 2; grid-row: 1 / span 2; align-self: center; min-width: 5.5rem }

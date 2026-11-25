@@ -14,24 +14,30 @@ export interface Input { forward: number; right: number; yaw: number; pitch: num
 // `place` is where the operator is (see places.ts). `transit` counts moves
 // between places and gives the heading to face on arrival, so the client can
 // turn its own view.
-export interface Player extends Point { feetY?: number; connected: boolean; id: number; yaw: number; pitch: number; slots?: (string | null)[]; hand?: number; place?: Place; transit?: {n: number; yaw: number} }
+// `swings` counts baton swings, so partners can play each one.
+export interface Player extends Point { feetY?: number; connected: boolean; id: number; yaw: number; pitch: number; slots?: (string | null)[]; hand?: number; place?: Place; transit?: {n: number; yaw: number}; swings?: number }
 // A carried flashlight is `stowed` (clipped to the chest, dimmer) when its
 // holder has another slot selected. `flight` is set while it is thrown.
 // `homeward` marks a flashlight thrown into the exit rift: it goes home once its flight ends.
 // `charge` is the battery left, in whole seconds switched on (missing means full).
-export interface Lamp extends Point { owner: number | null; on: boolean; y: number; yaw: number; pitch: number; stowed?: boolean; flight?: Flight; place?: Place; homeward?: boolean; charge?: number }
+// `lost`: left behind at the end of an expedition; the crew must buy another.
+export interface Lamp extends Point { owner: number | null; on: boolean; y: number; yaw: number; pitch: number; stowed?: boolean; flight?: Flight; place?: Place; homeward?: boolean; charge?: number; lost?: boolean }
 // A full battery lasts six minutes switched on; clipped on, it drains at half rate.
 export const batteryLife = 360;
 export const chargeOf = (lamp: Lamp) => lamp.charge ?? batteryLife;
 export interface Snapshot { round: string; update: number; players: Player[]; lamp: Lamp; opened?: string[]; mission?: Mission }
 // `take` picks up the nearest item, the flashlight included; `drop` and
 // `throw` act on the selected slot; `select` chooses a slot.
-// `load` puts the selected spare cell into the flashlight its holder carries.
-export type Action = 'take' | 'drop' | 'throw' | 'select' | 'toggle' | 'load' | 'open-door' | 'operate' | 'next';
-export const actions: Action[] = ['take','drop','throw','select','toggle','load','open-door','operate','next'];
+// `load` puts the selected spare cell into the flashlight its holder carries;
+// `buy` purchases `Command.buy` at the home terminal; `swing` swings a baton.
+export type Action = 'take' | 'drop' | 'throw' | 'select' | 'toggle' | 'load' | 'buy' | 'swing' | 'open-door' | 'operate' | 'next';
+export const actions: Action[] = ['take','drop','throw','select','toggle','load','buy','swing','open-door','operate','next'];
+// What the home terminal sells: an item, or a replacement flashlight.
+export type Ware = 'cell' | 'flare' | 'lamp' | 'baton';
+export const wares: Ware[] = ['cell','flare','lamp','baton'];
 // A throw's aim and strength (0 to 1), and the slot for `select`.
 export interface Aim { yaw: number; pitch: number; power: number }
-export interface Command { slot?: number; aim?: Aim }
+export interface Command { slot?: number; aim?: Aim; buy?: Ware }
 export const hotbarSize = 4;
 export const lampSlot = 'lamp';
 export const slotsOf = (p: Player): (string | null)[] => p.slots ?? Array(hotbarSize).fill(null);
@@ -42,8 +48,9 @@ export function freeSlot(p: Player) {
   return slots[hand] === null ? hand : slots.indexOf(null);
 }
 // Keep only well-formed command fields from the network.
-export function command(raw: {slot?: unknown; aim?: unknown}): Command {
+export function command(raw: {slot?: unknown; aim?: unknown; buy?: unknown}): Command {
   const out: Command = {};
+  if (wares.includes(raw.buy as Ware)) out.buy = raw.buy as Ware;
   if (Number.isInteger(raw.slot) && (raw.slot as number) >= 0 && (raw.slot as number) < hotbarSize) out.slot = raw.slot as number;
   const aim = raw.aim as Aim | undefined;
   if (aim && [aim.yaw,aim.pitch,aim.power].every(Number.isFinite)) {
@@ -72,7 +79,7 @@ export function clearAt(x: number, z: number, radius: number, obstacles: readonl
 }
 
 export function canTake(p: Player, lamp: Lamp, obstacles: readonly Rect[] = walls) {
-  if ((lamp.place ?? 'inside') !== (p.place ?? 'inside')) return false;
+  if (lamp.lost || (lamp.place ?? 'inside') !== (p.place ?? 'inside')) return false;
   if (p.feetY !== undefined && Math.abs(lamp.y-0.14-p.feetY)>1) return false;
   if (lamp.owner !== null || lamp.flight || Math.hypot(p.x - lamp.x, p.z - lamp.z) > 2 || freeSlot(p) < 0) return false;
   for (let i = 1; i <= 12; i++) {

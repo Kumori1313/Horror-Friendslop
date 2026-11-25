@@ -2,9 +2,9 @@ import { anchor, connections, type Layout } from './layout.ts';
 import { roomTemplates } from './room-templates.ts';
 import { canTake, clearAt, freeSlot } from './room.ts';
 import type { Flight } from './flight.ts';
-import { doorReach, outdoors, placeOf } from './places.ts';
+import { doorReach, home, outdoors, placeOf } from './places.ts';
 import type { Place } from './places.ts';
-import type { Player, Point, Snapshot } from './room.ts';
+import type { Player, Point, Snapshot, Ware } from './room.ts';
 import type { Point3 } from './room-templates.ts';
 import type { Rect } from './layout.ts';
 import { itemKinds, spawnSalvage } from './salvage.ts';
@@ -20,14 +20,52 @@ export interface Receipt {
   expedition: number; items: {kind: ItemKind; value: number}[];
   gross: number; deduction: number; credited: number; lost: number;
 }
-export interface Contract { seed: number; expeditions: number; index: number; layout: number; quota: number; credited: number; receipts: Receipt[] }
+// `spent` is what the crew has bought; the wallet is credited - spent, while
+// the quota counts credited sales only. `bought` numbers bought items.
+export interface Contract { seed: number; expeditions: number; index: number; layout: number; quota: number; credited: number; receipts: Receipt[]; spent?: number; bought?: number }
+export const wallet = (c: Contract) => c.credited-(c.spent ?? 0);
+// The home terminal's prices, and what each ware is for.
+export const prices: Record<Ware,number> = {cell:40,flare:20,lamp:80,baton:100};
+export const wareInfo: Record<Ware,{name: string; about: string}> = {
+  cell:{name:'Spare cell',about:'Refills the flashlight. Select it while carrying the flashlight and press F.'},
+  flare:{name:'Flare',about:'Throw or drop it to light: a red light for 60 seconds.'},
+  lamp:{name:'Replacement flashlight',about:'Only when the flashlight was left behind. Arrives with a full battery.'},
+  baton:{name:'Stun baton',about:'Swing it (T or click) to stun the Bell Diver for 6 s when it is within reach.'},
+};
 // Salvage that has left its spawn: carried (`owner`), dropped, thrown, or
 // banked in the exit rift. A thrown item's x, y and z are where it will come
 // to rest; `flight` is set until it gets there. A banked item went into the
 // rift, thrown or carried by an operator who escaped.
 // `used`: a spare cell loaded into the flashlight, gone for good. `kind`: a
 // bought item, which has no spawn spot in the facility to say what it is.
-export interface Haul extends Point3 { id: string; owner: number | null; banked?: boolean; flight?: Flight; place?: Place; used?: boolean; kind?: ItemKind }
+// `burn`: a lit flare's seconds left. `homeward`: bought gear thrown into the
+// exit rift, which turns up at home when its flight ends.
+export interface Haul extends Point3 { id: string; owner: number | null; banked?: boolean; flight?: Flight; place?: Place; used?: boolean; kind?: ItemKind; burn?: number; homeward?: boolean }
+export const flareTime = 60;
+// Where bought gear is laid out at home: a row in front of the terminal.
+export function deliverySpot(mission: Mission) {
+  const t = home().terminal;
+  for (let i=0;i<12;i++) {
+    const spot = {x:t.x+1.4+Math.floor(i/5)*0.55,y:0,z:t.z-1+(i%5)*0.5};
+    if (!mission.haul.some(h => h.owner === null && placeOf(h) === 'home' && Math.hypot(h.x-spot.x,h.z-spot.z) < 0.3)) return spot;
+  }
+  return {x:t.x+1.4,y:0,z:t.z};
+}
+// Where the Bell Diver's bell hangs now, from the ceiling or lowered on its
+// chain, as drawn: the stun baton has to reach it.
+export function bellSpan(layout: Layout, diver: Diver, mission: Mission) {
+  const room = layout.rooms.find(r => r.id === diver.bay);
+  if (!room || diver.mode === 'dormant') return;
+  const a = anchor(room), top = room.y+roomTemplates[room.template].height, floor = diver.y ?? a.y, p = pace(mission);
+  const reach = Math.max(0.3,Math.min(1,(top-floor-2.1-0.62)/1.2)), depth = Math.max(0,top-floor-0.62-1.2*reach);
+  let lowered = 0;
+  if (diver.mode === 'falling') lowered = depth*(1-Math.max(0,diver.seconds)/p.fall)**2;
+  else if (diver.mode === 'strike') lowered = depth;
+  else if (diver.mode === 'rising') { const f = Math.min(1,Math.max(0,diver.seconds)/p.rise); lowered = depth*f*f*(3-2*f); }
+  return {x:diver.x ?? a.x,z:diver.z ?? a.z,bottom:top-0.7-lowered,top:top-lowered};
+}
+// A baton swing reaches 1.7 m ahead and 2.1 m above the swinger's feet.
+export const batonReach = {ahead:1.7,up:2.1};
 export interface Mission {
   solo?: boolean;
   stage: Stage;
@@ -151,18 +189,22 @@ export function collectable(layout: Layout, mission: Mission, p: Player, obstacl
 // What **E** picks up: the flashlight or the nearest salvage, whichever is closer.
 export function nearestPickup(layout: Layout | undefined, state: Snapshot, p: Player, obstacles: readonly Rect[]): {lamp: true} | {item: Item} | undefined {
   const mission = state.mission;
-  const item = layout && mission && mission.stage === 'explore' ? collectable(layout,mission,p,obstacles) : undefined;
+  // Between expeditions, bought gear can be picked up at home.
+  const item = layout && mission && (mission.stage === 'explore' || mission.stage === 'home') ? collectable(layout,mission,p,obstacles) : undefined;
   const light = canTake(p,state.lamp,obstacles);
   if (light && (!item || distance(state.lamp,p) <= distance(item,p))) return {lamp:true};
   if (item) return {item};
 }
 
-export type Task = { kind: 'revive' | 'ring'; label: string };
+export type Task = { kind: 'revive' | 'ring' | 'shop'; label: string };
 // Out of the expedition: escaped through the rift, or dead.
 export const gone = (mission: Mission, id: number) => !!mission.escaped?.includes(id) || !!mission.dead?.includes(id);
 export function assignment(layout: Layout, state: Snapshot, player: Player, obstacles: readonly Rect[]): Task | undefined {
   const mission = state.mission;
-  if (!mission || mission.stage !== 'explore' || !player.connected || mission.down.some(d => d.id === player.id) || gone(mission,player.id)) return;
+  if (!mission || !player.connected) return;
+  // The home terminal sells gear between expeditions.
+  if (mission.stage === 'home' && placeOf(player) === 'home' && distance(player,home().terminal) <= 2.1) return {kind:'shop',label:'Open the supply terminal'};
+  if (mission.stage !== 'explore' || mission.down.some(d => d.id === player.id) || gone(mission,player.id)) return;
   const partner = state.players.find(p => p.id !== player.id);
   const partnerDown = !!partner && mission.down.some(d => d.id === partner.id);
   if (partner?.connected && partnerDown && placeOf(partner) === placeOf(player) && distance(player,partner) <= 1.7 &&

@@ -196,7 +196,7 @@ export function buildFacility(layout: Layout, library: Library) {
     // Room for a few bought items carried in as well.
     const k = itemKinds[kind], count = spawnSalvage(layout).filter(i => i.kind === kind).length+4;
     const metal = kind !== 'board' && kind !== 'toolbox';
-    const mesh = new T.InstancedMesh(Batch.unit,new T.MeshStandardMaterial({color:k.color,roughness:metal ? 0.32 : 0.6,metalness:metal ? 0.85 : 0.2,envMap:metal ? library.reflections ?? null : null,emissive:k.color,emissiveIntensity:kind === 'cell' ? 0.55 : 0.08,envMapIntensity:0.3}),Math.max(1,count));
+    const mesh = new T.InstancedMesh(Batch.unit,new T.MeshStandardMaterial({color:k.color,roughness:metal ? 0.32 : 0.6,metalness:metal ? 0.85 : 0.2,envMap:metal ? library.reflections ?? null : null,emissive:k.color,emissiveIntensity:kind === 'cell' ? 0.55 : kind === 'flare' ? 0.45 : 0.08,envMapIntensity:0.3}),Math.max(1,count));
     mesh.count = 0; mesh.frustumCulled = false; root.add(mesh);
     return [kind,mesh];
   }));

@@ -1,12 +1,12 @@
 import { bindPreferences } from './preferences.ts';
-import { assignment, finished, gone, itemName, nearestPickup } from './mission.ts';
+import { assignment, finished, gone, itemName, nearestPickup, prices, wallet, wareInfo } from './mission.ts';
 import { spawnSalvage, type ItemKind } from './salvage.ts';
 import { missionHud } from './mission-hud.ts';
 import { mountDiagnostics } from './diagnostics.ts';
 import './style.css';
 import { generatorVersion, geometryFor, nearbyDoor, roomAt, roomLabel, solidsAt } from './layout.ts';
 import type { Layout, Geometry } from './layout.ts';
-import { batteryLife, chargeOf, hotbarSize, lampSlot, selected, slotsOf, walls } from './room.ts';
+import { batteryLife, chargeOf, hotbarSize, lampSlot, selected, slotsOf, walls, wares } from './room.ts';
 import { SoloSession } from './solo-session.ts';
 import { CreatorSession, type Crew } from './creator-session.ts';
 import { RoomConnection, type Events } from './connection.ts';
@@ -63,7 +63,35 @@ function start(render: ReturnType<typeof createScene>, mode?: Crew | 'solo', sce
     ? mountDiagnostics(sceneStarted,solo ? undefined : () => { if (state) network?.interrupt(2000); },render.stats)
     : undefined;
   const operate = element<HTMLButtonElement>('operate');
-  operate.onclick = () => { if (playing) connection.action('operate'); };
+  // Q at the home terminal opens the shop; everything else goes to the host.
+  let shopping = false;
+  operate.onclick = () => { if (!playing) return; if (shopping) openShop(); else connection.action('operate'); };
+  const shop = element<HTMLDialogElement>('shop'), wareList = element('wares');
+  const wareButtons = new Map(wares.map(ware => {
+    const li = document.createElement('li'), button = document.createElement('button');
+    button.type = 'button';
+    button.onclick = () => { if (state) connection.action('buy',{buy:ware}); };
+    li.append(Object.assign(document.createElement('strong'),{textContent:wareInfo[ware].name}),button,Object.assign(document.createElement('small'),{textContent:wareInfo[ware].about}));
+    wareList.append(li);
+    return [ware,button];
+  }));
+  function showShop(s: Snapshot) {
+    const c = s.mission?.contract;
+    if (!c) return;
+    element('shop-funds').textContent = 'Wallet '+wallet(c)+'   ·   Quota '+c.credited+' of '+c.quota;
+    for (const [ware,button] of wareButtons) {
+      const unavailable = ware === 'lamp' && !s.lamp.lost;
+      button.textContent = unavailable ? 'Not needed' : 'Buy · '+prices[ware];
+      button.disabled = unavailable || wallet(c) < prices[ware] || s.mission?.stage !== 'home';
+    }
+  }
+  function openShop() {
+    if (!state || shop.open) return;
+    pause();
+    if (document.pointerLockElement) document.exitPointerLock();
+    showShop(state);
+    shop.showModal();
+  }
   let playing = false;
   const keys = new Set<string>();
   let touchMode = matchMedia('(pointer: coarse)').matches;
@@ -149,7 +177,10 @@ function start(render: ReturnType<typeof createScene>, mode?: Crew | 'solo', sce
   const power = () => charging === undefined ? 0 : Math.min(1,(performance.now()-charging)/900);
   function startThrow() {
     const p = state?.players.find(player => player.id === id);
-    if (!playing || !p || !geometry || !selected({...p,hand:handOf(p)}) || charging !== undefined) return;
+    const item = p && selected({...p,hand:handOf(p)});
+    // A stun baton swings at once instead of being thrown.
+    if (playing && item && kindOf(item) === 'baton') { act('swing'); render.swing(); return; }
+    if (!playing || !p || !geometry || !item || charging !== undefined) return;
     charging = performance.now();
     charge.hidden = false;
   }
@@ -297,6 +328,8 @@ function start(render: ReturnType<typeof createScene>, mode?: Crew | 'solo', sce
     const task = layout && assignment(layout,s,p,solids);
     operate.hidden = !task;
     if (task) operate.textContent = task.label;
+    shopping = task?.kind === 'shop';
+    if (shop.open) showShop(s);
     const mission = s.mission, active = !down && !finished(mission?.stage) && mission?.stage !== 'settled';
     if (hand && (p.hand ?? 0) === hand.slot) hand = undefined;
     const me = {...p,hand:handOf(p)};
@@ -313,12 +346,14 @@ function start(render: ReturnType<typeof createScene>, mode?: Crew | 'solo', sce
       }
       hud.update(layout,s,p,here?.id,!brief.hidden);
     }
-    if (layout) element('sector').textContent = place !== 'inside' ? placeNames[place] : here ? roomLabel(here) : 'Corridor';
+    const funds = place === 'home' && s.mission ? '  ·  Wallet '+wallet(s.mission.contract) : '';
+    if (layout) element('sector').textContent = (place !== 'inside' ? placeNames[place] : here ? roomLabel(here) : 'Corridor')+funds;
     if (touchMode) {
       take.hidden = !pick;
       take.textContent = 'Pick up '+pickName;
       dropButton.hidden = throwButton.hidden = !heldKind || !active;
       if (!geometry) throwButton.hidden = true;
+      throwButton.textContent = heldKind === 'baton' ? 'Swing' : 'Hold to throw';
       toggle.disabled = !!down || !holding || (!l.on && !chargeOf(l) && !loading(s));
       toggle.textContent = loading(s) ? 'Load cell' : l.on ? 'Light off' : 'Light on';
     }
@@ -336,6 +371,8 @@ function start(render: ReturnType<typeof createScene>, mode?: Crew | 'solo', sce
     else if (way) prompt.textContent = (touchMode ? '' : 'R  ')+(way === 'enter' ? 'Enter the facility' : 'Leave the facility');
     else if (door) prompt.textContent = touchMode ? 'Bulkhead within reach' : 'R  Open bulkhead';
     else if (pick) prompt.textContent = touchMode ? pickName[0].toUpperCase()+pickName.slice(1)+' within reach' : 'E  Pick up '+pickName;
+    else if (heldKind === 'baton') prompt.textContent = touchMode ? 'Tap Swing to stun the Bell Diver within reach' : 'Click or T  Swing the baton   ·   X  Drop it';
+    else if (heldKind === 'flare') prompt.textContent = touchMode ? 'Throw or drop the flare to light it' : 'X  Drop to light   ·   Hold T or click  Throw to light';
     else if (heldKind === 'cell') prompt.textContent = holding ? (touchMode ? 'Tap Load cell to recharge the flashlight' : 'F  Load the spare cell into the flashlight   ·   X  Drop it') : 'Carry the flashlight to load this spare cell';
     else if (holding && !chargeOf(l)) prompt.textContent = 'The flashlight is flat. Find a spare cell';
     else if (held) prompt.textContent = touchMode ? 'Holding the '+held : 'X  Drop '+held+'   ·   Hold T or click  Throw'+(holding ? '   ·   F  Switch '+(l.on ? 'off' : 'on') : '');
@@ -343,6 +380,7 @@ function start(render: ReturnType<typeof createScene>, mode?: Crew | 'solo', sce
     else if (place === 'outside' && s.mission?.rift && Math.hypot(p.x-s.mission.rift.x,p.z-s.mission.rift.z) < 6) prompt.textContent = 'Walk into the rift to leave, or throw salvage in';
     else if (riftOpen) prompt.textContent = s.mission?.stage === 'home' ? 'Walk into the rift to start the expedition' : 'Walk into the rift to follow your crew';
     else if (l.owner) prompt.textContent = operator(l.owner) + ' carries the flashlight';
+    else if (l.lost && place === 'home') prompt.textContent = 'The flashlight was left behind. Buy another at the supply terminal';
     else prompt.textContent = '';
     diagnostics?.update(s,layout,network?.metrics,crew,delay);
   }

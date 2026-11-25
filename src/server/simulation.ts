@@ -7,12 +7,12 @@ import { geometryFor, nearbyDoor, playerRadius, spawnPoints } from '../layout.ts
 import type { Layout, Geometry, Rect } from '../layout.ts';
 
 import { obstaclesAt, surfaceAt, surfaceHeight } from '../room-templates.ts';
-import { assignment, catalog, distance, diverBody, finished, gone, nearestPickup } from '../mission.ts';
+import { assignment, batonReach, bellSpan, catalog, deliverySpot, distance, diverBody, finished, flareTime, gone, nearestPickup, prices, wallet } from '../mission.ts';
 import { doorReach, home, intakeDoor, intakeEntry, outdoors, placeOf, riftOpen, riftReach, riftSpot } from '../places.ts';
 import type { Place, Stand } from '../places.ts';
 import { bodyOf, expeditionSeed, itemKinds, spawnSalvage } from '../salvage.ts';
 import { generateLayout } from './generate-layout.ts';
-import { advanceMission, newContract, newMission, wake, wipeSeed } from './mission.ts';
+import { advanceMission, newContract, newMission, stun, wake, wipeSeed } from './mission.ts';
 
 // Operator movement shared by the host and by clients predicting their own
 // operator, so both agree on walls, stairs and closed bulkheads.
@@ -158,6 +158,9 @@ export class Simulation {
   private spent = 0;
   // Likewise the expedition clock, which advances in whole seconds.
   private elapsed = 0;
+  // Simulated seconds, and when each operator last swung a baton.
+  private time = 0;
+  private swungAt = new Map<number,number>();
 
   join(assignedSeat?: number) {
     const seats = this.state.mission?.solo || this.layout?.tour ? [1] : [1,2];
@@ -206,7 +209,16 @@ export class Simulation {
       Object.assign(this.state.lamp,{...home().lamp,y:0.14,pitch:0,place:'home'});
       delete this.state.lamp.homeward;
     }
-    for (const h of mission?.haul ?? []) advance(h,dt);
+    this.time += dt;
+    for (const h of mission?.haul ?? []) {
+      // Bought gear thrown into the exit rift turns up at home.
+      if (advance(h,dt) && h.homeward) { Object.assign(h,deliverySpot(mission!),{place:'home'}); delete h.homeward; }
+      // A lit flare burns down wherever it is, then it's gone.
+      if (h.burn !== undefined) {
+        h.burn -= dt;
+        if (h.burn <= 0) { delete h.burn; Object.assign(h,{used:true,owner:null}); }
+      }
+    }
     // The battery drains while the flashlight is on away from home, at half
     // rate while it is clipped on. Flat, it switches off.
     const lamp = this.state.lamp;
@@ -271,7 +283,8 @@ export class Simulation {
   private escape(p: Player) {
     const mission = this.state.mission, rift = mission?.rift;
     if (!mission || !rift || gone(mission,p.id)) return;
-    for (const h of mission.haul) if (h.owner === p.id) Object.assign(h,{owner:null,banked:true,x:rift.x,y:0,z:rift.z,place:'outside'});
+    // Salvage carried in is banked; bought gear stays in hand.
+    for (const h of mission.haul) if (h.owner === p.id && !h.kind) Object.assign(h,{owner:null,banked:true,x:rift.x,y:0,z:rift.z,place:'outside'});
     (mission.escaped ??= []).push(p.id);
     this.moveTo(p,'home',home().spawns[p.id-1] ?? home().spawns[0]);
   }
@@ -296,7 +309,9 @@ export class Simulation {
   // After a sale everyone is back home, with the flashlight in its place.
   private returnHome() {
     for (const q of this.state.players) this.moveTo(q,'home',home().spawns[q.id-1] ?? home().spawns[0]);
-    Object.assign(this.state.lamp,{...home().lamp,y:0.14,yaw:0,pitch:0,owner:null,on:chargeOf(this.state.lamp) > 0,stowed:false,place:'home'});
+    // A flashlight left behind stays lost until the crew buys another.
+    if (!this.state.lamp.lost) Object.assign(this.state.lamp,{...home().lamp,y:0.14,yaw:0,pitch:0,owner:null,on:chargeOf(this.state.lamp) > 0,stowed:false,place:'home'});
+    else Object.assign(this.state.lamp,{owner:null,on:false,stowed:false});
     delete this.state.lamp.flight;
   }
 
@@ -385,7 +400,10 @@ export class Simulation {
       if (!h) return;
       Object.assign(h,{owner:null,x:rest.x,y:rest.y,z:rest.z,place});
       if (flight) h.flight = flight; else delete h.flight;
-      if (banked) h.banked = true;
+      // Salvage in the rift is banked; bought gear goes home like the flashlight.
+      if (banked) { if (h.kind) h.homeward = true; else h.banked = true; }
+      // A flare lights as it leaves the hand.
+      if (h.kind === 'flare' && h.burn === undefined) h.burn = flareTime;
     }
   }
 
@@ -400,7 +418,8 @@ export class Simulation {
       return;
     }
     // The receipt is read at home; the rift there starts the next expedition.
-    if (mission?.stage === 'home' && action !== 'select' && action !== 'take' && action !== 'drop' && action !== 'throw' && action !== 'toggle' && action !== 'load') return;
+    if (mission?.stage === 'home' && action !== 'select' && action !== 'take' && action !== 'drop' && action !== 'throw' && action !== 'toggle' && action !== 'load' && action !== 'buy') return;
+    if (action === 'buy') { this.buy(p,extra.buy); return; }
     if (mission?.down.some(d => d.id === id) || (mission && gone(mission,id))) return;
     const layout = this.layout;
     if (layout && mission && action === 'operate') {
@@ -435,9 +454,10 @@ export class Simulation {
         const item = choice.item;
         p.slots = slotsOf(p).map((s,i) => i === slot ? item.id : s);
         p.hand = slot;
-        // A bought item keeps its kind; only the facility's own salvage wakes the Diver.
-        const bought = mission.haul.find(h => h.id === item.id)?.kind;
-        mission.haul = [...mission.haul.filter(h => h.id !== item.id),{id:item.id,owner:id,x:item.x,y:item.y,z:item.z,...(bought ? {kind:bought} : {})}];
+        // A bought item keeps its kind, and a lit flare keeps burning; only
+        // the facility's own salvage wakes the Diver.
+        const prev = mission.haul.find(h => h.id === item.id), bought = prev?.kind;
+        mission.haul = [...mission.haul.filter(h => h.id !== item.id),{id:item.id,owner:id,x:item.x,y:item.y,z:item.z,...(bought ? {kind:bought} : {}),...(prev?.burn !== undefined ? {burn:prev.burn} : {})}];
         if (!bought) wake(layout,mission,this.roomOf(p) ?? item.room);
         if (lamp.owner === id) this.hold(p);
       }
@@ -454,6 +474,7 @@ export class Simulation {
       }
       return;
     }
+    if (action === 'swing') { this.swing(p); return; }
     // A flat battery won't switch on.
     if (lamp.owner === id && action === 'toggle' && (lamp.on || chargeOf(lamp) > 0)) {
       lamp.on = !lamp.on;
@@ -468,26 +489,63 @@ export class Simulation {
     }
   }
 
+  // The home terminal, between expeditions: a ware for its price from the
+  // crew's wallet, laid out in front of the terminal. A replacement
+  // flashlight is sold only when the flashlight was left behind.
+  private buy(p: Player, ware: Command['buy']) {
+    const mission = this.state.mission, lamp = this.state.lamp;
+    if (!ware || mission?.stage !== 'home' || placeOf(p) !== 'home' || distance(p,home().terminal) > 2.1) return;
+    const c = mission.contract, price = prices[ware];
+    if (wallet(c) < price || (ware === 'lamp' && !lamp.lost)) return;
+    if (ware === 'lamp') {
+      Object.assign(lamp,{...home().lamp,y:0.14,yaw:0,pitch:0,owner:null,on:true,stowed:false,place:'home',lost:false});
+      delete lamp.charge; delete lamp.flight; this.spent = 0;
+    } else {
+      c.bought = (c.bought ?? 0)+1;
+      mission.haul.push({id:'bought-'+c.bought,kind:ware,owner:null,...deliverySpot(mission),place:'home'});
+    }
+    c.spent = (c.spent ?? 0)+price;
+  }
+
+  // A swing of the stun baton in hand stuns the Bell Diver if its bell is in
+  // the swinger's room, within reach ahead and overhead. Once a second.
+  private swing(p: Player) {
+    const mission = this.state.mission, layout = this.layout, item = selected(p);
+    if (!mission || !layout || mission.stage !== 'explore' || !item || catalog(layout,mission).find(s => s.id === item)?.kind !== 'baton') return;
+    if (this.time-(this.swungAt.get(p.id) ?? -Infinity) < 0.9) return;
+    this.swungAt.set(p.id,this.time);
+    p.swings = (p.swings ?? 0)+1;
+    const bell = bellSpan(layout,mission.diver,mission), feet = p.feetY ?? 0;
+    if (!bell || placeOf(p) !== 'inside' || this.roomOf(p) !== mission.diver.bay) return;
+    const dx = bell.x-p.x, dz = bell.z-p.z, d = Math.hypot(dx,dz);
+    const ahead = d < 0.3 || (-Math.sin(p.yaw)*dx-Math.cos(p.yaw)*dz)/d > Math.cos(1.3);
+    if (d <= batonReach.ahead && ahead && bell.bottom <= feet+batonReach.up && bell.top >= feet+0.2) stun(mission);
+  }
+
   // After the receipt, plan the contract's next facility, or after a wipe a
   // fresh contract. The crew stays home until someone steps into the rift;
   // nothing of the facility is built yet.
   nextExpedition() {
     const mission = this.state.mission;
     if (!mission || mission.stage !== 'settled') return;
-    if (mission.outcome === 'wipe') {
+    const wipe = mission.outcome === 'wipe';
+    if (wipe) {
       mission.contract = newContract(wipeSeed(mission.contract.seed));
       delete mission.outcome;
-      // A fresh contract starts with a full battery.
-      delete this.state.lamp.charge; this.state.lamp.on = true;
+      // A fresh contract starts from nothing but a new flashlight, fully charged.
+      const lamp = this.state.lamp;
+      Object.assign(lamp,{...home().lamp,y:0.14,yaw:0,pitch:0,owner:null,on:true,stowed:false,place:'home',lost:false});
+      delete lamp.charge; delete lamp.flight;
     } else {
       mission.contract.index++;
       mission.contract.layout = expeditionSeed(mission.contract.seed,mission.contract.index);
     }
     this.layout = generateLayout(mission.contract.layout);
     this.state.opened = [];
-    Object.assign(mission,{stage:'home',haul:[],down:[],awake:false,diver:{mode:'dormant',bay:'',seconds:0}});
+    // Bought gear that came home stays; everything else went with the facility.
+    Object.assign(mission,{stage:'home',haul:wipe ? [] : mission.haul.filter(h => h.kind),down:[],awake:false,diver:{mode:'dormant',bay:'',seconds:0}});
     for (const key of ['arrival','bell','rift','enraged','escaped','dead','clock'] as const) delete mission[key];
-    for (const q of this.state.players) Object.assign(q,{slots:Array(hotbarSize).fill(null),hand:0});
+    this.fillSlots();
   }
 }
 

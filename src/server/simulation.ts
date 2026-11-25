@@ -489,6 +489,14 @@ export class Simulation {
     }
   }
 
+  // Diagnostics only, and only where this simulation runs in the player's own
+  // browser (solo or the hub host): add to the wallet without counting toward
+  // the quota, to try the shop without an expedition first.
+  grant(amount: number) {
+    const c = this.state.mission?.contract;
+    if (c && Number.isFinite(amount) && amount > 0) c.spent = (c.spent ?? 0)-amount;
+  }
+
   // The home terminal, between expeditions: a ware for its price from the
   // crew's wallet, laid out in front of the terminal. A replacement
   // flashlight is sold only when the flashlight was left behind.

@@ -60,7 +60,8 @@ function start(render: ReturnType<typeof createScene>, mode?: Crew | 'solo', sce
   const operator = (seat: number) => crew?.names[seat] ?? 'Operator '+seat;
   const hud = missionHud(preferences,operator);
   const diagnostics = import.meta.env.DEV || import.meta.env.MODE === 'diagnostics'
-    ? mountDiagnostics(sceneStarted,solo ? undefined : () => { if (state) network?.interrupt(2000); },render.stats)
+    ? mountDiagnostics(sceneStarted,solo ? undefined : () => { if (state) network?.interrupt(2000); },render.stats,
+      solo || crew?.host ? () => { const host = connection as {grant?: (amount: number) => void}; host.grant?.(200); } : undefined)
     : undefined;
   const operate = element<HTMLButtonElement>('operate');
   // Q at the home terminal opens the shop; everything else goes to the host.

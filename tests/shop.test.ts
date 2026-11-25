@@ -183,3 +183,12 @@ test('the stun baton stuns the Bell Diver only when its bell is within reach ahe
   sim.act(1,'swing');
   assert.equal(p1.swings,3,'a second swing within a second is ignored');
 });
+
+test('a diagnostics grant fills the wallet without counting toward the quota', () => {
+  const {sim,mission} = shopping(0);
+  sim.grant(200);
+  sim.grant(-50); sim.grant(Number.NaN);
+  assert.deepEqual([wallet(mission().contract),mission().contract.credited],[200,0]);
+  sim.act(1,'buy',{buy:'baton'});
+  assert.equal(wallet(mission().contract),100);
+});

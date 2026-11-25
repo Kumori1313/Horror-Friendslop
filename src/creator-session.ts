@@ -259,6 +259,13 @@ export class CreatorSession {
     else if (action==='select' && this.pending.length>1 && this.pending.at(-1)!.action==='select') this.pending.at(-1)!.slot=extra.slot;
     else if (this.pending.length<8) this.pending.push({seq:++this.seq,action,...extra});
   }
+  // Diagnostics: money for the shop, on the host only; the next snapshot
+  // tells the guest.
+  grant(amount: number) {
+    if (!this.sim) return;
+    this.sim.grant(amount);
+    this.afterAction();
+  }
   // Save at once, so a refresh right after a sale cannot undo or repeat it.
   private afterAction() {
     this.announceLayout();

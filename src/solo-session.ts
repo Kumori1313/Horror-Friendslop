@@ -52,6 +52,12 @@ export class SoloSession {
     this.events.snapshot(this.sim.state,false);
     this.save();
   }
+  // Diagnostics: money for the shop.
+  grant(amount: number) {
+    this.sim.grant(amount);
+    this.events.snapshot(this.sim.state,false);
+    this.save();
+  }
   // A contract's next expedition brings a new facility.
   private announceLayout() {
     if (this.sim.layout === this.shownLayout) return;

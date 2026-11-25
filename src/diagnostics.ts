@@ -1,11 +1,12 @@
 import { drawMap } from './layout-map.ts';
+import { wallet } from './mission.ts';
 import type { Layout } from './layout.ts';
 import { batteryLife, chargeOf, type Snapshot } from './room.ts';
 import type { RoomConnection } from './connection.ts';
 import type { Crew } from './creator-session.ts';
 
 export interface RenderStats { scale: number; drawn: number; rooms: number; calls: number }
-export function mountDiagnostics(sceneStarted: number, interrupt?: () => void, render?: RenderStats) {
+export function mountDiagnostics(sceneStarted: number, interrupt?: () => void, render?: RenderStats, grant?: () => void) {
   document.querySelector('main')!.insertAdjacentHTML('beforeend',`
     <aside id="diagnostics" hidden>
       <h2>Room diagnostics</h2>
@@ -14,6 +15,7 @@ export function mountDiagnostics(sceneStarted: number, interrupt?: () => void, r
         <small>I · Intake (base)　≡ · Stairwell　amber · salvage</small>
       </div>
       <pre id="stats"></pre><button id="outage">Simulate 2 s outage</button>
+      <button id="grant">Grant 200 to the wallet</button>
     </aside>`);
   document.querySelector('footer')!.insertAdjacentHTML('beforeend','<button id="debug" aria-expanded="false">Diagnostics · G</button>');
   const panel = document.getElementById('diagnostics')!;
@@ -32,6 +34,10 @@ export function mountDiagnostics(sceneStarted: number, interrupt?: () => void, r
   const outage = document.getElementById('outage')!;
   outage.hidden = !interrupt;
   outage.onclick = interrupt ?? null;
+  // Money for the shop, where this browser runs the simulation (solo or the hub host).
+  const grantButton = document.getElementById('grant')!;
+  grantButton.hidden = !grant;
+  grantButton.onclick = grant ?? null;
   window.addEventListener('keydown',e => {
     if (e.code === 'KeyG' && !e.repeat && !e.ctrlKey && !e.metaKey && !e.altKey &&
         !document.querySelector<HTMLDialogElement>('#preferences')!.open) toggle();
@@ -61,7 +67,7 @@ export function mountDiagnostics(sceneStarted: number, interrupt?: () => void, r
       ...(layout ? [
         'Layout v' + layout.version + ' · seed ' + layout.seed + (layout.fallback ? ' (fallback)' : ''),
         'Rooms   ' + layout.rooms.length + ' · passages ' + layout.passages.length,
-        ...(s.mission ? ['Contract  '+s.mission.contract.seed+' · expedition '+(s.mission.contract.index+1)+'/'+s.mission.contract.expeditions+' · '+s.mission.contract.credited+'/'+s.mission.contract.quota,
+        ...(s.mission ? ['Contract  '+s.mission.contract.seed+' · expedition '+(s.mission.contract.index+1)+'/'+s.mission.contract.expeditions+' · '+s.mission.contract.credited+'/'+s.mission.contract.quota+' · wallet '+wallet(s.mission.contract),
           'Salvage moved  '+s.mission.haul.length+(s.mission.awake ? ' · Diver awake' : ''),
           'Battery  '+chargeOf(l)+'/'+batteryLife+' s'+(l.on ? '' : ' (off)')+' · clock '+(s.mission.clock ?? 0)+' s'] : []),
         'Open doors  ' + (opened.join(', ') || 'none'),

@@ -61,7 +61,21 @@ export function riverSurface(river: River, height: (x: number, z: number) => num
   const low = cut(forward) <= cut(backward) ? forward : backward;
   // Averaging a sequence that never rises gives one that never rises; never
   // above the running low, so never above the ground.
-  return low.map((v,i) => { const near = low.slice(Math.max(0,i-5),i+6); return Math.min(v,near.reduce((a,b) => a+b,0)/near.length); });
+  return gentleFall(p,low.map((v,i) => { const near = low.slice(Math.max(0,i-5),i+6); return Math.min(v,near.reduce((a,b) => a+b,0)/near.length); }));
+}
+
+// A river falls at most `riverGradient` per metre: working up from its mouth,
+// any stretch standing higher than that above the stretch below is lowered.
+// Lowering never lets the water spill, and with no sudden drops one stretch's
+// wide ford banks never cut under another stretch's water.
+export const riverGradient = 0.06;
+function gentleFall(p: River['points'], surface: number[]) {
+  const out = surface.slice(), last = out.length-1;
+  if (last < 1) return out;
+  const forward = out[0] >= out[last];
+  if (forward) for (let i=last-1;i>=0;i--) out[i] = Math.min(out[i],out[i+1]+riverGradient*Math.abs(p[i].t-p[i+1].t));
+  else for (let i=1;i<=last;i++) out[i] = Math.min(out[i],out[i-1]+riverGradient*Math.abs(p[i].t-p[i-1].t));
+  return out;
 }
 
 // Two or three fords spread along the stretch well inside the map, each in
@@ -105,7 +119,8 @@ export function poolFords(river: River, surface: number[]) {
     const low = Math.min(...near.map(i => out[i]));
     for (const i of near) out[i] = low;
   }
-  return out;
+  // Then ease the water down into each pool rather than stepping it.
+  return gentleFall(p,out);
 }
 
 // The water in the riverbed (see `Water`).

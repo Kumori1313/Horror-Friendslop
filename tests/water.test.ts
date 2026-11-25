@@ -140,3 +140,30 @@ test('planning never walks through deep water', () => {
   assert.equal(reached(deepSpot),false);
   assert.equal(reached(ford),true,'but wades a ford');
 });
+
+test('the water never hangs in the air: wherever its sheet ends, the ground beside it stands at or above it', () => {
+  // The same cells the water's mesh is drawn over (world-scene.ts): any cell
+  // with a corner whose ground lies under the water there.
+  for (const seed of [1,5,12,15]) {
+    const m = outdoors(seed), f = m.ground, n = f.n, cache = new Map<number,number | undefined>();
+    const level = (i: number, k: number) => { const j = k*n+i; if (!cache.has(j)) cache.set(j,waterLevel(m.water,f.x0+i,f.z0+k)); return cache.get(j); };
+    const corners = (i: number, k: number) => [[i,k],[i+1,k],[i+1,k+1],[i,k+1]] as const;
+    const top = (i: number, k: number) => {
+      const known = corners(i,k).map(([a,b]) => level(a,b)).filter((l): l is number => l !== undefined);
+      if (!known.length) return;
+      const t = Math.max(...known);
+      return corners(i,k).some(([a,b]) => f.h[b*n+a] < (level(a,b) ?? t)-0.01) ? t : undefined;
+    };
+    const hanging: string[] = [];
+    for (let k=2;k<n-4;k++) for (let i=2;i<n-4;i++) {
+      const t = top(i,k);
+      if (t === undefined) continue;
+      for (const [di,dk,edge] of [[1,0,[[i+1,k],[i+1,k+1]]],[-1,0,[[i,k],[i,k+1]]],[0,1,[[i,k+1],[i+1,k+1]]],[0,-1,[[i,k],[i+1,k]]]] as const) {
+        if (top(i+di,k+dk) !== undefined) continue;
+        const gap = Math.max(...edge.map(([a,b]) => (level(a,b) ?? t)-f.h[b*n+a]));
+        if (gap > 0.05) hanging.push((f.x0+i)+','+(f.z0+k)+' by '+gap.toFixed(2));
+      }
+    }
+    assert.deepEqual(hanging,[],'seed '+seed);
+  }
+});

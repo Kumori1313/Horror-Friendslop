@@ -228,7 +228,8 @@ function segmentsNear(w:Water,x:number,z:number,radius:46 | 20) {
 }
 // The riverbed at (x, z): `bed` is the lowest the ground may be, `levee` the
 // lowest it may stand where water would otherwise spill, `level` the water's
-// surface there, and `wet` whether (x, z) is within the water's reach. Taken
+// surface there (the nearest stretch's), and `wet` whether (x, z) is within
+// the water's reach. Taken
 // over every stretch of the river, so meanders meet smoothly. Undefined far
 // from the river.
 export function channel(w:Water,x:number,z:number) {
@@ -236,25 +237,30 @@ export function channel(w:Water,x:number,z:number) {
   if (!list.length) return;
   const p = w.points, depth = deepWater+(fordWater-deepWater)*shallowAt(w.fords,x,z), slope = steepBank+(gentleBank-steepBank)*fordAt(w.fords,x,z);
   const reach = riverFloor+depth/slope;
-  let bed = Infinity, levee = -Infinity, level = 0, wet = false;
+  let bed = Infinity, levee = -Infinity, level = 0, near = Infinity;
   for (const i of list) {
     const ax = p[i-1].x, az = p[i-1].z, sx = p[i].x-ax, sz = p[i].z-az, len = sx*sx+sz*sz;
     const u = Math.max(0,Math.min(1,((x-ax)*sx+(z-az)*sz)/len)), d = Math.hypot(ax+sx*u-x,az+sz*u-z);
     if (d > 40) continue;
     const surface = p[i-1].level+(p[i].level-p[i-1].level)*u;
     const b = surface-depth+Math.max(0,d-riverFloor)*slope;
-    if (b < bed) { bed = b; level = surface; wet = d <= reach+1; }
+    if (b < bed) bed = b;
+    if (d < near) { near = d; level = surface; }
     // Only just beyond the waterline, where the map's surface already keeps
     // the ground above the water (see `riverSurface`); this mends the odd spot.
     if (d <= reach+3) levee = Math.max(levee,surface+0.3-0.5*Math.max(0,d-reach-1));
   }
   if (bed === Infinity) return;
+  // The water is the nearest stretch's, over its reach and over any riverbed
+  // beyond that lies lower, so its edge never stops short of a bank.
+  const wet = near <= reach+1 || bed < level-0.02;
   return {bed,levee,level,wet};
 }
 // The water's surface over (x, z), or undefined away from the water.
 export function waterLevel(w:Water,x:number,z:number) {
   // Water reaches at most riverFloor+deepWater/gentleBank+1 (about 13 m)
-  // from the centre line; skip the riverbed's full shape well beyond that.
+  // from the centre line, or a little further where the bed lies under it;
+  // skip the riverbed's full shape well beyond that.
   if (!segmentsNear(w,x,z,20).length) return;
   const c = channel(w,x,z);
   return c?.wet ? c.level : undefined;

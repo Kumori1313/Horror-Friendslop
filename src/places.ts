@@ -190,6 +190,24 @@ export function outdoors(seed: number): Outdoors {
         h[j] = Math.round((h[j]+(pad-h[j])*w)*100)/100;
       }
     }
+    // Where neighbouring stretches stand at slightly different levels (inside
+    // a bend near a ford), or a bridge's landing pad eases down beside it, a
+    // dry point beside the water could lie below it; raise any such point
+    // just above the water, so its edge meets a bank.
+    if (river.points.length) {
+      const level = new Float64Array(n*n).fill(Number.NaN), beside: number[] = [];
+      for (let j=0;j<n*n;j++) level[j] = waterLevel(water,ground.x0+(j % n),ground.z0+Math.floor(j/n)) ?? Number.NaN;
+      for (let j=0;j<n*n;j++) if (Number.isNaN(level[j])) {
+        const i = j % n, k = Math.floor(j/n);
+        let top = -Infinity;
+        for (let dk=-1;dk<=1;dk++) for (let di=-1;di<=1;di++) {
+          const ni = i+di, nk = k+dk;
+          if (ni >= 0 && nk >= 0 && ni < n && nk < n && !Number.isNaN(level[nk*n+ni])) top = Math.max(top,level[nk*n+ni]);
+        }
+        if (h[j] < top) beside.push(j,top);
+      }
+      for (let q=0;q<beside.length;q+=2) h[beside[q]] = Math.round((beside[q+1]+0.1)*100)/100;
+    }
     for (const b of bridges) {
       for (const pl of b.planks) g.surfaces.push({x:pl.x,z:pl.z,w:pl.w,d:pl.d,y:pl.y,rise:pl.rise,...(pl.along ? {along:pl.along} : {}),room});
       for (const r of b.rails) g.walls.push(wall(room,r.x-r.w/2,r.z-r.d/2,r.x+r.w/2,r.z+r.d/2,r.y,r.h));

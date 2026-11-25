@@ -147,7 +147,8 @@ function hunt(layout: Layout, state: Snapshot, mission: Mission, dt: number, loc
 // they carried is lost.
 export function settle(layout: Layout, state: Snapshot, mission: Mission) {
   const escaped = mission.escaped ?? [];
-  const sold = items(layout,mission).filter(i => i.banked);
+  // Spare cells are worth nothing and stay off the receipt.
+  const sold = items(layout,mission).filter(i => i.banked && i.value > 0);
   const gross = sold.reduce((sum,i) => sum+i.value,0);
   const lost = state.players.filter(p => !escaped.includes(p.id)).length;
   const credited = kept(gross,lost);

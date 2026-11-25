@@ -88,3 +88,7 @@ pre { margin-bottom: 0; line-height: 1.5 }
 
 #play-solo { display: inline-block; margin-top: 1rem; padding: .75rem 1.2rem; background: #e7b667; color: #151b17; font-weight: 700; text-decoration: none }
 #local-solo { color: #edc47d; padding: .75rem }
+/* The flashlight's battery, under its hotbar slot. */
+#hotbar .battery { position: absolute; left: 5px; right: 5px; bottom: 4px; height: 4px; background: #000a; border-radius: 2px; overflow: hidden; pointer-events: none }
+#hotbar .battery i { display: block; height: 100%; background: #9bd98a }
+#hotbar .battery.low i { background: #e2694a }

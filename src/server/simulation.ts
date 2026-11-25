@@ -1,4 +1,4 @@
-import { clearAt, command, freeSlot, hotbarSize, lampSlot, selected, slotsOf, walls } from '../room.ts';
+import { batteryLife, chargeOf, clearAt, command, freeSlot, hotbarSize, lampSlot, selected, slotsOf, walls } from '../room.ts';
 import type { Action, Aim, Command, Input, Lamp, Player, Snapshot } from '../room.ts';
 import { flightStep, gravity, launchFrom, trajectory } from '../flight.ts';
 import type { Body, Flight } from '../flight.ts';
@@ -152,6 +152,12 @@ export class Simulation {
   inputs = new Map<number, Input>();
   // Where the Diver wanders and which chain clip it rattles. Tests replace it.
   random: () => number = Math.random;
+  // Battery drained since the flashlight's charge last dropped a whole
+  // second. The charge itself moves in whole seconds so a lit flashlight
+  // changes the snapshot only once a second.
+  private spent = 0;
+  // Likewise the expedition clock, which advances in whole seconds.
+  private elapsed = 0;
 
   join(assignedSeat?: number) {
     const seats = this.state.mission?.solo || this.layout?.tour ? [1] : [1,2];
@@ -201,6 +207,23 @@ export class Simulation {
       delete this.state.lamp.homeward;
     }
     for (const h of mission?.haul ?? []) advance(h,dt);
+    // The battery drains while the flashlight is on away from home, at half
+    // rate while it is clipped on. Flat, it switches off.
+    const lamp = this.state.lamp;
+    if (mission?.stage === 'explore' && lamp.on && placeOf(lamp) !== 'home') {
+      this.spent += dt*(lamp.stowed ? 0.5 : 1);
+      // A hair of tolerance: thirty 1/30 s ticks should make a whole second.
+      if (this.spent >= 1-1e-9) {
+        const whole = Math.floor(this.spent+1e-9);
+        this.spent -= whole;
+        lamp.charge = Math.max(0,chargeOf(lamp)-whole);
+      }
+      if (chargeOf(lamp) <= 0) lamp.on = false;
+    }
+    if (mission?.stage === 'explore') {
+      this.elapsed += dt;
+      if (this.elapsed >= 1-1e-9) { const whole = Math.floor(this.elapsed+1e-9); this.elapsed -= whole; mission.clock = (mission.clock ?? 0)+whole; }
+    }
     if (mission?.stage === 'explore' && this.layout) {
       advanceMission(this.layout,this.state,mission,dt,p => this.roomOf(p),this.random);
       if (mission.stage !== 'explore') this.returnHome();
@@ -273,7 +296,7 @@ export class Simulation {
   // After a sale everyone is back home, with the flashlight in its place.
   private returnHome() {
     for (const q of this.state.players) this.moveTo(q,'home',home().spawns[q.id-1] ?? home().spawns[0]);
-    Object.assign(this.state.lamp,{...home().lamp,y:0.14,yaw:0,pitch:0,owner:null,on:true,stowed:false,place:'home'});
+    Object.assign(this.state.lamp,{...home().lamp,y:0.14,yaw:0,pitch:0,owner:null,on:chargeOf(this.state.lamp) > 0,stowed:false,place:'home'});
     delete this.state.lamp.flight;
   }
 
@@ -377,7 +400,7 @@ export class Simulation {
       return;
     }
     // The receipt is read at home; the rift there starts the next expedition.
-    if (mission?.stage === 'home' && action !== 'select' && action !== 'take' && action !== 'drop' && action !== 'throw' && action !== 'toggle') return;
+    if (mission?.stage === 'home' && action !== 'select' && action !== 'take' && action !== 'drop' && action !== 'throw' && action !== 'toggle' && action !== 'load') return;
     if (mission?.down.some(d => d.id === id) || (mission && gone(mission,id))) return;
     const layout = this.layout;
     if (layout && mission && action === 'operate') {
@@ -429,8 +452,17 @@ export class Simulation {
       }
       return;
     }
-    if (lamp.owner === id && action === 'toggle') {
+    // A flat battery won't switch on.
+    if (lamp.owner === id && action === 'toggle' && (lamp.on || chargeOf(lamp) > 0)) {
       lamp.on = !lamp.on;
+    }
+    // A spare cell in hand goes into the flashlight its holder carries.
+    if (action === 'load' && lamp.owner === id && layout && mission) {
+      const item = selected(p), h = mission.haul.find(e => e.id === item && e.owner === id);
+      if (!h || spawnSalvage(layout).find(s => s.id === h.id)?.kind !== 'cell') return;
+      Object.assign(h,{owner:null,used:true});
+      this.release(p,h.id);
+      lamp.charge = batteryLife; this.spent = 0;
     }
   }
 
@@ -443,6 +475,8 @@ export class Simulation {
     if (mission.outcome === 'wipe') {
       mission.contract = newContract(wipeSeed(mission.contract.seed));
       delete mission.outcome;
+      // A fresh contract starts with a full battery.
+      delete this.state.lamp.charge; this.state.lamp.on = true;
     } else {
       mission.contract.index++;
       mission.contract.layout = expeditionSeed(mission.contract.seed,mission.contract.index);
@@ -450,7 +484,7 @@ export class Simulation {
     this.layout = generateLayout(mission.contract.layout);
     this.state.opened = [];
     Object.assign(mission,{stage:'home',haul:[],down:[],awake:false,diver:{mode:'dormant',bay:'',seconds:0}});
-    for (const key of ['arrival','bell','rift','enraged','escaped','dead'] as const) delete mission[key];
+    for (const key of ['arrival','bell','rift','enraged','escaped','dead','clock'] as const) delete mission[key];
     for (const q of this.state.players) Object.assign(q,{slots:Array(hotbarSize).fill(null),hand:0});
   }
 }

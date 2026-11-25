@@ -1,6 +1,6 @@
 import * as T from 'three';
 import { drawTemplates } from './template-scene.ts';
-import { anchor, geometryFor, roomLabel } from './layout.ts';
+import { anchor, geometryFor, powered, roomLabel } from './layout.ts';
 import type { Layout, Kind } from './layout.ts';
 import { doorWidth, orient, outward } from './room-templates.ts';
 import { itemKinds, spawnSalvage, type ItemKind } from './salvage.ts';
@@ -15,6 +15,23 @@ export const colors: Record<Kind,number> = {
 };
 const stations: Kind[] = ['intake'];
 const lamp = 0xe4e7c9;
+// A powered room glows by its own colour, so it reads as lit without a
+// real-time light: the surface's colour (texture and tint) is added to its
+// emitted light.
+const lit = new WeakMap<T.Material,T.Material>();
+function poweredVariant(material: T.Material) {
+  let v = lit.get(material);
+  if (!v) {
+    v = material.clone();
+    v.onBeforeCompile = shader => {
+      shader.fragmentShader = shader.fragmentShader.replace('#include <emissivemap_fragment>','#include <emissivemap_fragment>\n\ttotalEmissiveRadiance += diffuseColor.rgb * 0.42;');
+    };
+    v.customProgramCacheKey = () => 'powered';
+    lit.set(material,v);
+  }
+  return v;
+}
+const darkLamp = 0x34362f;
 
 // Box vertices for one material within one room, merged into a single draw.
 export class Batch {
@@ -80,6 +97,7 @@ export function buildFacility(layout: Layout, library: Library) {
   }));
   const {matte,glow} = library;
   const emissive = new Set([lamp,...Object.values(colors)]);
+  const power = new Map(layout.rooms.map(r => [r.id,powered(layout,r.id)]));
   const batches = new Map<string,Map<T.Material,Batch>>();
   const transform = new T.Object3D(), normals = new T.Matrix3(), tint = new T.Color();
   const white = new T.Color(1,1,1);
@@ -87,6 +105,8 @@ export function buildFacility(layout: Layout, library: Library) {
     transform.rotation.set(axis==='x'?angle:0,axis==='wedge'?angle:0,axis==='z'?angle:0);
     transform.position.set(x,y,z); transform.scale.set(w,h,d); transform.updateMatrix();
     const kind = byId.get(room)!.kind, surface = surfaceFor(kind,finish);
+    // Ceiling lamps are out in an unpowered room; landmarks glow everywhere.
+    if (color === lamp && !power.get(room)) color = darkLamp;
     const material = emissive.has(color) ? glow : surface ? library.surfaces.get(surface)! : matte;
     // Shell textures carry their own colour, lightly tinted by the room's.
     if (material !== glow && shellFinish(finish)) tint.setHex(colors[kind]).lerp(white,0.82);
@@ -151,7 +171,7 @@ export function buildFacility(layout: Layout, library: Library) {
     label(intake.id,'Exit',d.x,d.y+2.95,d.z-0.06,Math.PI);
   }
   for (const [room,byMaterial] of batches) {
-    for (const [material,batch] of byMaterial) groups.get(room)!.add(new T.Mesh(batch.build(),material));
+    for (const [material,batch] of byMaterial) groups.get(room)!.add(new T.Mesh(batch.build(),material !== glow && power.get(room) ? poweredVariant(material) : material));
   }
   // Bulkheads are painted steel plate.
   const panel = library.surfaces.get('panel')!.clone();
@@ -167,7 +187,7 @@ export function buildFacility(layout: Layout, library: Library) {
   const salvageMeshes = new Map((Object.keys(itemKinds) as ItemKind[]).map(kind => {
     const k = itemKinds[kind], count = spawnSalvage(layout).filter(i => i.kind === kind).length;
     const metal = kind !== 'board' && kind !== 'toolbox';
-    const mesh = new T.InstancedMesh(Batch.unit,new T.MeshStandardMaterial({color:k.color,roughness:metal ? 0.32 : 0.6,metalness:metal ? 0.85 : 0.2,envMap:metal ? library.reflections ?? null : null,emissive:k.color,emissiveIntensity:0.08}),Math.max(1,count));
+    const mesh = new T.InstancedMesh(Batch.unit,new T.MeshStandardMaterial({color:k.color,roughness:metal ? 0.32 : 0.6,metalness:metal ? 0.85 : 0.2,envMap:metal ? library.reflections ?? null : null,emissive:k.color,emissiveIntensity:kind === 'cell' ? 0.55 : 0.08}),Math.max(1,count));
     mesh.count = 0; mesh.frustumCulled = false; root.add(mesh);
     return [kind,mesh];
   }));

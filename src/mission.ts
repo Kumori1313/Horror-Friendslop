@@ -25,7 +25,8 @@ export interface Contract { seed: number; expeditions: number; index: number; la
 // banked in the exit rift. A thrown item's x, y and z are where it will come
 // to rest; `flight` is set until it gets there. A banked item went into the
 // rift, thrown or carried by an operator who escaped.
-export interface Haul extends Point3 { id: string; owner: number | null; banked?: boolean; flight?: Flight; place?: Place }
+// `used`: a spare cell loaded into the flashlight, gone for good.
+export interface Haul extends Point3 { id: string; owner: number | null; banked?: boolean; flight?: Flight; place?: Place; used?: boolean }
 export interface Mission {
   solo?: boolean;
   stage: Stage;
@@ -35,6 +36,8 @@ export interface Mission {
   // enrages every creature for the rest of the expedition.
   bell?: number;
   rift?: {x: number; z: number; seconds: number};
+  // Whole seconds since the expedition left home; the outdoors darkens with it.
+  clock?: number;
   enraged?: boolean;
   // Operators who went into the exit rift, and those who died.
   escaped?: number[];
@@ -113,7 +116,7 @@ export function onPad(p: Point & {feetY?: number; place?: Place}, pad: Point3) {
 export interface Item extends Salvage { owner: number | null; banked: boolean; flight?: Flight; place: Place }
 export function items(layout: Layout, mission: Mission | undefined): Item[] {
   const moved = new Map(mission?.haul.map(h => [h.id,h]));
-  return spawnSalvage(layout).map(s => {
+  return spawnSalvage(layout).filter(s => !moved.get(s.id)?.used).map(s => {
     const h = moved.get(s.id);
     return h ? {...s,x:h.x,y:h.y,z:h.z,owner:h.owner,banked:!!h.banked,flight:h.flight,place:placeOf(h)} : {...s,owner:null,banked:false,place:'inside' as Place};
   });
@@ -121,7 +124,7 @@ export function items(layout: Layout, mission: Mission | undefined): Item[] {
 // The salvage an operator carries, in the order it was collected.
 export function pack(layout: Layout, mission: Mission, id: number) {
   const byId = new Map(spawnSalvage(layout).map(s => [s.id,s]));
-  return mission.haul.filter(h => h.owner === id && byId.has(h.id)).map(h => byId.get(h.id)!);
+  return mission.haul.filter(h => h.owner === id && !h.used && byId.has(h.id)).map(h => byId.get(h.id)!);
 }
 
 // Within an arm's reach, on the same storey, with nothing solid in between.

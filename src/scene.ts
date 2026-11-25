@@ -7,7 +7,7 @@ import { home, outdoors, placeOf, type Place } from './places.ts';
 import { buildHome, buildOutdoors } from './world-scene.ts';
 import { obstaclesAt, roomTemplates, socketAt, surfaceAt } from './room-templates.ts';
 import { portalGraph, visibleRooms, type PortalGraph } from './visibility.ts';
-import { lampSlot, selected, walls } from './room.ts';
+import { batteryLife, chargeOf, lampSlot, selected, walls } from './room.ts';
 import type { Snapshot } from './room.ts';
 import { gravity, positionAt, trajectory } from './flight.ts';
 import type { Flight } from './flight.ts';
@@ -123,7 +123,7 @@ export function createScene(canvas: HTMLCanvasElement, generated = false) {
     let m = itemMaterials.get(kind);
     if (!m) {
       const k = itemKinds[kind], metal = kind !== 'board' && kind !== 'toolbox';
-      m = new T.MeshStandardMaterial({color:k.color,roughness:metal ? 0.32 : 0.6,metalness:metal ? 0.85 : 0.2,envMap:metal ? library?.reflections ?? null : null,emissive:k.color,emissiveIntensity:0.08});
+      m = new T.MeshStandardMaterial({color:k.color,roughness:metal ? 0.32 : 0.6,metalness:metal ? 0.85 : 0.2,envMap:metal ? library?.reflections ?? null : null,emissive:k.color,emissiveIntensity:kind === 'cell' ? 0.55 : 0.08});
       itemMaterials.set(kind,m);
     }
     return m;
@@ -318,19 +318,27 @@ export function createScene(canvas: HTMLCanvasElement, generated = false) {
   // always had; outdoors is a moonlit night; home is a violet void.
   // Outdoors sees farther: the façade must show from the arrival rift.
   const looks: Record<Place,{background: number; fog: number; density: number; sky: number; skyGround: number; skyLevel: number; moon: number; moonLevel: number; far: number}> = {
-    inside:{background:0x263331,fog:0x273532,density:0.043,sky:0xc0e0dc,skyGround:0x605648,skyLevel:1.28,moon:0xe2d8b7,moonLevel:1,far:48},
+    // Inside is dark but for powered rooms, which glow by themselves, the
+    // landmarks, and the flashlight.
+    inside:{background:0x080b0b,fog:0x090d0c,density:0.043,sky:0xc0e0dc,skyGround:0x3a342c,skyLevel:0.14,moon:0xe2d8b7,moonLevel:0.05,far:48},
     outside:{background:0x141d26,fog:0x18222b,density:0.017,sky:0x7f95b3,skyGround:0x3a352c,skyLevel:1.05,moon:0xb3c6ea,moonLevel:0.95,far:110},
     home:{background:0x120d1c,fog:0x161023,density:0.035,sky:0xb7a6e6,skyGround:0x3a2f45,skyLevel:1.1,moon:0xd8c8ff,moonLevel:0.6,far:48},
   };
-  let looked: Place | undefined;
-  function look(place: Place) {
-    if (place === looked) return;
-    looked = place;
+  // Outdoors darkens as the expedition runs on, to a deep night after
+  // `nightfall` seconds.
+  const nightfall = 600;
+  const night = {background:0x070a0e,fog:0x0a0e13,skyLevel:0.5,moonLevel:0.4};
+  let looked = '';
+  const mix = (a: number, b: number, t: number) => new T.Color(a).lerp(new T.Color(b),t);
+  function look(place: Place, clock = 0) {
+    const dusk = place === 'outside' ? Math.min(1,clock/nightfall) : 0, key = place+'/'+dusk.toFixed(3);
+    if (key === looked) return;
+    looked = key;
     const l = looks[place];
-    (scene.background as T.Color).setHex(l.background);
-    (scene.fog as T.FogExp2).color.setHex(l.fog); (scene.fog as T.FogExp2).density = l.density;
-    sky.color.setHex(l.sky); sky.groundColor.setHex(l.skyGround); sky.intensity = l.skyLevel;
-    skylight.color.setHex(l.moon); skylight.intensity = l.moonLevel;
+    (scene.background as T.Color).copy(mix(l.background,night.background,dusk));
+    (scene.fog as T.FogExp2).color.copy(mix(l.fog,night.fog,dusk)); (scene.fog as T.FogExp2).density = l.density;
+    sky.color.setHex(l.sky); sky.groundColor.setHex(l.skyGround); sky.intensity = l.skyLevel+(night.skyLevel-l.skyLevel)*dusk;
+    skylight.color.setHex(l.moon); skylight.intensity = l.moonLevel+(night.moonLevel-l.moonLevel)*dusk;
     camera.far = l.far; camera.updateProjectionMatrix();
   }
   let homeWorld: ReturnType<typeof buildHome> | undefined;
@@ -424,7 +432,7 @@ export function createScene(canvas: HTMLCanvasElement, generated = false) {
     const me = state?.players.find(p => p.id === self);
     // Without a contract everything is inside, as it always was.
     const here: Place | undefined = !state?.mission ? (layout ? 'inside' : undefined) : me ? placeOf(me) : undefined;
-    if (generated && here) look(here);
+    if (generated && here) look(here,state?.mission?.clock);
     // Build only the place this camera is in. Home drops the expedition.
     if (here === 'home') {
       facility?.dispose(); facility = undefined; loaded = undefined; portals = undefined;
@@ -539,8 +547,12 @@ export function createScene(canvas: HTMLCanvasElement, generated = false) {
       // Clipped to the chest, the beam is shorter and dimmer. Its holder
       // doesn't see the flashlight itself, only its light.
       const stowed = !!l.stowed && l.owner !== null;
-      beam.intensity = stowed ? 32 : 85; beam.distance = stowed ? 10 : 17; beam.angle = stowed ? 0.5 : 0.43;
-      (cone.material as T.MeshBasicMaterial).opacity = stowed ? 0.02 : 0.045;
+      // A low battery dims the beam below a fifth, and it flickers below a tenth.
+      const left = chargeOf(l)/batteryLife;
+      const flicker = left < 0.1 && Math.sin(now*0.031)*Math.sin(now*0.0173+1) > 0.55 ? 0.25 : 1;
+      const power = (left < 0.2 ? 0.35+0.65*left/0.2 : 1)*flicker;
+      beam.intensity = (stowed ? 32 : 85)*power; beam.distance = stowed ? 10 : 17; beam.angle = stowed ? 0.5 : 0.43;
+      (cone.material as T.MeshBasicMaterial).opacity = (stowed ? 0.02 : 0.045)*power;
       barrel.visible = head.visible = lens.visible = !(stowed && l.owner === self);
       beam.visible = l.on; cone.visible = l.on && !(stowed && l.owner === self);
       lensMat.color.setHex(l.on ? 0xffe7a6 : 0x646951);

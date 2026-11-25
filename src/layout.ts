@@ -4,7 +4,7 @@ import type { Point } from './room.ts';
 import { assembleTemplates, cell, corridorKinds, destinationPool, isCorridor, orient, roomTemplates, socketAt, storey, surfaceAt, surfaceHeight, obstaclesAt } from './room-templates.ts';
 import type { PlacedSurface, Placement, Point3, Solid, TemplateGeometry, TemplateKind, TemplateLink } from './room-templates.ts';
 
-export const generatorVersion = 5;
+export const generatorVersion = 6;
 export const playerRadius = 0.25;
 export interface Rect extends Point { w: number; d: number }
 export type Kind = Exclude<TemplateKind,typeof corridorKinds[number]> | 'corridor';
@@ -105,6 +105,20 @@ export function connections(layout: Layout) {
   return (a: string, b: string) => steps.get(a)?.get(b) ?? Infinity;
 }
 export const neighbours = (layout: Layout, room: string) => table(layout).next.get(room) ?? [];
+
+// Which rooms have power, derived from the seed. Intake always does;
+// corridors, stairwells and the service tunnel never do; about half of the
+// other rooms do. Powered rooms are lit; the rest are dark but for the
+// flashlight and their landmarks.
+export function powered(layout: Layout, room: string) {
+  const r = layout.rooms.find(m => m.id === room);
+  if (!r || r.kind === 'corridor' || r.kind === 'stairwell' || r.template === 'tunnel') return false;
+  if (r.kind === 'intake' || layout.tour) return true;
+  let h = (layout.seed ^ 0x2545f491) >>> 0;
+  for (let i=0;i<room.length;i++) h = Math.imul(h ^ room.charCodeAt(i),0x01000193) >>> 0;
+  h ^= h >>> 15; h = Math.imul(h,0x2c1b3c6d) >>> 0; h ^= h >>> 12;
+  return (h & 1) === 0;
+}
 
 // The Bell Diver strikes one zone of a room at a time: the room's bounding
 // box split into equal tiles no more than `zoneSize` metres a side, so a long

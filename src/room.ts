@@ -18,12 +18,17 @@ export interface Player extends Point { feetY?: number; connected: boolean; id: 
 // A carried flashlight is `stowed` (clipped to the chest, dimmer) when its
 // holder has another slot selected. `flight` is set while it is thrown.
 // `homeward` marks a flashlight thrown into the exit rift: it goes home once its flight ends.
-export interface Lamp extends Point { owner: number | null; on: boolean; y: number; yaw: number; pitch: number; stowed?: boolean; flight?: Flight; place?: Place; homeward?: boolean }
+// `charge` is the battery left, in whole seconds switched on (missing means full).
+export interface Lamp extends Point { owner: number | null; on: boolean; y: number; yaw: number; pitch: number; stowed?: boolean; flight?: Flight; place?: Place; homeward?: boolean; charge?: number }
+// A full battery lasts six minutes switched on; clipped on, it drains at half rate.
+export const batteryLife = 360;
+export const chargeOf = (lamp: Lamp) => lamp.charge ?? batteryLife;
 export interface Snapshot { round: string; update: number; players: Player[]; lamp: Lamp; opened?: string[]; mission?: Mission }
 // `take` picks up the nearest item, the flashlight included; `drop` and
 // `throw` act on the selected slot; `select` chooses a slot.
-export type Action = 'take' | 'drop' | 'throw' | 'select' | 'toggle' | 'open-door' | 'operate' | 'next';
-export const actions: Action[] = ['take','drop','throw','select','toggle','open-door','operate','next'];
+// `load` puts the selected spare cell into the flashlight its holder carries.
+export type Action = 'take' | 'drop' | 'throw' | 'select' | 'toggle' | 'load' | 'open-door' | 'operate' | 'next';
+export const actions: Action[] = ['take','drop','throw','select','toggle','load','open-door','operate','next'];
 // A throw's aim and strength (0 to 1), and the slot for `select`.
 export interface Aim { yaw: number; pitch: number; power: number }
 export interface Command { slot?: number; aim?: Aim }

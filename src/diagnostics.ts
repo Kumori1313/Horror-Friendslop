@@ -1,6 +1,6 @@
 import { drawMap } from './layout-map.ts';
 import type { Layout } from './layout.ts';
-import type { Snapshot } from './room.ts';
+import { batteryLife, chargeOf, type Snapshot } from './room.ts';
 import type { RoomConnection } from './connection.ts';
 import type { Crew } from './creator-session.ts';
 
@@ -62,7 +62,8 @@ export function mountDiagnostics(sceneStarted: number, interrupt?: () => void, r
         'Layout v' + layout.version + ' · seed ' + layout.seed + (layout.fallback ? ' (fallback)' : ''),
         'Rooms   ' + layout.rooms.length + ' · passages ' + layout.passages.length,
         ...(s.mission ? ['Contract  '+s.mission.contract.seed+' · expedition '+(s.mission.contract.index+1)+'/'+s.mission.contract.expeditions+' · '+s.mission.contract.credited+'/'+s.mission.contract.quota,
-          'Salvage moved  '+s.mission.haul.length+(s.mission.awake ? ' · Diver awake' : '')] : []),
+          'Salvage moved  '+s.mission.haul.length+(s.mission.awake ? ' · Diver awake' : ''),
+          'Battery  '+chargeOf(l)+'/'+batteryLife+' s'+(l.on ? '' : ' (off)')+' · clock '+(s.mission.clock ?? 0)+' s'] : []),
         'Open doors  ' + (opened.join(', ') || 'none'),
       ] : []),
     ].join('\n');

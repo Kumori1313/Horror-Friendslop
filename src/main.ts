@@ -6,11 +6,11 @@ import { mountDiagnostics } from './diagnostics.ts';
 import './style.css';
 import { generatorVersion, geometryFor, nearbyDoor, roomAt, roomLabel, solidsAt } from './layout.ts';
 import type { Layout, Geometry } from './layout.ts';
-import { hotbarSize, lampSlot, selected, slotsOf, walls } from './room.ts';
+import { batteryLife, chargeOf, hotbarSize, lampSlot, selected, slotsOf, walls } from './room.ts';
 import { SoloSession } from './solo-session.ts';
 import { CreatorSession, type Crew } from './creator-session.ts';
 import { RoomConnection, type Events } from './connection.ts';
-import type { Action, Command, Input, Player, Ticket, Snapshot } from './room.ts';
+import type { Action, Command, Input, Lamp, Player, Ticket, Snapshot } from './room.ts';
 import { bindDrag } from './touch.ts';
 import { createScene } from './scene.ts';
 import { Prediction } from './prediction.ts';
@@ -81,7 +81,7 @@ function start(render: ReturnType<typeof createScene>, mode?: Crew | 'solo', sce
   const slotButtons = Array.from({length:hotbarSize},(_,i) => {
     const b = document.createElement('button');
     b.type = 'button';
-    b.innerHTML = '<img alt=""><span class="key">'+(i+1)+'</span>';
+    b.innerHTML = '<img alt=""><span class="key">'+(i+1)+'</span><span class="battery" hidden><i></i></span>';
     b.onclick = () => select(i);
     hotbar.append(b);
     return b;
@@ -118,7 +118,12 @@ function start(render: ReturnType<typeof createScene>, mode?: Crew | 'solo', sce
     });
   }
   function act(action: Action, extra?: Command) { if (playing && state) connection.action(action,extra); }
-  function switchLight() { if (state?.lamp.owner === id) act('toggle'); }
+  // F switches the flashlight, or loads a spare cell selected in the hotbar.
+  const loading = (s: Snapshot) => {
+    const p = s.players.find(q => q.id === id), item = p && selected({...p,hand:handOf(p)});
+    return s.lamp.owner === id && !!item && kindOf(item) === 'cell';
+  };
+  function switchLight() { if (state?.lamp.owner === id) act(loading(state) ? 'load' : 'toggle'); }
   function openDoor() { if (geometry) act('open-door'); }
   doorButton.onclick = openDoor;
   take.onclick = () => act('take');
@@ -245,11 +250,19 @@ function start(render: ReturnType<typeof createScene>, mode?: Crew | 'solo', sce
   }
   const nameOf = (kind: ItemKind | 'lamp') => kind === 'lamp' ? 'Flashlight' : itemName(kind);
   let previews: Record<string,string> | undefined;
-  function showHotbar(p: Player) {
+  // The flashlight's slot shows how much battery is left.
+  function showHotbar(p: Player, lamp: Lamp) {
     previews ??= render.previews();
-    const slots = slotsOf(p), current = handOf(p);
+    const slots = slotsOf(p), current = handOf(p), left = chargeOf(lamp)/batteryLife;
     slots.forEach((item,i) => {
       const b = slotButtons[i], kind = item ? kindOf(item) : undefined, img = b.querySelector('img')!;
+      const meter = b.querySelector<HTMLElement>('.battery')!, bar = meter.firstElementChild as HTMLElement;
+      meter.hidden = kind !== 'lamp';
+      if (kind === 'lamp') {
+        const width = Math.round(left*100)+'%';
+        if (bar.style.width !== width) bar.style.width = width;
+        meter.classList.toggle('low',left < 0.2);
+      }
       const src = kind ? previews![kind] : '';
       if (img.getAttribute('src') !== src) { if (src) img.src = src; else img.removeAttribute('src'); }
       img.hidden = !kind;
@@ -291,7 +304,7 @@ function start(render: ReturnType<typeof createScene>, mode?: Crew | 'solo', sce
     const pick = active ? nearestPickup(layout,s,p,solids) : undefined;
     const pickName = pick ? ('lamp' in pick ? 'flashlight' : itemName(pick.item.kind)) : '';
     hotbar.hidden = !brief.hidden;
-    if (brief.hidden) showHotbar(me);
+    if (brief.hidden) showHotbar(me,s.lamp);
     if (layout && s.mission) {
       if (finished(s.mission.stage) || s.mission.stage === 'settled') {
         if (playing) pause();
@@ -306,8 +319,8 @@ function start(render: ReturnType<typeof createScene>, mode?: Crew | 'solo', sce
       take.textContent = 'Pick up '+pickName;
       dropButton.hidden = throwButton.hidden = !heldKind || !active;
       if (!geometry) throwButton.hidden = true;
-      toggle.disabled = !!down || !holding;
-      toggle.textContent = l.on ? 'Light off' : 'Light on';
+      toggle.disabled = !!down || !holding || (!l.on && !chargeOf(l) && !loading(s));
+      toggle.textContent = loading(s) ? 'Load cell' : l.on ? 'Light off' : 'Light on';
     }
     const held = heldKind ? (heldKind === 'lamp' ? 'flashlight' : itemName(heldKind)) : '';
     if (!brief.hidden) prompt.textContent = solo ? '' : s.players.length === 2 ? 'Both seats occupied' : 'Waiting for a partner';
@@ -323,6 +336,8 @@ function start(render: ReturnType<typeof createScene>, mode?: Crew | 'solo', sce
     else if (way) prompt.textContent = (touchMode ? '' : 'R  ')+(way === 'enter' ? 'Enter the facility' : 'Leave the facility');
     else if (door) prompt.textContent = touchMode ? 'Bulkhead within reach' : 'R  Open bulkhead';
     else if (pick) prompt.textContent = touchMode ? pickName[0].toUpperCase()+pickName.slice(1)+' within reach' : 'E  Pick up '+pickName;
+    else if (heldKind === 'cell') prompt.textContent = holding ? (touchMode ? 'Tap Load cell to recharge the flashlight' : 'F  Load the spare cell into the flashlight   ·   X  Drop it') : 'Carry the flashlight to load this spare cell';
+    else if (holding && !chargeOf(l)) prompt.textContent = 'The flashlight is flat. Find a spare cell';
     else if (held) prompt.textContent = touchMode ? 'Holding the '+held : 'X  Drop '+held+'   ·   Hold T or click  Throw'+(holding ? '   ·   F  Switch '+(l.on ? 'off' : 'on') : '');
     else if (holding) prompt.textContent = touchMode ? 'The flashlight is clipped on' : 'F  Switch the clipped flashlight '+(l.on ? 'off' : 'on');
     else if (place === 'outside' && s.mission?.rift && Math.hypot(p.x-s.mission.rift.x,p.z-s.mission.rift.z) < 6) prompt.textContent = 'Walk into the rift to leave, or throw salvage in';

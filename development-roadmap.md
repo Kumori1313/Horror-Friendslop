@@ -255,6 +255,7 @@ Phase 13's outdoor map is a placeholder made from the facility's own collision p
 
 ## Phase 19 — Animate the crew, equipment, and creatures
 
+- Model the items before animating them. Replace the coloured boxes with real models for every piece of salvage, the flashlight, and the bought gear (spare cells, flares, the stun baton), so each is recognisable on sight in hand, on the floor, in flight and in its hotbar preview. Keep them cheap: low-poly, one instanced mesh per kind as now, with the same collision bodies so throws are unchanged.
 - Animate idle, walk, stair travel, carrying, tool use, downed, and revive states. Give doors, pickups, flashlight use, throws, the bell, and the rift opening and closing visible transitions. Start creature animation in its encounter phase, then finish ceiling traversal, attacks, retreats, and hit reactions across the roster.
 - Drive animations from confirmed gameplay events so a guest sees what the host resolved. Reconnecting mid-action should restore the current pose. Retain reduced-motion controls and measure frame times on the physical Android host in a dark, multi-floor encounter.
 - Share skeletons and animation clips between characters of the same kind. Skip animation updates for culled characters, and update distant ones at a lower rate. Use simpler meshes for characters seen across a large hall.

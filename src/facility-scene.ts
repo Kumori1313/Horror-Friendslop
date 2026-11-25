@@ -24,7 +24,7 @@ function poweredVariant(material: T.Material) {
   if (!v) {
     v = material.clone();
     v.onBeforeCompile = shader => {
-      shader.fragmentShader = shader.fragmentShader.replace('#include <emissivemap_fragment>','#include <emissivemap_fragment>\n\ttotalEmissiveRadiance += diffuseColor.rgb * 0.07;');
+      shader.fragmentShader = shader.fragmentShader.replace('#include <emissivemap_fragment>','#include <emissivemap_fragment>\n\ttotalEmissiveRadiance += diffuseColor.rgb * 0.1;');
     };
     v.customProgramCacheKey = () => 'powered';
     lit.set(material,v);
@@ -236,12 +236,13 @@ export function buildFacility(layout: Layout, library: Library) {
     root.removeFromParent();
   }
   // Each powered room's lamp: under the middle of its largest ceiling.
-  const lamps = new Map<string,{x: number; y: number; z: number; height: number}>(), sizes = new Map<string,number>();
+  const lamps = new Map<string,{x: number; y: number; z: number; height: number; reach: number}>(), sizes = new Map<string,number>();
   for (const r of geometry.roofs) {
     if (!power.get(r.room) || Math.min(r.w,r.d) < 2 || r.w*r.d <= (sizes.get(r.room) ?? 0)) continue;
     sizes.set(r.room,r.w*r.d);
     const floor = byId.get(r.room)!.y;
-    lamps.set(r.room,{x:r.x,y:r.y-0.12,z:r.z,height:r.y-floor});
+    // `reach`: from the middle of the ceiling to its farthest corner.
+    lamps.set(r.room,{x:r.x,y:r.y-0.12,z:r.z,height:r.y-floor,reach:Math.hypot(r.w,r.d)/2});
   }
   return {root,update,show,dispose,salvage,lamps,rooms:groups.size};
 }

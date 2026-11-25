@@ -201,12 +201,14 @@ export function createScene(canvas: HTMLCanvasElement, generated = false) {
   // pool goes to the nearest drawn ones each frame, fading in, so the number
   // of lights (and with it every shader) never changes inside.
   const ceilingLamps = Array.from({length:3},() => {
-    const light = new T.SpotLight(0xfff0d6,0,10,1.05,0.65,1.3);
+    // Wide and soft, from just above the ceiling, so it fills the room
+    // rather than pooling on the floor.
+    const light = new T.SpotLight(0xfff0d6,0,10,1.4,1,1);
     light.userData.room = '';
     scene.add(light,light.target);
     return light;
   });
-  function lightRooms(lamps: Map<string,{x: number; y: number; z: number; height: number}> | undefined, drawn: Set<string> | undefined, dt: number) {
+  function lightRooms(lamps: Map<string,{x: number; y: number; z: number; height: number; reach: number}> | undefined, drawn: Set<string> | undefined, dt: number) {
     const near = lamps ? [...lamps].filter(([room]) => !drawn || drawn.has(room))
       .sort((a,b) => camera.position.distanceToSquared(new T.Vector3(a[1].x,a[1].y,a[1].z))-camera.position.distanceToSquared(new T.Vector3(b[1].x,b[1].y,b[1].z)))
       .slice(0,ceilingLamps.length) : [];
@@ -218,8 +220,10 @@ export function createScene(canvas: HTMLCanvasElement, generated = false) {
       if (placed.has(room)) continue;
       const light = free.shift()!;
       light.userData.room = room; light.intensity = 0;
-      light.position.set(lamp.x,lamp.y,lamp.z); light.target.position.set(lamp.x,lamp.y-1,lamp.z);
-      light.distance = lamp.height*2.4+2; light.userData.full = 26+lamp.height*5;
+      light.position.set(lamp.x,lamp.y+0.9,lamp.z); light.target.position.set(lamp.x,lamp.y-1,lamp.z);
+      // It fades out at the room's far corners, so with no shadows it
+      // barely reaches through the walls into the dark rooms next door.
+      light.distance = Math.hypot(lamp.reach,lamp.height+0.9)+0.5; light.userData.full = 6+lamp.height*1.4;
     }
     for (const light of ceilingLamps) {
       if (!taken.has(light.userData.room)) light.userData.room = '';
@@ -350,7 +354,9 @@ export function createScene(canvas: HTMLCanvasElement, generated = false) {
   const looks: Record<Place,{background: number; fog: number; density: number; sky: number; skyGround: number; skyLevel: number; moon: number; moonLevel: number; far: number}> = {
     // Inside is dark but for powered rooms, which glow by themselves, the
     // landmarks, and the flashlight.
-    inside:{background:0x080b0b,fog:0x090d0c,density:0.043,sky:0xc0e0dc,skyGround:0x3a342c,skyLevel:0.14,moon:0xe2d8b7,moonLevel:0.05,far:48},
+    // No moon indoors: even a faint directional light glints off smooth metal
+    // in a room with no light of its own.
+    inside:{background:0x080b0b,fog:0x090d0c,density:0.043,sky:0xc0e0dc,skyGround:0x3a342c,skyLevel:0.14,moon:0xe2d8b7,moonLevel:0,far:48},
     outside:{background:0x141d26,fog:0x18222b,density:0.017,sky:0x7f95b3,skyGround:0x3a352c,skyLevel:1.05,moon:0xb3c6ea,moonLevel:0.95,far:110},
     home:{background:0x120d1c,fog:0x161023,density:0.035,sky:0xb7a6e6,skyGround:0x3a2f45,skyLevel:1.1,moon:0xd8c8ff,moonLevel:0.6,far:48},
   };

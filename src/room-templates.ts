@@ -185,33 +185,79 @@ export interface TemplateGeometry {
   props:(Solid & {kind:PropKind; room:string})[]; doors:(Solid & {id:string})[]; openings:Opening[];
   water?:Water;
 }
-// Water along a river: its centre line with the floor's height at each
-// point, and its fords. Over the channel the surface stands `deep` above the
-// floor, `shallow` near a ford (by straight distance to it), reaching out over
-// the banks; where the ground stands above it there is no water. Movement,
-// planning and drowning read it.
-export interface Water { points:{x:number; z:number; floor:number}[]; fords:{x:number; z:number; floor:number}[]; deep:number; shallow:number; width:number }
+// Water along a river: its centre line with the water's surface at each
+// point (never rising downstream), and its fords. The riverbed is cut to a
+// fixed depth under that surface, `deepWater` in the channel and `fordWater`
+// at a ford, where the bed rises like a riffle; a level floor `riverFloor`
+// either side of the centre line, then banks rising `steepBank` per metre
+// (far too steep to climb), or `gentleBank` at a ford. Where a bank would be
+// lower than the water, a low levee holds it in. The map carves its ground
+// from `channel`; movement, planning, drowning and the water's mesh read
+// `waterLevel`.
+export interface Water { points:{x:number; z:number; level:number}[]; fords:{x:number; z:number}[] }
+export const deepWater = 2.6, fordWater = 0.7, riverFloor = 3.2, steepBank = 1.8, gentleBank = 0.3;
 const easing = (t:number) => { const c = Math.max(0,Math.min(1,t)); return c*c*(3-2*c); };
-// How much of a ford there is at (x, z): 1 within 17 m of its middle (the
-// whole width of its gentle banks), none by 27 m.
-export const fordAt = (fords:{x:number; z:number}[],x:number,z:number) => Math.max(0,...fords.map(f => easing(1-(Math.hypot(x-f.x,z-f.z)-17)/10)));
-// The water's surface over (x, z), or undefined outside the channel.
-export function waterLevel(w:Water,x:number,z:number) {
-  let best = Infinity, floor = 0;
-  const p = w.points;
-  for (let i=1;i<p.length;i++) {
-    const ax = p[i-1].x, az = p[i-1].z, sx = p[i].x-ax, sz = p[i].z-az, len = sx*sx+sz*sz;
-    const u = Math.max(0,Math.min(1,((x-ax)*sx+(z-az)*sz)/len)), qx = ax+sx*u-x, qz = az+sz*u-z, d = qx*qx+qz*qz;
-    if (d < best) { best = d; floor = p[i-1].floor+(p[i].floor-p[i-1].floor)*u; }
+// How much of a ford there is at (x, z): 1 within 30 m of its middle, so its
+// gentle banks ramp all the way up to the land around, none by 40 m.
+export function fordAt(fords:{x:number; z:number}[],x:number,z:number) {
+  let most = 0;
+  for (const f of fords) most = Math.max(most,easing(1-(Math.hypot(x-f.x,z-f.z)-30)/10));
+  return most;
+}
+// How shallow the water is at (x, z): 1 within 9 m of a ford, none by 15 m.
+function shallowAt(fords:{x:number; z:number}[],x:number,z:number) {
+  let most = 0;
+  for (const f of fords) most = Math.max(most,easing(1-(Math.hypot(x-f.x,z-f.z)-9)/6));
+  return most;
+}
+// The segments within `radius` (plus a cell) of each 8 m cell, found once
+// per cell: 46 m for the riverbed's shape, 20 m for where water can be.
+const nearby = new WeakMap<Water,Map<number,number[]>>();
+function segmentsNear(w:Water,x:number,z:number,radius:46 | 20) {
+  let cells = nearby.get(w);
+  if (!cells) nearby.set(w,cells = new Map());
+  const ci = Math.floor(x/8), ck = Math.floor(z/8), key = (ci*4096+ck)*2+(radius === 20 ? 1 : 0);
+  let list = cells.get(key);
+  if (!list) {
+    const cx = ci*8+4, cz = ck*8+4, p = w.points;
+    list = [];
+    for (let i=1;i<p.length;i++) if (Math.abs(p[i-1].x-cx) < radius+4 && Math.abs(p[i-1].z-cz) < radius+4) list.push(i);
+    cells.set(key,list);
   }
-  const ford = fordAt(w.fords,x,z);
-  if (Math.sqrt(best) > w.width+2.5+11*ford) return;
-  // Near a ford the surface is set by the ford's own floor, so a bend of the
-  // river nearby can't flood its shallows.
-  let ford2 = w.fords[0], near = Infinity;
-  for (const f of w.fords) { const d = Math.hypot(x-f.x,z-f.z); if (d < near) { near = d; ford2 = f; } }
-  const shallow = ford2 ? easing(1-(near-9)/6) : 0;
-  return (floor+w.deep)*(1-shallow)+(shallow ? (ford2.floor+w.shallow)*shallow : 0);
+  return list;
+}
+// The riverbed at (x, z): `bed` is the lowest the ground may be, `levee` the
+// lowest it may stand where water would otherwise spill, `level` the water's
+// surface there, and `wet` whether (x, z) is within the water's reach. Taken
+// over every stretch of the river, so meanders meet smoothly. Undefined far
+// from the river.
+export function channel(w:Water,x:number,z:number) {
+  const list = segmentsNear(w,x,z,46);
+  if (!list.length) return;
+  const p = w.points, depth = deepWater+(fordWater-deepWater)*shallowAt(w.fords,x,z), slope = steepBank+(gentleBank-steepBank)*fordAt(w.fords,x,z);
+  const reach = riverFloor+depth/slope;
+  let bed = Infinity, levee = -Infinity, level = 0, wet = false;
+  for (const i of list) {
+    const ax = p[i-1].x, az = p[i-1].z, sx = p[i].x-ax, sz = p[i].z-az, len = sx*sx+sz*sz;
+    const u = Math.max(0,Math.min(1,((x-ax)*sx+(z-az)*sz)/len)), d = Math.hypot(ax+sx*u-x,az+sz*u-z);
+    if (d > 40) continue;
+    const surface = p[i-1].level+(p[i].level-p[i-1].level)*u;
+    const b = surface-depth+Math.max(0,d-riverFloor)*slope;
+    if (b < bed) { bed = b; level = surface; wet = d <= reach+1; }
+    // Only just beyond the waterline, where the map's surface already keeps
+    // the ground above the water (see `riverSurface`); this mends the odd spot.
+    if (d <= reach+3) levee = Math.max(levee,surface+0.3-0.5*Math.max(0,d-reach-1));
+  }
+  if (bed === Infinity) return;
+  return {bed,levee,level,wet};
+}
+// The water's surface over (x, z), or undefined away from the water.
+export function waterLevel(w:Water,x:number,z:number) {
+  // Water reaches at most riverFloor+deepWater/gentleBank+1 (about 13 m)
+  // from the centre line; skip the riverbed's full shape well beyond that.
+  if (!segmentsNear(w,x,z,20).length) return;
+  const c = channel(w,x,z);
+  return c?.wet ? c.level : undefined;
 }
 // Wading slows an operator once the water is over their knees; over their
 // head, they are under.

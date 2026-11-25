@@ -59,7 +59,8 @@ function start(render: ReturnType<typeof createScene>, mode?: Crew | 'solo', sce
   // Game Hub crews go by the names chosen in the lobby.
   const operator = (seat: number) => crew?.names[seat] ?? 'Operator '+seat;
   const hud = missionHud(preferences,operator);
-  const diagnostics = import.meta.env.DEV || import.meta.env.MODE === 'diagnostics'
+  const testing = import.meta.env.DEV || import.meta.env.MODE === 'diagnostics';
+  const diagnostics = testing
     ? mountDiagnostics(sceneStarted,solo ? undefined : () => { if (state) network?.interrupt(2000); },render.stats,
       solo || crew?.host ? () => { const host = connection as {grant?: (amount: number) => void}; host.grant?.(200); } : undefined)
     : undefined;
@@ -119,7 +120,7 @@ function start(render: ReturnType<typeof createScene>, mode?: Crew | 'solo', sce
   slotName.className = 'name';
   function showControls() {
     touchControls.hidden = !playing || !touchMode;
-    element('control-hint').textContent = touchMode ? 'Left pad to walk · Swipe the room to look' : 'WASD to walk · Mouse or arrows to look';
+    element('control-hint').textContent = touchMode ? 'Left pad to walk · Swipe the room to look' : 'WASD to walk · Mouse or arrows to look'+(testing ? ' · Shift to sprint (testing)' : '');
     diagnostics?.setTouch(touchMode);
   }
   function look(dx: number, dy: number, sensitivity: number) {
@@ -214,6 +215,8 @@ function start(render: ReturnType<typeof createScene>, mode?: Crew | 'solo', sce
     return {
       forward: Math.max(-1,Math.min(1,Number(keys.has('KeyW')) - Number(keys.has('KeyS')) - stickY)),
       right: Math.max(-1,Math.min(1,Number(keys.has('KeyD')) - Number(keys.has('KeyA')) + stickX)), yaw, pitch,
+      // Testing builds only: hold Shift to sprint.
+      ...(testing && (keys.has('ShiftLeft') || keys.has('ShiftRight')) ? {sprint:true} : {}),
     };
   }
   function input() { connection.input(controls()); }

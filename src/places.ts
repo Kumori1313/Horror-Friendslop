@@ -1,6 +1,6 @@
 import { collisionIndex, connections, geometryFor, walkable, type Geometry, type Layout } from './layout.ts';
-import { landings, placeBridges, placeRuins, placeWrecks, riverCourse, riverCut, riverDepth, riverNearest, riverFloor, riverWater, trail, type Bridge, type River, type Ruin, type Wreck } from './outdoor-features.ts';
-import { wadeDepth, waterLevel, type Water } from './room-templates.ts';
+import { landings, placeBridges, placeFords, placeRuins, placeWrecks, poolFords, riverCourse, riverFloor, riverSurface, riverWater, trail, type Bridge, type River, type Ruin, type Wreck } from './outdoor-features.ts';
+import { channel, wadeDepth, waterLevel, type Water } from './room-templates.ts';
 import { climbable, fieldGrade, fieldHeight, maxGrade, obstaclesAt, orient, outward, planningGrade, socketAt, surfaceAt } from './room-templates.ts';
 import { clearAt } from './room.ts';
 import type { Heightfield, Point3, RoomWall } from './room-templates.ts';
@@ -119,7 +119,7 @@ export function outdoors(seed: number): Outdoors {
   const rockSeeds = Array.from({length:400},() => [next(),next(),next(),next(),next()]);
   // The dry riverbed keeps well clear of the building and the arrival.
   const river = riverCourse(next,half,[{x:building.x,z:building.z,r:34},{x:ax,z:az,r:18}]) ?? {points:[],fords:[]};
-  const featureSeed = Math.floor(next()*2**31);
+  const featureSeed = Math.floor(next()*2**31), fordCount = river.fords.length;
   // Every door and the bell must be reachable on foot, and nowhere an
   // operator can get down to may leave them stranded. Try other ditches
   // first, then gentler ground.
@@ -131,18 +131,13 @@ export function outdoors(seed: number): Outdoors {
       // floor about 3 m wide between steep walls, so an operator who drops in
       // can walk along the floor to where the ditch fades out into a crossing.
       -scale*2.8*smooth((1-Math.abs(creases(x/34+offsets[1]+shift,z/34+offsets[2]))/0.16)/0.55)*smooth((fade(x/23+shift,z/23+offsets[3])+0.15)/0.5);
-    const arrivalLevel = base(ax,az), fordLevels = river.fords.map(f => ({x:f.x,z:f.z,y:base(f.x,f.z)}));
-    // Around each ford the hillside eases toward the ford's own height, so
-    // its gentle banks aren't tipped too steep by the slope they sit on.
-    const shaped = (x: number, z: number) => {
-      let y = base(x,z);
-      for (const f of fordLevels) { const d = Math.hypot(x-f.x,z-f.z); if (d < 22) y += (f.y-y)*(1-smooth((d-12)/10)); }
-      return y;
-    };
+    // The fords go where the river would cut least deep into these hills.
+    if (river.points.length) river.fords = placeFords(river,riverSurface(river,base,half),base,half,fordCount,[{x:building.x,z:building.z,r:42},{x:ax,z:az,r:28}]);
+    const arrivalLevel = base(ax,az);
     const n = outdoorSize+1, h: number[] = new Array(n*n);
     for (let k=0;k<n;k++) for (let i=0;i<n;i++) {
       const x = i-half, z = k-half;
-      let y = shaped(x,z);
+      let y = base(x,z);
       // The building's plot, with the bell in front, is level at 0.
       const plot = Math.max(Math.abs(x-building.x)-building.w/2-8,Math.abs(z-building.z-2)-building.d/2-9,0);
       y *= smooth(plot/12);
@@ -167,20 +162,19 @@ export function outdoors(seed: number): Outdoors {
     g.props.push({x:bell.x,z:bell.z,w:1.3,d:1.3,y:0,h:2.7,kind:'bell',room});
     // Nowhere to get stuck: fill any ground that has no way back out.
     for (let pass=0;pass<6 && unstrand(g,ground,{x:ax,y:arrivalLevel,z:az});pass++);
-    // Then the riverbed, carved after: falling into it away from a ford is a
-    // hazard by design. Never cut below the floor at the river's middle, so
-    // its banks hold no deep pockets.
-    if (river.points.length) {
-      const before = {...ground,h:[...h]};
-      for (let j=0;j<n*n;j++) {
-        const x = ground.x0+(j % n), z = ground.z0+Math.floor(j/n), cut = riverCut(river,x,z);
-        if (cut <= 0) continue;
-        const c = riverNearest(river,x,z);
-        h[j] = Math.round(Math.max(h[j]-cut,fieldHeight(before,c.x,c.z)-riverDepth)*100)/100;
-      }
+    // Then the river, carved after: falling into it away from a ford is a
+    // hazard by design. Its surface follows the ground downstream without
+    // ever rising; the bed is cut under it, and a low levee holds the water
+    // in wherever the bank would be lower.
+    const water = riverWater(river,river.points.length ? poolFords(river,riverSurface(river,height,half)) : []);
+    // The building's plot and the arrival area stay as they are, the cut
+    // easing in over 8 m around them.
+    for (let j=0;j<n*n && river.points.length;j++) {
+      const x = ground.x0+(j % n), z = ground.z0+Math.floor(j/n), c = channel(water,x,z);
+      if (!c) continue;
+      const plot = Math.max(Math.abs(x-building.x)-building.w/2-8,Math.abs(z-building.z-2)-building.d/2-9,0), keep = Math.min(smooth(plot/8),smooth((Math.hypot(x-ax,z-az)-15)/8));
+      h[j] = Math.round((h[j]+(Math.min(c.bed,Math.max(h[j],c.levee))-h[j])*keep)*100)/100;
     }
-    // Water in the riverbed, and dilapidated bridges over it.
-    const water = riverWater(river,height);
     g.water = water;
     const bridges = river.points.length ? placeBridges(random(featureSeed ^ 0x6b43a9b5),river,water,ground,half) : [];
     // Level a pad of ground at each landing to the deck's height, a little
@@ -245,7 +239,8 @@ export function outdoors(seed: number): Outdoors {
     const dry = (x: number, z: number, y: number) => { const l = waterLevel(water,x,z); return l === undefined || l-y <= wadeDepth+0.5; };
     const trails = doors.map(d => trail(ground,g.surfaces[0],(x,z,y) => index.clear(x,z,y,0.6) && dry(x,z,y),(x,z) => wander(x/12,z/12)*0.5+0.5,{x:ax,z:az},d.exit));
     const marks = new Uint8Array(n*n);
-    for (let j=0;j<n*n;j++) if (river.points.length && riverCut(river,ground.x0+(j % n),ground.z0+Math.floor(j/n)) > riverDepth*0.7) marks[j] = 2;
+    // Silt where the water stands and along its edge.
+    for (let j=0;j<n*n;j++) { const x = ground.x0+(j % n), z = ground.z0+Math.floor(j/n), l = waterLevel(water,x,z); if (l !== undefined && h[j] < l+0.4) marks[j] = 2; }
     for (const line of trails) for (const p of line ?? []) for (let dz=-1;dz<=1;dz++) for (let dx=-1;dx<=1;dx++) {
       const i = Math.round(p.x-ground.x0)+dx, k = Math.round(p.z-ground.z0)+dz;
       if (i >= 0 && k >= 0 && i < n && k < n && Math.hypot(ground.x0+i-p.x,ground.z0+k-p.z) <= 1.3) marks[k*n+i] = 1;

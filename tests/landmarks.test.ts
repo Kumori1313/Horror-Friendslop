@@ -44,7 +44,7 @@ test('the riverbed is a barrier: its banks can\'t be climbed except at the fords
       const from = walkable(map.geometry,{x:ford.x,y:groundAt(map,ford.x,ford.z),z:ford.z},[],0.5);
       assert.ok(from(side(-1)) && from(side(1)),'seed '+seed+': both banks of the ford at '+ford.t+' can be climbed');
     }
-    const away = inside.filter(i => map.river.fords.every(fd => Math.hypot(p[i].x-fd.x,p[i].z-fd.z) > 30));
+    const away = inside.filter(i => map.river.fords.every(fd => Math.hypot(p[i].x-fd.x,p[i].z-fd.z) > 40));
     const barrier = away.filter(i => across(i) > maxGrade).length;
     assert.ok(barrier >= away.length*0.7,'seed '+seed+': '+barrier+' of '+away.length+' stretches between fords can\'t be climbed out of');
   }

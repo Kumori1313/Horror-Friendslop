@@ -15,7 +15,7 @@ const seed = 19;
 const map = outdoors(seed);
 // The middle of the river away from any ford, and the middle of a ford.
 const deepSpot = (() => {
-  const p = map.river.points.find(q => Math.max(Math.abs(q.x),Math.abs(q.z)) < 50 && map.river.fords.every(f => Math.hypot(f.x-q.x,f.z-q.z) > 30))!;
+  const p = map.river.points.find(q => Math.max(Math.abs(q.x),Math.abs(q.z)) < 55 && map.river.fords.every(f => Math.hypot(f.x-q.x,f.z-q.z) > 20) && (waterLevel(map.water,q.x,q.z) ?? -Infinity)-groundAt(map,q.x,q.z) > 2)!;
   return {x:p.x,y:groundAt(map,p.x,p.z),z:p.z};
 })();
 const ford = {...map.fords[0],y:groundAt(map,map.fords[0].x,map.fords[0].z)};

@@ -1,4 +1,4 @@
-import { batteryLife, chargeOf, clearAt, command, freeSlot, hotbarSize, lampSlot, selected, slotsOf, walls } from '../room.ts';
+import { batteryLife, chargeOf, clearAt, command, freeSlot, hotbarSize, lampSlot, selected, slotsOf, sprintSpeed, walls } from '../room.ts';
 import type { Action, Aim, Command, Input, Lamp, Player, Snapshot } from '../room.ts';
 import { flightStep, gravity, launchFrom, trajectory } from '../flight.ts';
 import type { Body, Flight } from '../flight.ts';
@@ -22,7 +22,7 @@ export function moveOperator(p: Player, input: Input, dt: number, geometry: Geom
   // Wading past the knees slows an operator down.
   const level = geometry?.water ? waterLevel(geometry.water,p.x,p.z) : undefined;
   const wading = level !== undefined && level-(p.feetY ?? 0) > wadeDepth;
-  const step = 3.3 * (wading ? 0.6 : 1) * dt / Math.max(1, Math.hypot(input.forward, input.right));
+  const step = 3.3 * (wading ? 0.6 : 1) * (input.sprint === true ? sprintSpeed : 1) * dt / Math.max(1, Math.hypot(input.forward, input.right));
   const x = p.x + (Math.cos(p.yaw) * input.right - Math.sin(p.yaw) * input.forward) * step;
   const z = p.z - (Math.cos(p.yaw) * input.forward + Math.sin(p.yaw) * input.right) * step;
   stepTo(p,x,p.z,geometry,opened);

@@ -3,18 +3,18 @@
 // from the arrival to the building's doors. Pure functions of the seed and
 // the ground, so every client builds the same map. Like `places.ts`, no
 // Node-only APIs.
-import { climbable, fieldGrade, fieldHeight, fordAt, planningGrade, waterLevel, type Heightfield, type Surface, type Water } from './room-templates.ts';
+import { climbable, deepWater, fieldGrade, fieldHeight, planningGrade, riverFloor, waterLevel, type Heightfield, type Surface, type Water } from './room-templates.ts';
+export { deepWater, fordWater, riverFloor } from './room-templates.ts';
 
 const smooth = (t: number) => { const c = Math.max(0,Math.min(1,t)); return c*c*(3-2*c); };
 type Rng = () => number;
 type Area = {x: number; z: number; r: number};
 
-// The riverbed: a meandering centre line across the map. `t` runs along it.
+// The river: a meandering centre line across the map. `t` runs along it.
 export interface River { points: {x: number; z: number; t: number}[]; fords: {x: number; z: number; t: number}[] }
-export const riverDepth = 4.5, riverFloor = 3.2;
-// Water over the riverbed's floor: over a head in the channel, about waist
-// deep at a ford.
-export const deepWater = 2.6, fordWater = 0.7;
+// Where the ground lets it, the water stands this far below the ground along
+// the centre line, so the bank tops are this far above the water.
+export const freeboard = 1.9;
 
 export function riverCourse(next: Rng, half: number, keep: Area[]): River | undefined {
   for (let tries=0;tries<12;tries++) {
@@ -39,14 +39,78 @@ export function riverCourse(next: Rng, half: number, keep: Area[]): River | unde
   }
 }
 
-// How much of a ford there is at (x, z).
-export const fordness = (river: River, x: number, z: number) => fordAt(river.fords,x,z);
+// The water's surface along the river: `freeboard` below the ground on its
+// centre line and 0.4 m below the lowest ground across it within 15 m, so the
+// banks hold it in, but never rising downstream, smoothed. It flows whichever
+// way cuts less deep into the hills, and where the ground rises downstream
+// the river cuts a gorge. Where it leaves the map through the cliffs it runs
+// level, through a gorge.
+export function riverSurface(river: River, height: (x: number, z: number) => number, half: number) {
+  const p = river.points, inside = (i: number) => Math.max(Math.abs(p[i].x),Math.abs(p[i].z)) < half-12;
+  const raw = p.map((q,i) => {
+    const a = p[Math.max(0,i-1)], c = p[Math.min(p.length-1,i+1)], len = Math.hypot(c.x-a.x,c.z-a.z) || 1, nx = -(c.z-a.z)/len, nz = (c.x-a.x)/len;
+    let low = height(q.x,q.z)-freeboard;
+    for (let s=-15;s<=15;s+=1) low = Math.min(low,height(q.x+nx*s,q.z+nz*s)-0.4);
+    return low;
+  });
+  const first = p.findIndex((_,i) => inside(i)), last = p.length-1-[...p].reverse().findIndex((_,i) => inside(p.length-1-i));
+  if (first >= 0) for (let i=0;i<p.length;i++) if (i < first) raw[i] = raw[first]; else if (i > last) raw[i] = raw[last];
+  const run = (order: number[]) => { const out = raw.slice(); let low = Infinity; for (const i of order) out[i] = low = Math.min(low,raw[i]); return out; };
+  const ahead = raw.map((_,i) => i), forward = run(ahead), backward = run(ahead.slice().reverse());
+  const cut = (m: number[]) => m.reduce((sum,v,i) => sum+raw[i]-v,0);
+  const low = cut(forward) <= cut(backward) ? forward : backward;
+  // Averaging a sequence that never rises gives one that never rises; never
+  // above the running low, so never above the ground.
+  return low.map((v,i) => { const near = low.slice(Math.max(0,i-5),i+6); return Math.min(v,near.reduce((a,b) => a+b,0)/near.length); });
+}
 
-// The water in the riverbed: the floor's height at each point of the centre
-// line, and the river's fords (see `waterLevel`).
-export function riverWater(river: River, height: (x: number, z: number) => number): Water {
-  const points = river.points.map(p => ({x:p.x,z:p.z,floor:height(p.x,p.z)}));
-  return {points,fords:river.fords.map(f => ({x:f.x,z:f.z,floor:height(f.x,f.z)})),deep:deepWater,shallow:fordWater,width:riverFloor};
+// Two or three fords spread along the stretch well inside the map, each in
+// its band where the river cuts least deep below the ground and the ground
+// rises least across it, so its gentle banks lead out onto the land around
+// rather than up against a hollow's rim.
+export function placeFords(river: River, surface: number[], height: (x: number, z: number) => number, half: number, count: number, keep: Area[]) {
+  // Clear of `keep` where the river allows, so a ford's wide banks stay away
+  // from level plots.
+  // Not on a tight meander, where crossing would lead straight into another
+  // stretch of the river.
+  const p = river.points, within = p.map((_,i) => i).filter(i => Math.max(Math.abs(p[i].x),Math.abs(p[i].z)) < half-26 &&
+    p.every(q => Math.abs(q.t-p[i].t) < 40 || Math.hypot(q.x-p[i].x,q.z-p[i].z) >= 30));
+  const clear = within.filter(i => keep.every(k => Math.hypot(p[i].x-k.x,p[i].z-k.z) >= k.r)), inner = clear.length >= count*8 ? clear : within;
+  if (inner.length < 12) return [];
+  // Bands of equal length along what is left, a margin kept between them.
+  const fords: River['fords'] = [], per = inner.length/count;
+  for (let k=0;k<count;k++) {
+    const band = inner.slice(Math.round(k*per+per*0.15),Math.round((k+1)*per-per*0.15)).filter(i => fords.every(f => Math.hypot(f.x-p[i].x,f.z-p[i].z) >= 30)), mid = band.length ? p[band[Math.floor(band.length/2)]].t : 0;
+    if (!band.length) continue;
+    const score = (i: number) => {
+      const a = p[i-1] ?? p[i], c = p[i+1] ?? p[i], len = Math.hypot(c.x-a.x,c.z-a.z) || 1, nx = -(c.z-a.z)/len, nz = (c.x-a.x)/len, here = height(p[i].x,p[i].z);
+      let rise = 0;
+      for (const side of [-1,1]) for (let s=6;s<=24;s+=2) rise = Math.max(rise,height(p[i].x+nx*s*side,p[i].z+nz*s*side)-here-0.15*s);
+      return here-freeboard-surface[i]+2*rise+0.02*Math.abs(p[i].t-mid);
+    };
+    const best = band.reduce((a,b) => score(b) < score(a) ? b : a);
+    fords.push({x:p[best].x,z:p[best].z,t:p[best].t});
+  }
+  return fords;
+}
+
+// Around each ford the water lies level, a pool at the lowest surface within
+// reach of its wide banks, so no stretch of the river there stands higher
+// than the bank another stretch's ford banks cut down to. Lowering never
+// lets the water spill, and the surface still never rises downstream.
+export function poolFords(river: River, surface: number[]) {
+  const out = surface.slice(), p = river.points;
+  for (const f of river.fords) {
+    const near = p.map((_,i) => i).filter(i => Math.hypot(p[i].x-f.x,p[i].z-f.z) <= 42 && Math.abs(p[i].t-f.t) <= 60);
+    const low = Math.min(...near.map(i => out[i]));
+    for (const i of near) out[i] = low;
+  }
+  return out;
+}
+
+// The water in the riverbed (see `Water`).
+export function riverWater(river: River, surface: number[]): Water {
+  return {points:river.points.map((p,i) => ({x:p.x,z:p.z,level:surface[i]})),fords:river.fords.map(f => ({x:f.x,z:f.z}))};
 }
 
 // The nearest point of the river's centre line to (x, z).
@@ -59,26 +123,6 @@ export function riverNearest(river: River, x: number, z: number) {
     if (d < best) { best = d; at = {x:qx,z:qz}; }
   }
   return at;
-}
-
-// How far below the ground the riverbed cuts at (x, z): a level floor
-// between banks too steep to climb, which widen into gentle slopes at a ford.
-export function riverCut(river: River, x: number, z: number) {
-  let best = Infinity, along = 0;
-  const p = river.points;
-  for (let i=1;i<p.length;i++) {
-    const ax = p[i-1].x, az = p[i-1].z, sx = p[i].x-ax, sz = p[i].z-az, len = sx*sx+sz*sz;
-    const u = Math.max(0,Math.min(1,((x-ax)*sx+(z-az)*sz)/len)), qx = ax+sx*u-x, qz = az+sz*u-z, d = qx*qx+qz*qz;
-    if (d < best) { best = d; along = p[i-1].t+(p[i].t-p[i-1].t)*u; }
-  }
-  const d = Math.sqrt(best);
-  if (d > riverFloor+14) return 0;
-  const ford = fordness(river,x,z);
-  // Banks 2.5 m wide: far too steep to climb, but wide enough for the 1 m
-  // height map to draw without a sawtooth edge; at a ford, 13.5 m, gentle.
-  const bank = 2.5+11*ford;
-  // Shallower at a ford, so its banks stay gentle even on a hillside.
-  return riverDepth*(1-0.35*ford)*(d <= riverFloor ? 1 : smooth(1-(d-riverFloor)/bank));
 }
 
 // Ground gentle enough to build on, a margin clear of anything steep.
@@ -248,6 +292,8 @@ export function placeBridges(next: Rng, river: River, water: Water, f: Heightfie
     };
     const a = end(-1), b = end(1);
     if (a === undefined || b === undefined || b-a > 30) continue;
+    // Room to step off at both ends, well inside the map's boundary walls.
+    if ([a-3,b+3].some(s => { const q = at(s); return Math.max(Math.abs(q.x),Math.abs(q.z)) > half-16; })) continue;
     // Both landings, and the ground beyond them, clear of the river, so a
     // bridge never lands beside another bend of it.
     if ([a,a-3,b,b+3].some(s => { const q = at(s), r = riverNearest(river,q.x,q.z); return Math.hypot(r.x-q.x,r.z-q.z) < riverFloor+3; })) continue;

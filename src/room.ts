@@ -8,7 +8,10 @@ export const walls = [
   { x: -3, z: -1, w: 4, d: 0.35 }, { x: 3, z: -1, w: 4, d: 0.35 },
 ];
 export interface Point { x: number; z: number }
-export interface Input { forward: number; right: number; yaw: number; pitch: number }
+// `sprint` is sent only by testing builds (the dev server and the
+// diagnostics build), to get around large maps quickly.
+export interface Input { forward: number; right: number; yaw: number; pitch: number; sprint?: boolean }
+export const sprintSpeed = 2.5;
 // `slots` is the hotbar: salvage ids, `lampSlot` for the flashlight, or null.
 // `hand` is the selected slot.
 // `place` is where the operator is (see places.ts). `transit` counts moves

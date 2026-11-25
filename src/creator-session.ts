@@ -29,7 +29,7 @@ interface Checkpoint { seed:number; state:Snapshot; time:number; ack:number; pee
 
 function validInput(v: Input) {
   return v && [v.forward,v.right,v.yaw,v.pitch].every(Number.isFinite) && Math.abs(v.forward)<=1 &&
-    Math.abs(v.right)<=1 && Math.abs(v.pitch)<=1.4;
+    Math.abs(v.right)<=1 && Math.abs(v.pitch)<=1.4 && (v.sprint===undefined || typeof v.sprint==='boolean');
 }
 
 export class CreatorSession {

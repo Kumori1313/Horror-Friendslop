@@ -3,7 +3,7 @@ import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js
 import { Batch } from './facility-scene.ts';
 import type { Library, Surface } from './materials.ts';
 import { groundAt, home, type Outdoors } from './places.ts';
-import { fieldHeight, fordAt, waterLevel } from './room-templates.ts';
+import { fieldHeight, waterLevel } from './room-templates.ts';
 
 // Merge boxes by material, with world-space texture coordinates, so a whole
 // place costs one draw per material.
@@ -274,20 +274,29 @@ export function buildOutdoors(map: Outdoors, library: Library) {
     for (const p of br.posts) b.box(wood,0x4a3d30,p.x,p.y+p.h/2,p.z,p.w,p.h,p.d);
   }
   b.build(root);
-  // The water: a ribbon along the river's centre line at its surface height,
-  // wide enough to meet the banks, dark and slowly moving.
-  const water = map.water.points, across = 8;
-  if (water.length > 1) {
+  // The water: a sheet at its surface over every height-map cell where the
+  // ground dips under it, so it meets the banks wherever they are and never
+  // hangs in the air. Dark, with a faint sheen, slowly moving.
+  const field = map.ground, n = field.n, river = map.water.points;
+  if (river.length > 1) {
+    const lo = {x:Math.min(...river.map(p => p.x))-16,z:Math.min(...river.map(p => p.z))-16}, hi = {x:Math.max(...river.map(p => p.x))+16,z:Math.max(...river.map(p => p.z))+16};
+    const levels = new Map<number,number | undefined>();
+    const levelAt = (i: number, k: number) => {
+      const key = k*n+i;
+      if (!levels.has(key)) { const x = field.x0+i*field.step, z = field.z0+k*field.step; levels.set(key,x < lo.x || x > hi.x || z < lo.z || z > hi.z ? undefined : waterLevel(map.water,x,z)); }
+      return levels.get(key);
+    };
     const position: number[] = [], uv: number[] = [], index: number[] = [];
-    water.forEach((p,i) => {
-      const a = water[Math.max(0,i-1)], c = water[Math.min(water.length-1,i+1)], len = Math.hypot(c.x-a.x,c.z-a.z) || 1;
-      const nx = -(c.z-a.z)/len, nz = (c.x-a.x)/len, wide = map.water.width+3.5+11*fordAt(map.water.fords,p.x,p.z);
-      for (let k=0;k<=across;k++) {
-        const s = (k/across*2-1)*wide, x = p.x+nx*s, z = p.z+nz*s;
-        position.push(x,waterLevel(map.water,x,z) ?? p.floor+map.water.deep,z); uv.push(k/across,i*0.5);
-        if (i && k) { const v = i*(across+1)+k; index.push(v-across-2,v-1,v-across-1,v-across-1,v-1,v); }
-      }
-    });
+    for (let k=0;k<n-1;k++) for (let i=0;i<n-1;i++) {
+      const corners = [[i,k],[i+1,k],[i+1,k+1],[i,k+1]], level = corners.map(([a,c]) => levelAt(a,c));
+      const known = level.filter((l): l is number => l !== undefined);
+      if (!known.length) continue;
+      const top = Math.max(...known);
+      if (!corners.some(([a,c],m) => field.h[c*n+a] < (level[m] ?? top)-0.01)) continue;
+      const v = position.length/3;
+      corners.forEach(([a,c],m) => { const x = field.x0+a*field.step, z = field.z0+c*field.step; position.push(x,level[m] ?? top,z); uv.push(x/4,z/4); });
+      index.push(v,v+3,v+1,v+1,v+3,v+2);
+    }
     const g = new T.BufferGeometry();
     g.setAttribute('position',new T.Float32BufferAttribute(position,3)); g.setAttribute('uv',new T.Float32BufferAttribute(uv,2));
     g.setIndex(index); g.computeVertexNormals();

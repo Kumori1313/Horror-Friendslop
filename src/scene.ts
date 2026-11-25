@@ -123,7 +123,7 @@ export function createScene(canvas: HTMLCanvasElement, generated = false) {
     let m = itemMaterials.get(kind);
     if (!m) {
       const k = itemKinds[kind], metal = kind !== 'board' && kind !== 'toolbox';
-      m = new T.MeshStandardMaterial({color:k.color,roughness:metal ? 0.32 : 0.6,metalness:metal ? 0.85 : 0.2,envMap:metal ? library?.reflections ?? null : null,emissive:k.color,emissiveIntensity:kind === 'cell' ? 0.55 : 0.08});
+      m = new T.MeshStandardMaterial({color:k.color,roughness:metal ? 0.32 : 0.6,metalness:metal ? 0.85 : 0.2,envMap:metal ? library?.reflections ?? null : null,emissive:k.color,emissiveIntensity:kind === 'cell' ? 0.55 : 0.08,envMapIntensity:0.3});
       itemMaterials.set(kind,m);
     }
     return m;
@@ -197,6 +197,36 @@ export function createScene(canvas: HTMLCanvasElement, generated = false) {
   const lens = new T.Mesh(new T.CircleGeometry(0.105,16),lensMat);
   lens.rotation.y = Math.PI; lens.position.z = -0.252; torch.add(lens);
   const beam = new T.SpotLight(0xffe2a3,85,17,0.43,0.55,1.4);
+  // Powered rooms are lit by a spotlight under their ceiling lamp. A fixed
+  // pool goes to the nearest drawn ones each frame, fading in, so the number
+  // of lights (and with it every shader) never changes inside.
+  const ceilingLamps = Array.from({length:3},() => {
+    const light = new T.SpotLight(0xfff0d6,0,10,1.05,0.65,1.3);
+    light.userData.room = '';
+    scene.add(light,light.target);
+    return light;
+  });
+  function lightRooms(lamps: Map<string,{x: number; y: number; z: number; height: number}> | undefined, drawn: Set<string> | undefined, dt: number) {
+    const near = lamps ? [...lamps].filter(([room]) => !drawn || drawn.has(room))
+      .sort((a,b) => camera.position.distanceToSquared(new T.Vector3(a[1].x,a[1].y,a[1].z))-camera.position.distanceToSquared(new T.Vector3(b[1].x,b[1].y,b[1].z)))
+      .slice(0,ceilingLamps.length) : [];
+    const taken = new Set(near.map(([room]) => room));
+    // Lights already on a wanted room stay; the rest go to the rooms left over.
+    const free = ceilingLamps.filter(l => !taken.has(l.userData.room));
+    const placed = new Set(ceilingLamps.map(l => l.userData.room));
+    for (const [room,lamp] of near) {
+      if (placed.has(room)) continue;
+      const light = free.shift()!;
+      light.userData.room = room; light.intensity = 0;
+      light.position.set(lamp.x,lamp.y,lamp.z); light.target.position.set(lamp.x,lamp.y-1,lamp.z);
+      light.distance = lamp.height*2.4+2; light.userData.full = 26+lamp.height*5;
+    }
+    for (const light of ceilingLamps) {
+      if (!taken.has(light.userData.room)) light.userData.room = '';
+      const want = light.userData.room ? light.userData.full : 0;
+      light.intensity += (want-light.intensity)*Math.min(1,dt*6);
+    }
+  }
   // A SpotLight starts at (0, 1, 0). Put it at the flashlight itself, which the
   // simulation keeps clear of walls, so the beam never starts inside one.
   beam.position.set(0,0,0); beam.target.position.set(0,0,-4); torch.add(beam,beam.target);
@@ -441,6 +471,7 @@ export function createScene(canvas: HTMLCanvasElement, generated = false) {
     if (layout && here === 'inside' && (layout !== loaded || !facility)) {
       facility?.dispose();
       facility = buildFacility(layout,library!);
+      for (const light of ceilingLamps) { light.userData.room = ''; light.intensity = 0; }
       scene.add(facility.root);
       portals = portalGraph(layout,geometryFor(layout));
       loaded = layout;
@@ -452,6 +483,9 @@ export function createScene(canvas: HTMLCanvasElement, generated = false) {
     }
     if (here === 'home' && !homeWorld && library) { homeWorld = buildHome(library); scene.add(homeWorld.root); }
     if (facility) facility.root.visible = here === 'inside';
+    // The ceiling lamps belong to the facility; elsewhere they're switched out
+    // of the scene (one shader rebuild per trip, not per frame).
+    for (const light of ceilingLamps) if (light.visible !== (here === 'inside')) light.visible = here === 'inside';
     if (outside) outside.root.visible = here === 'outside';
     if (homeWorld) homeWorld.root.visible = here === 'home';
     // Which places are held in memory, for tests: at home, only the home dimension.
@@ -569,6 +603,7 @@ export function createScene(canvas: HTMLCanvasElement, generated = false) {
           drawn = visibleRooms(portals,start,viewProjection.elements,camera.position,state.opened ?? [],camera.far);
         }
         facility.show(drawn);
+        lightRooms(facility.lamps,drawn,dt);
         stats.drawn = drawn?.size ?? facility.rooms; stats.rooms = facility.rooms;
         const shown = (x: number,z: number,y: number) => !drawn || drawn.has(surfaceAt(g,x,z,y)?.room ?? '');
         for (const p of state.players) {

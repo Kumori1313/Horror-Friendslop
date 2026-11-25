@@ -15,20 +15,28 @@ export const colors: Record<Kind,number> = {
 };
 const stations: Kind[] = ['intake'];
 const lamp = 0xe4e7c9;
-// A powered room glows by its own colour, so it reads as lit without a
-// real-time light: the surface's colour (texture and tint) is added to its
-// emitted light.
+// A powered room is lit by the spotlight under its ceiling lamp (scene.ts).
+// Its surfaces also get a faint glow of their own colour, the light bouncing
+// around the room, so the corners outside the cone aren't black.
 const lit = new WeakMap<T.Material,T.Material>();
 function poweredVariant(material: T.Material) {
   let v = lit.get(material);
   if (!v) {
     v = material.clone();
     v.onBeforeCompile = shader => {
-      shader.fragmentShader = shader.fragmentShader.replace('#include <emissivemap_fragment>','#include <emissivemap_fragment>\n\ttotalEmissiveRadiance += diffuseColor.rgb * 0.42;');
+      shader.fragmentShader = shader.fragmentShader.replace('#include <emissivemap_fragment>','#include <emissivemap_fragment>\n\ttotalEmissiveRadiance += diffuseColor.rgb * 0.07;');
     };
     v.customProgramCacheKey = () => 'powered';
     lit.set(material,v);
   }
+  return v;
+}
+// In an unpowered room nothing lights the surroundings, so metal reflects none.
+const unlit = new WeakMap<T.Material,T.Material>();
+function unpoweredVariant(material: T.Material) {
+  if (!(material instanceof T.MeshStandardMaterial) || !material.envMap) return material;
+  let v = unlit.get(material);
+  if (!v) { v = material.clone(); (v as T.MeshStandardMaterial).envMap = null; unlit.set(material,v); }
   return v;
 }
 const darkLamp = 0x34362f;
@@ -171,7 +179,7 @@ export function buildFacility(layout: Layout, library: Library) {
     label(intake.id,'Exit',d.x,d.y+2.95,d.z-0.06,Math.PI);
   }
   for (const [room,byMaterial] of batches) {
-    for (const [material,batch] of byMaterial) groups.get(room)!.add(new T.Mesh(batch.build(),material !== glow && power.get(room) ? poweredVariant(material) : material));
+    for (const [material,batch] of byMaterial) groups.get(room)!.add(new T.Mesh(batch.build(),material === glow ? material : power.get(room) ? poweredVariant(material) : unpoweredVariant(material)));
   }
   // Bulkheads are painted steel plate.
   const panel = library.surfaces.get('panel')!.clone();
@@ -187,7 +195,7 @@ export function buildFacility(layout: Layout, library: Library) {
   const salvageMeshes = new Map((Object.keys(itemKinds) as ItemKind[]).map(kind => {
     const k = itemKinds[kind], count = spawnSalvage(layout).filter(i => i.kind === kind).length;
     const metal = kind !== 'board' && kind !== 'toolbox';
-    const mesh = new T.InstancedMesh(Batch.unit,new T.MeshStandardMaterial({color:k.color,roughness:metal ? 0.32 : 0.6,metalness:metal ? 0.85 : 0.2,envMap:metal ? library.reflections ?? null : null,emissive:k.color,emissiveIntensity:kind === 'cell' ? 0.55 : 0.08}),Math.max(1,count));
+    const mesh = new T.InstancedMesh(Batch.unit,new T.MeshStandardMaterial({color:k.color,roughness:metal ? 0.32 : 0.6,metalness:metal ? 0.85 : 0.2,envMap:metal ? library.reflections ?? null : null,emissive:k.color,emissiveIntensity:kind === 'cell' ? 0.55 : 0.08,envMapIntensity:0.3}),Math.max(1,count));
     mesh.count = 0; mesh.frustumCulled = false; root.add(mesh);
     return [kind,mesh];
   }));
@@ -227,5 +235,13 @@ export function buildFacility(layout: Layout, library: Library) {
     for (const resource of [...geometries,...materials]) resource.dispose();
     root.removeFromParent();
   }
-  return {root,update,show,dispose,salvage,rooms:groups.size};
+  // Each powered room's lamp: under the middle of its largest ceiling.
+  const lamps = new Map<string,{x: number; y: number; z: number; height: number}>(), sizes = new Map<string,number>();
+  for (const r of geometry.roofs) {
+    if (!power.get(r.room) || Math.min(r.w,r.d) < 2 || r.w*r.d <= (sizes.get(r.room) ?? 0)) continue;
+    sizes.set(r.room,r.w*r.d);
+    const floor = byId.get(r.room)!.y;
+    lamps.set(r.room,{x:r.x,y:r.y-0.12,z:r.z,height:r.y-floor});
+  }
+  return {root,update,show,dispose,salvage,lamps,rooms:groups.size};
 }

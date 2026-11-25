@@ -322,19 +322,33 @@ export function placeBridges(next: Rng, river: River, water: Water, f: Heightfie
     const level2 = [(landing(a,-1)+landing(a,1))/2,(landing(b,-1)+landing(b,1))/2], ends = new Map([[-1,level2],[1,level2]]), length = b-a;
     if (Math.abs(level2[1]-level2[0]) > length*0.3) continue;
     const rows = Math.round(length), step = length/rows, planks: Plank[] = [], rails: Block[] = [], posts: Block[] = [];
-    let gapped = false;
+    // Which rows lose planks: 0 none, -1 or 1 that half, 2 both (a gap to
+    // jump). Half-gaps come in runs of one to three rows on one side; to
+    // change sides there is a whole row between runs, and a full gap has a
+    // whole row before it to jump from and after it to land on. The first
+    // two and last two rows are always whole.
+    const missing: number[] = new Array(rows).fill(0);
+    for (let r=2;r<rows-2;) {
+      const before = missing[r-1];
+      if (before === 0 && r+1 < rows-2 && next() < 0.16) { missing[r] = 2; r += 2; continue; }
+      if (before !== 2 && next() < 0.3) {
+        const side = before === 0 ? (next() < 0.5 ? -1 : 1) : before, run = 1+Math.floor(next()*3);
+        for (let k=0;k<run && r < rows-2;k++,r++) missing[r] = side;
+        r++;
+        continue;
+      }
+      r++;
+    }
     for (let r=0;r<rows;r++) {
       const mid = a+r*step+step/2, deck = (side: number) => { const [u,v] = ends.get(side)!; return u+(v-u)*(r/rows); }, slope = (side: number) => { const [u,v] = ends.get(side)!; return (v-u)/rows; };
-      const gap: number = !gapped && r > 1 && r < rows-2 && next() < 0.22 ? (next() < 0.5 ? -1 : 1) : 0;
-      gapped = gap !== 0;
       for (const side of [-1,1]) {
-        if (side === gap) continue;
+        if (missing[r] === side || missing[r] === 2) continue;
         const q = at(mid), [u,v] = ends.get(side)!, y = u+(v-u)*(r/rows), tilt = (v-u)/rows;
         planks.push(along === 'x' ? {x:q.x,z:q.z+side*half2,w:step,d:half2*2,y,rise:tilt,along:'x'} : {x:q.x+side*half2,z:q.z,w:half2*2,d:step,y,rise:tilt});
       }
-      // Railings, a metre high, with stretches gone.
+      // Railings, a metre high, with most stretches gone.
       for (const side of [-1,1]) {
-        if (next() < 0.4) continue;
+        if (next() < 0.55) continue;
         const q = at(mid), top = Math.max(deck(side),deck(side)+slope(side));
         rails.push(along === 'x' ? {x:q.x,z:q.z+side*(half2*2+0.04),w:step,d:0.08,y:top-0.05,h:1.05} : {x:q.x+side*(half2*2+0.04),z:q.z,w:0.08,d:step,y:top-0.05,h:1.05});
       }

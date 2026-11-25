@@ -6,7 +6,7 @@ import type { Body, Flight } from '../flight.ts';
 import { geometryFor, nearbyDoor, playerRadius, spawnPoints } from '../layout.ts';
 import type { Layout, Geometry, Rect } from '../layout.ts';
 
-import { climbable, headHeight, obstaclesAt, surfaceAt, surfaceHeight, wadeDepth, waterLevel } from '../room-templates.ts';
+import { climbable, headHeight, obstaclesAt, surfaceAt, surfaceHeight, wadeDepth, waterLevel, type Solid } from '../room-templates.ts';
 import { assignment, batonReach, bellSpan, breathTime, swingTime, catalog, deliverySpot, distance, diverBody, finished, flareTime, gone, nearestPickup, prices, wallet } from '../mission.ts';
 import { doorReach, home, insideDoors, outdoors, placeOf, riftOpen, riftReach, riftSpot } from '../places.ts';
 import type { Place, Stand } from '../places.ts';
@@ -19,36 +19,81 @@ import { advanceMission, die, newContract, newMission, stun, wake, wipeSeed } fr
 // Operators fall under the same gravity as thrown things, and sink through
 // water no faster than this.
 export const sinkSpeed = 1.5;
+// A jump rises about 0.6 m: onto crates and sills and over short gaps, never
+// near a ceiling. Landing faster than a 6 m fall is fatal.
+export const jumpHeight = 0.6, fatalFall = 6;
+export const jumpSpeed = Math.sqrt(2*gravity*jumpHeight), fatalSpeed = Math.sqrt(2*gravity*fatalFall);
+const bodyHeight = 1.75;
 // Going down ground no steeper than this (rise over run, about 48 degrees)
 // keeps an operator on their feet; anything steeper, or an edge, and they
 // leave the ground and fall.
 const footing = 1.1;
 
+// Moves an operator for one tick. Returns how fast they hit the ground if
+// they landed this tick, for fall damage.
 export function moveOperator(p: Player, input: Input, dt: number, geometry: Geometry | undefined, opened: readonly string[] = []) {
   p.yaw = input.yaw;
   p.pitch = input.pitch;
   // Wading past the knees slows an operator down.
-  const level = geometry?.water ? waterLevel(geometry.water,p.x,p.z) : undefined;
-  const wading = level !== undefined && level-(p.feetY ?? 0) > wadeDepth;
+  const level = geometry?.water ? waterLevel(geometry.water,p.x,p.z) : undefined, feet = p.feetY ?? 0;
+  const wading = level !== undefined && level-feet > wadeDepth;
+  // Jump from the ground, but not off a riverbed with the water over the chest.
+  if (input.jump === true && p.vy === undefined && geometry && !(level !== undefined && level-feet > wadeDepth+0.5)) p.vy = jumpSpeed;
   const step = 3.3 * (wading ? 0.6 : 1) * (input.sprint === true ? sprintSpeed : 1) * dt / Math.max(1, Math.hypot(input.forward, input.right));
   const x = p.x + (Math.cos(p.yaw) * input.right - Math.sin(p.yaw) * input.forward) * step;
   const z = p.z - (Math.cos(p.yaw) * input.forward + Math.sin(p.yaw) * input.right) * step;
   stepTo(p,x,p.z,geometry,opened);
   stepTo(p,p.x,z,geometry,opened);
-  fall(p,dt,geometry);
+  return fall(p,dt,geometry);
 }
 
 // While airborne, gravity pulls the operator down until they land on the
-// first floor beneath them. In water they sink slowly.
+// first floor, or the top of anything solid, beneath them; rising, a ceiling
+// stops them. In water they sink slowly. Returns the speed of a landing.
 export function fall(p: Player, dt: number, g: Geometry | undefined) {
   if (p.vy === undefined || !g) return;
-  const feet = p.feetY ?? 0, floor = floorBelow(g,p.x,p.z,feet+1e-6);
+  const feet = p.feetY ?? 0, floor = groundBelow(g,p.x,p.z,feet);
   let vy = p.vy-gravity*dt;
   const level = g.water ? waterLevel(g.water,p.x,p.z) : undefined;
   if (level !== undefined && level > feet) vy = Math.max(vy,-sinkSpeed);
-  const to = feet+vy*dt;
-  if (floor === undefined || to <= floor) { p.feetY = floor ?? feet; delete p.vy; return; }
+  let to = feet+vy*dt;
+  if (vy > 0) {
+    const roof = headroom(g,p.x,p.z,feet);
+    if (to+bodyHeight > roof) { to = Math.max(feet,roof-bodyHeight); vy = 0; }
+  }
+  if (floor === undefined || to <= floor) { p.feetY = floor ?? feet; delete p.vy; return Math.max(0,-vy); }
   p.feetY = to; p.vy = vy;
+}
+
+// Whether a box overlaps the operator's body circle at (x, z).
+const under = (s: {x: number; z: number; w: number; d: number}, x: number, z: number) => {
+  const cx = Math.max(s.x-s.w/2,Math.min(s.x+s.w/2,x)), cz = Math.max(s.z-s.d/2,Math.min(s.z+s.d/2,z));
+  return (cx-x)**2+(cz-z)**2 < playerRadius*playerRadius;
+};
+const solidsOf = (g: Geometry): Solid[] => [...g.walls,...g.rails,...g.props,...g.doors];
+// The highest floor at the point, or top of something solid under the body,
+// at or below the feet.
+function groundBelow(g: Geometry, x: number, z: number, feet: number) {
+  let best = floorBelow(g,x,z,feet+1e-6);
+  for (const s of solidsOf(g)) if (s.y+s.h <= feet+1e-6 && under(s,x,z) && (best === undefined || s.y+s.h > best)) best = s.y+s.h;
+  return best;
+}
+// The top of something solid under the body, level with the feet: walking
+// along a crate or a wreck.
+function solidTop(g: Geometry, x: number, z: number, feet: number) {
+  return solidsOf(g).some(s => Math.abs(s.y+s.h-feet) <= 0.02 && under(s,x,z));
+}
+// The lowest ceiling, slab underside or overhang above the head here.
+function headroom(g: Geometry, x: number, z: number, feet: number) {
+  let low = Infinity;
+  const head = feet+bodyHeight-0.02;
+  for (const s of [...g.roofs,...solidsOf(g)]) if (s.y >= head && under(s,x,z)) low = Math.min(low,s.y);
+  for (const s of g.surfaces) {
+    if (s.field || !under(s,x,z)) continue;
+    const bottom = Math.min(s.y,s.y+(s.rise ?? 0))-0.13;
+    if (bottom >= head) low = Math.min(low,bottom);
+  }
+  return low;
 }
 
 function stepTo(p: Player, x: number, z: number, g: Geometry | undefined, opened: readonly string[]) {
@@ -60,13 +105,16 @@ function stepTo(p: Player, x: number, z: number, g: Geometry | undefined, opened
   }
   const feet = p.feetY ?? 0, support = surfaceAt(g,x,z,feet), run = Math.hypot(x-p.x,z-p.z);
   if (p.vy !== undefined) {
-    // In the air: land on anything within a step above the feet, otherwise
-    // drift on above whatever lies below, never into a wall or rising ground.
+    // In the air: coming down, land on anything within a step above the
+    // feet; otherwise drift on above whatever lies below, never into a wall
+    // or rising ground.
     if (!standable(g,x,z,feet,opened) || groundAbove(g,x,z,feet)) return;
-    if (support && surfaceHeight(support,x,z) >= feet) { Object.assign(p,{x,z,feetY:surfaceHeight(support,x,z)}); delete p.vy; return; }
+    if (p.vy <= 0 && support && surfaceHeight(support,x,z) >= feet) { Object.assign(p,{x,z,feetY:surfaceHeight(support,x,z)}); delete p.vy; return; }
     p.x = x; p.z = z;
     return;
   }
+  // Along the top of a crate, a machine or a wreck.
+  if (solidTop(g,x,z,feet) && (!support || surfaceHeight(support,x,z) <= feet+0.02) && standable(g,x,z,feet,opened)) { p.x = x; p.z = z; return; }
   if (support) {
     const to = surfaceHeight(support,x,z);
     // Ground steeper than an operator can climb is a wall.
@@ -80,14 +128,15 @@ function stepTo(p: Player, x: number, z: number, g: Geometry | undefined, opened
     Object.assign(p,{x,z,feetY:to});
     return;
   }
-  // Off an edge, such as the side of a ramp: step out, a little way from the
-  // ledge so the body clears its side on the way down, and fall.
+  // Off an edge, such as the side of a ramp or a crate: step out, a little
+  // way from the ledge where that clears its side on the way down, and fall.
   const dx = Math.sign(x-p.x), dz = Math.sign(z-p.z);
   for (const extra of [0,0.1,0.2,0.3,0.4,0.5]) {
-    const cx = x+dx*extra, cz = z+dz*extra, below = floorBelow(g,cx,cz,feet);
-    if (below === undefined || !standable(g,cx,cz,feet,opened)) return;
+    const cx = x+dx*extra, cz = z+dz*extra, below = groundBelow(g,cx,cz,feet);
+    if (below === undefined || !standable(g,cx,cz,feet,opened)) break;
     if (standable(g,cx,cz,below,opened)) { Object.assign(p,{x:cx,z:cz,vy:0}); return; }
   }
+  if (standable(g,x,z,feet,opened)) Object.assign(p,{x,z,vy:0});
 }
 
 // Rolling ground rising more than a step above the feet here: a slope's
@@ -248,7 +297,9 @@ export class Simulation {
         continue;
       }
       const place = placeOf(p);
-      moveOperator(p,input,dt,this.geometryAt(place),this.openedAt(place));
+      const impact = moveOperator(p,input,dt,this.geometryAt(place),this.openedAt(place));
+      // A long fall is fatal during an expedition.
+      if (impact !== undefined && impact >= fatalSpeed && mission?.stage === 'explore' && !mission.escaped?.includes(p.id)) { die(this.state,mission,p.id); continue; }
       // Walking into the home rift goes through it; walking into the exit rift escapes.
       if (mission && place === 'home' && distance(p,home().rift) <= riftReach) this.depart(p);
       else if (mission?.rift && place === 'outside' && distance(p,mission.rift) <= riftReach) this.escape(p);

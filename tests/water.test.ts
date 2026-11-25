@@ -100,16 +100,30 @@ test('bridges cross the river, with holes that drop you in', () => {
   let bridged = 0;
   for (let s=1;s<=24;s++) if (outdoors(s).bridges.length) bridged++;
   assert.ok(bridged >= 18,'most maps have a bridge: '+bridged+' of 24');
+  let jumps = 0;
   for (const s of [3,19,24]) {
     const m = outdoors(s);
     for (const b of m.bridges) {
-      // From the ground just short of one landing to just past the other.
-      const key = (q: {x: number; z: number}) => b.along === 'x' ? q.x : q.z;
-      const lo = Math.min(...b.planks.map(q => key(q)-(b.along === 'x' ? q.w : q.d)/2))-0.4, hi = Math.max(...b.planks.map(q => key(q)+(b.along === 'x' ? q.w : q.d)/2))+0.4;
-      const at = [lo,hi].map(t => { const x = b.along === 'x' ? t : b.x, z = b.along === 'x' ? b.z : t; return {x,y:groundAt(m,x,z),z}; });
-      assert.ok(route(m.geometry,at[0],at[1],[0.25,0]),'seed '+s+': walk across the bridge at '+b.x.toFixed(0)+','+b.z.toFixed(0));
+      // The rows along the span, and which halves each keeps.
+      const key = (q: {x: number; z: number}) => b.along === 'x' ? q.x : q.z, size = (q: {w: number; d: number}) => b.along === 'x' ? q.w : q.d;
+      const lo = Math.min(...b.planks.map(q => key(q)-size(q)/2)), hi = Math.max(...b.planks.map(q => key(q)+size(q)/2)), step = size(b.planks[0]);
+      const rows = Math.round((hi-lo)/step), count = (r: number) => b.planks.filter(q => Math.abs(key(q)-(lo+(r+0.5)*step)) < step/4).length;
+      // A full gap is one row, with whole rows either side to jump from and to.
+      const gaps = [...Array(rows).keys()].filter(r => count(r) === 0);
+      for (const r of gaps) assert.deepEqual([count(r-1),count(r+1)],[2,2],'seed '+s+': whole rows around the gap at row '+r);
+      jumps += gaps.length;
+      // Each stretch between gaps can be walked, from the ground at the ends.
+      const ends = [lo-0.4,...gaps.flatMap(r => [lo+(r-0.5)*step,lo+(r+1.5)*step]),hi+0.4];
+      const point = (t: number) => {
+        const x = b.along === 'x' ? t : b.x, z = b.along === 'x' ? b.z : t;
+        if (t < lo || t > hi) return {x,y:groundAt(m,x,z),z};
+        const pl = b.planks.find(q => Math.abs(key(q)-t) <= size(q)/2+1e-6)!;
+        return {x,y:pl.y+pl.rise*((t-(key(pl)-size(pl)/2))/size(pl)),z};
+      };
+      for (let k=0;k<ends.length;k+=2) assert.ok(route(m.geometry,point(ends[k]),point(ends[k+1]),[0.25,0]),'seed '+s+': walk the bridge at '+b.x.toFixed(0)+','+b.z.toFixed(0)+' from '+ends[k].toFixed(1)+' to '+ends[k+1].toFixed(1));
     }
   }
+  assert.ok(jumps > 0,'some bridges need a jump');
   // Stepping into a hole over the channel drops you into the water.
   let found: {m: ReturnType<typeof outdoors>; b: (typeof map.bridges)[number]; plank: (typeof map.bridges)[number]['planks'][number]} | undefined;
   for (let s=1;s<=24 && !found;s++) {
@@ -169,4 +183,32 @@ test('the water never hangs in the air: wherever its sheet ends, the ground besi
     }
     assert.deepEqual(hanging,[],'seed '+seed);
   }
+});
+
+test('a gap in a bridge is crossed with a running jump', () => {
+  // The first full gap on seeds 1 to 24.
+  for (let seed=1;seed<=24;seed++) {
+    const m = outdoors(seed);
+    for (const b of m.bridges) {
+      const key = (q: {x: number; z: number}) => b.along === 'x' ? q.x : q.z, size = (q: {w: number; d: number}) => b.along === 'x' ? q.w : q.d;
+      const lo = Math.min(...b.planks.map(q => key(q)-size(q)/2)), step = size(b.planks[0]);
+      const rows = Math.round((Math.max(...b.planks.map(q => key(q)+size(q)/2))-lo)/step);
+      const gap = [...Array(rows).keys()].find(r => !b.planks.some(q => Math.abs(key(q)-(lo+(r+0.5)*step)) < step/4));
+      if (gap === undefined) continue;
+      // Run along the centre line from two rows back, jumping at the edge.
+      const start = lo+(gap-1.5)*step, edge = lo+gap*step, far = lo+(gap+1)*step;
+      const before = b.planks.find(q => Math.abs(key(q)-(lo+(gap-1.5)*step)) < step/4)!;
+      const p: Player = {id:1,connected:true,x:b.along === 'x' ? start : b.x,z:b.along === 'x' ? b.z : start,feetY:before.y,yaw:0,pitch:0};
+      const forward = b.along === 'x' ? {forward:0,right:1} : {forward:-1,right:0};
+      for (let i=0;i<60;i++) {
+        const t = b.along === 'x' ? p.x : p.z;
+        moveOperator(p,{...forward,yaw:0,pitch:0,jump:t > edge-0.35},1/30,m.geometry);
+      }
+      const t = b.along === 'x' ? p.x : p.z;
+      assert.ok(t > far,'seed '+seed+': across the gap, at '+t.toFixed(2)+' past '+far.toFixed(2));
+      assert.ok(p.feetY! > before.y-0.5,'still on the deck, feet at '+p.feetY!.toFixed(2));
+      return;
+    }
+  }
+  assert.fail('no bridge with a full gap');
 });

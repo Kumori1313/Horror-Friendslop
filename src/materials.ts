@@ -48,6 +48,8 @@ export const palettes: Record<Kind,Palette> = {
   hall:{wall:'corrugated',floor:'concrete',ceiling:'panel'},
   stairwell:{wall:'concrete',floor:'concrete',ceiling:'concrete'},
   corridor:{wall:'concrete',floor:'concrete',ceiling:'panel'},
+  pit:{wall:'concrete',floor:'diamond',ceiling:'concrete'},
+  foundry:{wall:'rust',floor:'diamond',ceiling:'corrugated'},
 };
 
 // Wall trims run along every wall, so they use plain steel panel and skip the

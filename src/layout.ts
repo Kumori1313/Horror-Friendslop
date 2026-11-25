@@ -4,7 +4,7 @@ import type { Point } from './room.ts';
 import { assembleTemplates, cell, climbable, planningGrade, wadeDepth, waterLevel, corridorKinds, destinationPool, isCorridor, orient, roomTemplates, socketAt, storey, supports, surfaceAt, surfaceHeight, obstaclesAt } from './room-templates.ts';
 import type { PlacedSurface, Placement, Point3, Solid, TemplateGeometry, TemplateKind, TemplateLink } from './room-templates.ts';
 
-export const generatorVersion = 7;
+export const generatorVersion = 8;
 export const playerRadius = 0.25;
 export interface Rect extends Point { w: number; d: number }
 export type Kind = Exclude<TemplateKind,typeof corridorKinds[number]> | 'corridor';
@@ -209,7 +209,13 @@ export function collisionIndex(g: Geometry, opened: readonly string[] = [], reac
     return (x: number, z: number) => map.get(cellKey(x,z)) ?? [];
   }
   const surfaces = bucket(g.surfaces,0.01);
-  const solids = new Map<number,ReturnType<typeof bucket<Solid>>>();
+  // Every solid, by position; the height test (`obstaclesAt`'s) is made per
+  // query, as nearby feet heights can differ in which solids they meet (on
+  // stairs just below a doorway's sill, the wall under it is in the way).
+  const solids = bucket<Solid>([...g.walls,...g.rails,...g.props,...g.doors.filter(d => !opened.includes(d.id))],reach);
+  // Built surfaces, for the solid sides of ramps and raised floors and for
+  // decks too low to pass under, as the simulation's `standable` has them.
+  const overhead = bucket(g.surfaces.filter(s => !s.field),reach);
   return {
     // Same rule as `surfaceAt`, over the nearby surfaces only. A wider step
     // probes for support further along a slope.
@@ -223,10 +229,13 @@ export function collisionIndex(g: Geometry, opened: readonly string[] = [], reac
       return best;
     },
     clear(x: number, z: number, feet: number, radius = playerRadius) {
-      const key = Math.round(feet*8);
-      let near = solids.get(key);
-      if (!near) solids.set(key,near = bucket(obstaclesAt(g,feet,opened),reach));
-      return clearAt(x,z,radius,near(x,z));
+      if (!clearAt(x,z,radius,solids(x,z).filter(s => s.y+s.h > feet+0.01 && s.y < feet+1.75))) return false;
+      for (const s of overhead(x,z)) {
+        const cx = Math.max(s.x-s.w/2,Math.min(s.x+s.w/2,x)), cz = Math.max(s.z-s.d/2,Math.min(s.z+s.d/2,z));
+        if ((cx-x)**2+(cz-z)**2 >= radius*radius) continue;
+        if (surfaceHeight(s,cx,cz) > feet+0.32 && Math.min(s.y,s.y+(s.rise ?? 0))-0.13 < feet+1.75) return false;
+      }
+      return true;
     },
   };
 }
@@ -284,6 +293,8 @@ export function validLayout(layout: Layout) {
   if (byId.size !== rooms.length || rooms.length < 5) return false;
   if (rooms.some(r => !(r.template in roomTemplates) || r.kind !== kindOf(r.template) || ![0,1,2,3].includes(r.turn) ||
       ![0,storey].includes(r.y) || !Number.isInteger(r.x/cell) || !Number.isInteger(r.z/cell))) return false;
+  // A room with a pit sits on the ground storey.
+  if (rooms.some(r => roomTemplates[r.template].depth && r.y !== 0)) return false;
   const intake = rooms.find(r => r.kind === 'intake');
   if (!intake || intake.x !== -4 || intake.y !== 0 || intake.z !== 0 || intake.turn !== 0) return false;
   const destinations = rooms.filter(r => r.kind !== 'corridor' && r.kind !== 'stairwell');

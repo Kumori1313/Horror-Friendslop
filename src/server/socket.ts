@@ -11,7 +11,7 @@ import type { Input, ServerMessage } from '../room.ts';
 function validInput(value: Input | undefined) {
   return value && [value.forward, value.right, value.yaw, value.pitch].every(Number.isFinite)
     && Math.abs(value.forward) <= 1 && Math.abs(value.right) <= 1 && Math.abs(value.pitch) <= 1.4
-    && (value.sprint === undefined || typeof value.sprint === 'boolean');
+    && (value.sprint === undefined || typeof value.sprint === 'boolean') && (value.jump === undefined || typeof value.jump === 'boolean');
 }
 
 interface Seat {

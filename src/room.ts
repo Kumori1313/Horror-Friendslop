@@ -10,7 +10,8 @@ export const walls = [
 export interface Point { x: number; z: number }
 // `sprint` is sent only by testing builds (the dev server and the
 // diagnostics build), to get around large maps quickly.
-export interface Input { forward: number; right: number; yaw: number; pitch: number; sprint?: boolean }
+// `jump` is held while the jump key or button is down.
+export interface Input { forward: number; right: number; yaw: number; pitch: number; sprint?: boolean; jump?: boolean }
 export const sprintSpeed = 2.5;
 // `slots` is the hotbar: salvage ids, `lampSlot` for the flashlight, or null.
 // `hand` is the selected slot.

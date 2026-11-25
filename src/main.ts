@@ -120,7 +120,7 @@ function start(render: ReturnType<typeof createScene>, mode?: Crew | 'solo', sce
   slotName.className = 'name';
   function showControls() {
     touchControls.hidden = !playing || !touchMode;
-    element('control-hint').textContent = touchMode ? 'Left pad to walk · Swipe the room to look' : 'WASD to walk · Mouse or arrows to look'+(testing ? ' · Shift to sprint (testing)' : '');
+    element('control-hint').textContent = touchMode ? 'Left pad to walk · Swipe the room to look · Jump button' : 'WASD to walk · Space to jump · Mouse or arrows to look'+(testing ? ' · Shift to sprint (testing)' : '');
     diagnostics?.setTouch(touchMode);
   }
   function look(dx: number, dy: number, sensitivity: number) {
@@ -210,6 +210,16 @@ function start(render: ReturnType<typeof createScene>, mode?: Crew | 'solo', sce
     select(handOf(p)+Math.sign(e.deltaY));
   },{passive:true});
   showControls();
+  // A tap is held long enough for the host to see it (the guest sends its
+  // controls at most every 100 ms); holding jumps again on each landing.
+  let jumpUntil = 0, touchJump = false;
+  function jump(down: boolean) {
+    if (down) { jumpUntil = performance.now()+200; setTimeout(() => { if (playing) input(); },220); }
+    input();
+  }
+  const jumpButton = element<HTMLButtonElement>('jump');
+  jumpButton.addEventListener('pointerdown',e => { e.preventDefault(); touchJump = true; jump(true); });
+  for (const end of ['pointerup','pointercancel','pointerleave'] as const) jumpButton.addEventListener(end,() => { if (touchJump) { touchJump = false; jump(false); } });
   function controls(): Input {
     if (!playing) return {forward:0,right:0,yaw,pitch};
     return {
@@ -217,6 +227,7 @@ function start(render: ReturnType<typeof createScene>, mode?: Crew | 'solo', sce
       right: Math.max(-1,Math.min(1,Number(keys.has('KeyD')) - Number(keys.has('KeyA')) + stickX)), yaw, pitch,
       // Testing builds only: hold Shift to sprint.
       ...(testing && (keys.has('ShiftLeft') || keys.has('ShiftRight')) ? {sprint:true} : {}),
+      ...(keys.has('Space') || touchJump || performance.now() < jumpUntil ? {jump:true} : {}),
     };
   }
   function input() { connection.input(controls()); }
@@ -257,9 +268,10 @@ function start(render: ReturnType<typeof createScene>, mode?: Crew | 'solo', sce
     if (e.ctrlKey || e.metaKey || e.altKey) return;
     if (e.code === 'KeyO' && !e.repeat) { e.preventDefault(); openSettings(); return; }
     if (!playing || !state) return;
-    if (e.code.startsWith('Arrow')) e.preventDefault();
+    if (e.code.startsWith('Arrow') || e.code === 'Space') e.preventDefault();
     if (e.repeat) return;
     keys.add(e.code);
+    if (e.code === 'Space') jump(true);
     if (e.code === 'KeyQ') operate.click();
     if (e.code === 'KeyE') act('take');
     if (e.code === 'KeyR') openDoor();

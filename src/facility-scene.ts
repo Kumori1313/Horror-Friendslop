@@ -11,7 +11,7 @@ export const colors: Record<Kind,number> = {
   intake:0xe0b258, relay:0xe6a840, switchboard:0xe0894e, chiller:0x57b9da, pump:0x648d92,
   stores:0xb78155, closet:0xc49a6c, boiler:0xb5654a, lockers:0x8c8fb8, control:0x7fb069, coldstore:0x9fd3e6,
   filters:0xa3b86c, generator:0xd4c24f, gallery:0x7d8f99, office:0xc98a9b, workshop:0xb88a4a, tunnel:0x6f8278,
-  hall:0x8fa3a0, stairwell:0xd9d2b4, corridor:0x93a599,
+  hall:0x8fa3a0, stairwell:0xd9d2b4, corridor:0x93a599, pit:0x7a8a5a, foundry:0xc0683a,
 };
 const stations: Kind[] = ['intake'];
 const lamp = 0xe4e7c9;

@@ -62,7 +62,7 @@ class Facility {
       for (const s of this.shuffle(t.sockets)) {
         if (s.side !== opposite(at.side) || (sockets && !sockets(s.name))) continue;
         const y = at.y-s.y;
-        if (y !== 0 && y !== storey) continue;
+        if ((y !== 0 && y !== storey) || (t.depth && y !== 0)) continue;
         const room = this.place(id,template,at.x-s.x,y,at.z-s.z,turn);
         if (!room) continue;
         this.link(at.room,at.name,id,s.name);

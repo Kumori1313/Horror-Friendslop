@@ -61,3 +61,116 @@ test('the guest\'s prediction falls exactly as the host does', () => {
   }
   assert.equal(host.feetY,0);
 });
+
+// Jumping and long falls.
+import { fatalFall, jumpHeight, Simulation } from '../src/server/simulation.ts';
+import { generateLayout } from '../src/server/generate-layout.ts';
+import { geometryFor, socketGroups } from '../src/layout.ts';
+import { roomTemplates } from '../src/room-templates.ts';
+import { spawnSalvage } from '../src/salvage.ts';
+
+const jump: Input = {...idle,jump:true};
+const yard: Geometry = {
+  surfaces:[{x:0,z:0,w:40,d:40,y:0,room}],
+  walls:[],roofs:[{x:-8,z:0,w:4,d:4,y:2.1,h:0.12,room}],rails:[],doors:[],openings:[],
+  props:[{x:4,z:0,w:2,d:2,y:0,h:0.5,kind:'crate',room},{x:8,z:0,w:2,d:2,y:0,h:0.8,kind:'crate',room}],
+};
+
+test('a jump rises about 0.6 m and comes back down', () => {
+  const p = at(0,6,0);
+  let top = 0, t = 0;
+  moveOperator(p,jump,dt,yard);
+  while (p.vy !== undefined && t < 2) { moveOperator(p,idle,dt,yard); top = Math.max(top,p.feetY!); t += dt; }
+  assert.ok(Math.abs(top-jumpHeight) < 0.08,'rose '+top.toFixed(2)+' m');
+  assert.deepEqual([p.feetY,p.vy],[0,undefined]);
+});
+
+test('a jump clears a low crate, lands on it, walks along it and steps off; a taller one stays a wall', () => {
+  // A running jump from 1.4 m short of the crate.
+  const p = at(1.6,0,0);
+  for (let i=0;i<30 && !(p.vy === undefined && p.feetY! > 0.4);i++) moveOperator(p,{...east,jump:i === 0},dt,yard);
+  assert.ok(Math.abs(p.feetY!-0.5) < 1e-6,'on top of the crate, feet at '+p.feetY);
+  for (let i=0;i<4;i++) moveOperator(p,east,dt,yard);
+  assert.ok(Math.abs(p.feetY!-0.5) < 1e-6 && p.vy === undefined,'walking along it');
+  for (let i=0;i<30 && !(p.vy === undefined && p.feetY === 0);i++) moveOperator(p,east,dt,yard);
+  assert.equal(p.feetY,0,'off the far side');
+  // Jumping at the 0.8 m crate only bumps into it.
+  for (let i=0;i<40;i++) moveOperator(p,{...east,jump:true},dt,yard);
+  assert.ok(p.x < 8-1-0.24,'held back at x '+p.x.toFixed(2));
+});
+
+test('a low ceiling cuts a jump short', () => {
+  const p = at(-8,0,0);
+  let top = 0;
+  moveOperator(p,jump,dt,yard);
+  for (let i=0;i<40;i++) { moveOperator(p,idle,dt,yard); top = Math.max(top,p.feetY!); }
+  assert.ok(top <= 2.1-1.75+1e-9 && top > 0.3,'head stopped at the ceiling, feet up '+top.toFixed(2));
+});
+
+// A layout with a given room, and a sim with operator 1 standing somewhere in it.
+function withRoom(template: 'pit' | 'foundry' | 'hall') {
+  for (let seed=1;seed<400;seed++) {
+    const layout = generateLayout(seed), room = layout.rooms.find(r => r.template === template);
+    if (!room) continue;
+    const sim = new Simulation(layout,'coop','inside');
+    sim.join(); sim.join();
+    return {sim,room,layout};
+  }
+  throw new Error('no layout with a '+template);
+}
+const run = (sim: Simulation, seconds: number) => { for (let i=0;i<Math.round(seconds*30);i++) sim.tick(1/30); };
+
+test('stepping off the settling pit\'s girder is fatal; dropping from the hall\'s gallery is not', () => {
+  const {sim,room,layout} = withRoom('pit');
+  const g = geometryFor(layout), girder = g.surfaces.find(s => s.room === room.id && s.y === 0 && Math.max(s.w,s.d) > 8 && Math.min(s.w,s.d) < 1.3)!;
+  const p = sim.state.players[0], across = girder.w > girder.d ? {x:girder.x,z:girder.z} : {x:girder.x,z:girder.z};
+  Object.assign(p,{x:across.x,z:across.z,feetY:0});
+  // Sidestep off the girder.
+  const side: Input = girder.w > girder.d ? {forward:1,right:0,yaw:0,pitch:0} : {forward:0,right:1,yaw:0,pitch:0};
+  sim.inputs.set(1,side);
+  run(sim,0.5);
+  sim.inputs.set(1,idle);
+  run(sim,2);
+  assert.deepEqual(sim.state.mission!.dead,[1],'died in the fall');
+  assert.ok(p.feetY! < -9,'at the bottom of the pit');
+  // From the hall's gallery to the floor, 4 m, an operator lives.
+  const hall = withRoom('hall'), q = hall.sim.state.players[0], hg = geometryFor(hall.layout);
+  // In the air at the gallery's height over the hall's floor, then down.
+  const clearOfProps = (s: {x: number; z: number}) => !hg.props.some(o => Math.abs(o.x-s.x) < o.w/2+0.5 && Math.abs(o.z-s.z) < o.d/2+0.5);
+  const floor = hg.surfaces.filter(s => s.room === hall.room.id && s.y === hall.room.y && !s.rise && clearOfProps(s)).sort((a,b) => b.w*b.d-a.w*a.d)[0];
+  Object.assign(q,{x:floor.x,z:floor.z,feetY:floor.y+4,vy:0});
+  run(hall.sim,2);
+  assert.equal(q.feetY,floor.y,'landed on the floor');
+  assert.equal(hall.sim.state.mission!.dead?.includes(1) ?? false,false,'alive');
+});
+
+test('rails keep an operator on the hall\'s gallery', () => {
+  const {sim,room,layout} = withRoom('hall'), g = geometryFor(layout), p = sim.state.players[0];
+  const rail = g.rails.find(r => r.room === room.id)!;
+  // Stand on the gallery side of the rail and walk into it.
+  const alongX = rail.w > rail.d, gallery = g.surfaces.find(s => s.room === room.id && s.catwalk)!;
+  const inward = alongX ? Math.sign(gallery.z-rail.z) : Math.sign(gallery.x-rail.x);
+  Object.assign(p,alongX ? {x:rail.x,z:rail.z+inward*0.6,feetY:rail.y} : {x:rail.x+inward*0.6,z:rail.z,feetY:rail.y});
+  // Walk toward the rail (yaw 0 faces -z; right is +x).
+  sim.inputs.set(1,alongX ? {forward:inward,right:0,yaw:0,pitch:0} : {forward:0,right:-inward,yaw:0,pitch:0});
+  run(sim,1.5);
+  assert.equal(p.vy,undefined);
+  assert.equal(p.feetY,rail.y,'still on the gallery');
+});
+
+test('the settling pit and the foundry join all their doorways, turn up in facilities, and never hold salvage in their pits', () => {
+  for (const kind of ['pit','foundry'] as const) {
+    assert.equal(new Set(socketGroups(kind).values()).size,1,kind+': one walkable group');
+    assert.ok(roomTemplates[kind].depth! >= fatalFall,kind+': deep enough to kill from the floor');
+  }
+  let pits = 0, foundries = 0;
+  for (let seed=0;seed<60;seed++) {
+    const layout = generateLayout(seed);
+    for (const r of layout.rooms) if (r.template === 'pit' || r.template === 'foundry') {
+      r.template === 'pit' ? pits++ : foundries++;
+      assert.equal(r.y,0,'on the ground storey');
+    }
+    for (const item of spawnSalvage(layout)) assert.ok(item.y >= -0.01,'seed '+seed+': salvage at '+item.y);
+  }
+  assert.ok(pits > 20 && foundries > 20,'pits '+pits+', foundries '+foundries+' in 60 facilities');
+});

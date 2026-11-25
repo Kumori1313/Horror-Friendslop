@@ -29,6 +29,9 @@ export interface Prop extends Patch { kind:PropKind; h:number; y?:number }
 export interface RoomTemplate {
   name:string;
   height:number;
+  // A pit this deep below the floor, walled down to its bottom. Such a room
+  // sits on the ground storey only, so nothing lies beneath it.
+  depth?:number;
   footprint:Patch[];
   surfaces:Surface[];
   sockets:Socket[];
@@ -80,16 +83,39 @@ const templates = {
     prop('shelf',2,-1.5,1.4,0.8,2),prop('shelf',2,5.5,1.4,0.8,2),prop('shelf',-1.5,2,0.8,1.4,2),prop('shelf',5.5,2,0.8,1.4,2),
   ]}),
   closet:block('Loot closet',1,1,{loot:true,props:[prop('shelf',1.5,1.5,0.8,0.8,1.4)]},2.8),
-  boiler:block('Boiler room',2,2,{pad:{x:2,y:0,z:-0.5},props:[prop('tank',2,2,2,2,2.6),prop('pipe',2,-1.75,8,0.3,0.3,2.75)]}),
+  // Pipes spanning a room stop at its walls' inner faces, 6 cm in from the
+  // edge, so their ends never lie flush with a wall's outer face.
+  boiler:block('Boiler room',2,2,{pad:{x:2,y:0,z:-0.5},props:[prop('tank',2,2,2,2,2.6),prop('pipe',2,-1.75,7.88,0.3,0.3,2.75)]}),
   lockers:block('Locker room',2,1,{loot:true,props:[prop('locker',2,-1.65,1.4,0.6,2),prop('locker',2,1.65,1.4,0.6,2)]}),
   control:block('Control room',2,1,{props:[prop('console',2,1.6,1.4,0.7,1),prop('console',2,-1.6,1.4,0.7,1.3)]}),
   coldstore:block('Cold store',1,2,{loot:true,props:[prop('crate',-1.6,2,0.7,1.4,1),prop('crate',1.6,2,0.7,1.4,1.3)]}),
   filters:block('Filter bank',2,2,{props:[prop('filter',2,0,1,1.6,2.4),prop('filter',2,4,1,1.6,2.4)]}),
   generator:block('Generator room',3,2,{pad:{x:4,y:0,z:-0.5},props:[prop('generator',4,2,4,2,2.4)]}),
-  gallery:block('Pipe gallery',3,1,{props:[prop('pipe',4,-1.7,12,0.4,0.4,2.65),prop('pipe',4,1.7,12,0.4,0.4,2.65)]}),
+  gallery:block('Pipe gallery',3,1,{props:[prop('pipe',4,-1.7,11.88,0.4,0.4,2.65),prop('pipe',4,1.7,11.88,0.4,0.4,2.65)]}),
   office:block("Foreman's office",1,1,{loot:true,props:[prop('desk',1.55,1.55,0.7,0.7,0.8),prop('shelf',-1.6,-1.6,0.6,0.6,1.3)]}),
   workshop:block('Workshop',2,2,{loot:true,props:[prop('bench',2,-1.5,1.4,0.8,0.95),prop('bench',-1.5,2,0.8,1.4,0.95),prop('bench',5.5,2,0.8,1.4,0.95)]}),
   // The bent tunnel turns north at its east end and runs 16 m beneath whatever sits above it.
+  // A sludge pit 10 m deep fills the room. Two broken corner ledges each
+  // hold a pair of doorways; the only way between them is an unrailed girder
+  // across the middle, with a spur to a small island over the sludge.
+  pit:{name:'Settling pit',height:7.6,depth:10,loot:true,footprint:[patch(4,4,12,12)],pad:{x:4,y:0,z:4},surfaces:[
+    ...[patch(1,-1.2,6,1.6),patch(-1.2,3.2,1.6,7.2),patch(7,9.2,6,1.6),patch(9.2,4.8,1.6,7.2)].map(f=>({...f,y:0})),
+    {...patch(4,4,8.8,1.2),y:0},{...patch(2,5.45,1.2,1.7),y:0},{...patch(2,7.5,2.4,2.4),y:0},
+    {...patch(4,4,12,12),y:-10},
+  ],props:[prop('tank',6.5,1.5,2.4,2.4,1.6,-10),prop('pipe',4,7,11.88,0.4,0.4,3.2)],sockets:[
+    {name:'north0',side:'north',x:0,z:-2,y:0},{name:'west1',side:'west',x:-2,z:4,y:0},
+    {name:'east1',side:'east',x:10,z:4,y:0},{name:'south2',side:'south',x:8,z:10,y:0},
+  ]},
+  // A casting pit 7 m deep beside a ground-floor working platform. Unrailed
+  // stairs climb along the pit's edge to bare catwalks on the upper walls.
+  foundry:{name:'Foundry gantry',height:7.6,depth:7,footprint:[patch(4,2,12,8)],pad:{x:0,y:0,z:2},surfaces:[
+    {...patch(0,2,4,8),y:0},{...patch(5.4,5.2,6.8,1.6),y:0,rise:4,along:'x',stairs:true},
+    {...patch(9.4,5.2,1.2,1.6),y:4},{...patch(9.2,1.2,1.6,6.4),y:4},{...patch(6.2,-1.2,4.4,1.6),y:4},
+    {...patch(6,2,8,8),y:-7},
+  ],props:[prop('machine',0.8,-1,1.2,1.2,1.8),prop('crate',-1.2,2,0.8,0.8,0.5),prop('tank',6,1,2.4,2.4,2.5,-7)],sockets:[
+    {name:'west0',side:'west',x:-2,z:0,y:0},{name:'west1',side:'west',x:-2,z:4,y:0},
+    {name:'east0',side:'east',x:10,z:0,y:4},{name:'east1',side:'east',x:10,z:4,y:4},{name:'north2',side:'north',x:8,z:-2,y:4},
+  ]},
   tunnel:{name:'Service tunnel',height:2.9,footprint:[patch(4,0,12,4),patch(8,-10,4,16)],
     surfaces:[{...patch(4,0,12,4),y:0},{...patch(8,-10,4,16),y:0}],pad:{x:8,y:0,z:-8},sockets:[
       {name:'mouth',side:'west',x:-2,z:0,y:0},{name:'corner',side:'east',x:10,z:0,y:0},
@@ -124,7 +150,7 @@ export const roomTemplates: Record<TemplateKind,RoomTemplate> = templates;
 export const corridorKinds = ['straight','corner','tee','cross'] as const;
 // Destinations a seed can draw from, each at most once. Connectors may repeat.
 export const destinationPool:TemplateKind[] = ['relay','switchboard','chiller','pump','stores','closet','boiler','lockers','control',
-  'coldstore','filters','generator','gallery','office','workshop','tunnel','hall'];
+  'coldstore','filters','generator','gallery','office','workshop','tunnel','hall','pit','foundry'];
 export const isCorridor = (kind:TemplateKind) => (corridorKinds as readonly string[]).includes(kind);
 
 export interface Placement { id:string; template:TemplateKind; x:number; y:number; z:number; turn:number }
@@ -318,7 +344,7 @@ export function assembleTemplates(rooms:Placement[],links:(TemplateLink & {door?
         const seams:Interval[] = neighbors.map(p=>[p[axis]-p[length]/2,p[axis]+p[length]/2]);
         const ports = sockets.filter(s=>s.side===side && same(s[across],face));
         // Split horizontally at each sill and lintel, including upper doors.
-        const levels = [...new Set([0,t.height,...ports.flatMap(s=>[s.y,Math.min(t.height,s.y+doorHeight)])])].sort((a,b)=>a-b);
+        const levels = [...new Set([-(t.depth ?? 0),0,t.height,...ports.flatMap(s=>[s.y,Math.min(t.height,s.y+doorHeight)])])].sort((a,b)=>a-b);
         for (let i=1;i<levels.length;i++) {
           const low = levels[i-1], high = levels[i];
           const holes:Interval[] = ports.filter(s=>s.y<=low && s.y+doorHeight>=high).map(s=>[s[axis]-doorWidth/2,s[axis]+doorWidth/2]);
@@ -402,5 +428,5 @@ export function surfaceAt(g:TemplateGeometry,x:number,z:number,feet:number) {
 
 // Walls, props and closed bulkheads that a standing operator at these feet can touch.
 export function obstaclesAt(g:TemplateGeometry,feet:number,opened:readonly string[] = []):Solid[] {
-  return [...g.walls,...g.props,...g.doors.filter(d=>!opened.includes(d.id))].filter(s=>s.y+s.h>feet+0.01 && s.y<feet+1.75);
+  return [...g.walls,...g.rails,...g.props,...g.doors.filter(d=>!opened.includes(d.id))].filter(s=>s.y+s.h>feet+0.01 && s.y<feet+1.75);
 }

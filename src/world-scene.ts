@@ -3,7 +3,7 @@ import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js
 import { Batch } from './facility-scene.ts';
 import type { Library, Surface } from './materials.ts';
 import { groundAt, home, type Outdoors } from './places.ts';
-import { fieldHeight } from './room-templates.ts';
+import { fieldHeight, fordAt, waterLevel } from './room-templates.ts';
 
 // Merge boxes by material, with world-space texture coordinates, so a whole
 // place costs one draw per material.
@@ -185,6 +185,7 @@ function terrain(map: Outdoors) {
 // operator first goes outside and disposed when the crew is home.
 export function buildOutdoors(map: Outdoors, library: Library) {
   const root = new T.Group(), b = batcher(library);
+  let waterMaterial: T.MeshStandardMaterial | undefined;
   const wall = b.surface('panel'), rust = b.surface('rust');
   root.add(terrain(map));
   const f = map.building;
@@ -260,7 +261,41 @@ export function buildOutdoors(map: Outdoors, library: Library) {
     root.add(new T.Mesh(mergeGeometries(cylinders),rustMat));
     for (const c of cylinders) c.dispose();
   }
+  // Bridges: plank decks with holes, broken railings, posts into the water.
+  const wood = b.surface('wood');
+  for (const br of map.bridges) {
+    for (const pl of br.planks) {
+      const len = pl.along === 'x' ? pl.w : pl.d, tilt = Math.atan2(pl.rise,len);
+      if (pl.along === 'x') b.box(wood,0x6b5a45,pl.x,pl.y+pl.rise/2-0.06,pl.z,Math.hypot(len,pl.rise),0.12,pl.d-0.04,tilt,'z');
+      else b.box(wood,0x6b5a45,pl.x,pl.y+pl.rise/2-0.06,pl.z,pl.w-0.04,0.12,Math.hypot(len,pl.rise),-tilt,'x');
+    }
+    for (const r of br.rails) b.box(wood,0x5a4a38,r.x,r.y+r.h-0.05,r.z,r.w,0.1,r.d);
+    for (const r of br.rails) b.box(wood,0x5a4a38,r.x,r.y+r.h/2,r.z,Math.min(r.w,0.1),r.h,Math.min(r.d,0.1));
+    for (const p of br.posts) b.box(wood,0x4a3d30,p.x,p.y+p.h/2,p.z,p.w,p.h,p.d);
+  }
   b.build(root);
+  // The water: a ribbon along the river's centre line at its surface height,
+  // wide enough to meet the banks, dark and slowly moving.
+  const water = map.water.points, across = 8;
+  if (water.length > 1) {
+    const position: number[] = [], uv: number[] = [], index: number[] = [];
+    water.forEach((p,i) => {
+      const a = water[Math.max(0,i-1)], c = water[Math.min(water.length-1,i+1)], len = Math.hypot(c.x-a.x,c.z-a.z) || 1;
+      const nx = -(c.z-a.z)/len, nz = (c.x-a.x)/len, wide = map.water.width+3.5+11*fordAt(map.water.fords,p.x,p.z);
+      for (let k=0;k<=across;k++) {
+        const s = (k/across*2-1)*wide, x = p.x+nx*s, z = p.z+nz*s;
+        position.push(x,waterLevel(map.water,x,z) ?? p.floor+map.water.deep,z); uv.push(k/across,i*0.5);
+        if (i && k) { const v = i*(across+1)+k; index.push(v-across-2,v-1,v-across-1,v-across-1,v-1,v); }
+      }
+    });
+    const g = new T.BufferGeometry();
+    g.setAttribute('position',new T.Float32BufferAttribute(position,3)); g.setAttribute('uv',new T.Float32BufferAttribute(uv,2));
+    g.setIndex(index); g.computeVertexNormals();
+    const ripples = scrub().clone(); ripples.needsUpdate = true;
+    // A faint sheen of its own, so the water reads as a surface even at night.
+    waterMaterial = new T.MeshStandardMaterial({color:0x1d3a3a,emissive:0x163234,emissiveIntensity:0.9,emissiveMap:ripples,roughness:0.15,metalness:0.3,transparent:true,opacity:0.85,map:ripples,side:T.DoubleSide,depthWrite:false});
+    root.add(new T.Mesh(g,waterMaterial));
+  }
   const arrival = rift(0x9b7bff);
   arrival.group.position.set(map.arrival.x,map.arrival.y+1.2,map.arrival.z);
   // It faces the building it brought the crew to.
@@ -293,6 +328,7 @@ export function buildOutdoors(map: Outdoors, library: Library) {
   return {
     root,seed:map.seed,
     update(time: number, arrivalOpen: boolean, open?: {x: number; y?: number; z: number}, rung = false) {
+      if (waterMaterial?.map) waterMaterial.map.offset.y = -time*0.05;
       arrival.group.visible = arrivalOpen;
       if (arrivalOpen) arrival.spin(time);
       exit.group.visible = pillar.visible = !!open;

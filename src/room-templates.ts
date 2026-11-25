@@ -183,7 +183,39 @@ export interface RoomWall extends RoomSolid { inward:number }
 export interface TemplateGeometry {
   surfaces:PlacedSurface[]; walls:RoomWall[]; roofs:RoomSolid[]; rails:RoomSolid[];
   props:(Solid & {kind:PropKind; room:string})[]; doors:(Solid & {id:string})[]; openings:Opening[];
+  water?:Water;
 }
+// Water along a river: its centre line with the floor's height at each
+// point, and its fords. Over the channel the surface stands `deep` above the
+// floor, `shallow` near a ford (by straight distance to it), reaching out over
+// the banks; where the ground stands above it there is no water. Movement,
+// planning and drowning read it.
+export interface Water { points:{x:number; z:number; floor:number}[]; fords:{x:number; z:number; floor:number}[]; deep:number; shallow:number; width:number }
+const easing = (t:number) => { const c = Math.max(0,Math.min(1,t)); return c*c*(3-2*c); };
+// How much of a ford there is at (x, z): 1 within 17 m of its middle (the
+// whole width of its gentle banks), none by 27 m.
+export const fordAt = (fords:{x:number; z:number}[],x:number,z:number) => Math.max(0,...fords.map(f => easing(1-(Math.hypot(x-f.x,z-f.z)-17)/10)));
+// The water's surface over (x, z), or undefined outside the channel.
+export function waterLevel(w:Water,x:number,z:number) {
+  let best = Infinity, floor = 0;
+  const p = w.points;
+  for (let i=1;i<p.length;i++) {
+    const ax = p[i-1].x, az = p[i-1].z, sx = p[i].x-ax, sz = p[i].z-az, len = sx*sx+sz*sz;
+    const u = Math.max(0,Math.min(1,((x-ax)*sx+(z-az)*sz)/len)), qx = ax+sx*u-x, qz = az+sz*u-z, d = qx*qx+qz*qz;
+    if (d < best) { best = d; floor = p[i-1].floor+(p[i].floor-p[i-1].floor)*u; }
+  }
+  const ford = fordAt(w.fords,x,z);
+  if (Math.sqrt(best) > w.width+2.5+11*ford) return;
+  // Near a ford the surface is set by the ford's own floor, so a bend of the
+  // river nearby can't flood its shallows.
+  let ford2 = w.fords[0], near = Infinity;
+  for (const f of w.fords) { const d = Math.hypot(x-f.x,z-f.z); if (d < near) { near = d; ford2 = f; } }
+  const shallow = ford2 ? easing(1-(near-9)/6) : 0;
+  return (floor+w.deep)*(1-shallow)+(shallow ? (ford2.floor+w.shallow)*shallow : 0);
+}
+// Wading slows an operator once the water is over their knees; over their
+// head, they are under.
+export const wadeDepth = 0.5, headHeight = 1.6;
 
 type Interval = [number,number];
 // Remaining spans after removing holes in a wall or shared tile boundary.
@@ -296,13 +328,22 @@ export function fieldHeight(f:Heightfield,x:number,z:number) {
 
 // Prefer the reachable surface nearest the current feet. This distinguishes
 // the floor under the gallery from the gallery itself at the same x and z.
+// Whether `s`, `delta` from the feet, makes better support than `best`: the
+// nearest in height, except that a built surface (a bridge's deck) wins over
+// the rolling ground under it, so stepping on at a landing takes the deck.
+export function supports(s:PlacedSurface,delta:number,best:PlacedSurface|undefined,difference:number) {
+  if (!best) return true;
+  if (!!s.field !== !!best.field) return !s.field;
+  return delta<difference;
+}
+
 export function surfaceAt(g:TemplateGeometry,x:number,z:number,feet:number) {
   let best:PlacedSurface|undefined, difference=Infinity;
   for (const s of g.surfaces) {
     // A hair of tolerance closes seams where rotated corridor arms meet.
     if (Math.abs(x-s.x)>s.w/2+1e-6 || Math.abs(z-s.z)>s.d/2+1e-6) continue;
     const delta = Math.abs(surfaceHeight(s,x,z)-feet);
-    if (delta<=0.32 && delta<difference) { best=s; difference=delta; }
+    if (delta<=0.32 && supports(s,delta,best,difference)) { best=s; difference=delta; }
   }
   return best;
 }

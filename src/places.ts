@@ -1,5 +1,6 @@
 import { collisionIndex, connections, geometryFor, walkable, type Geometry, type Layout } from './layout.ts';
-import { placeRuins, placeWrecks, riverCourse, riverCut, riverDepth, riverFloor, trail, type River, type Ruin, type Wreck } from './outdoor-features.ts';
+import { landings, placeBridges, placeRuins, placeWrecks, riverCourse, riverCut, riverDepth, riverNearest, riverFloor, riverWater, trail, type Bridge, type River, type Ruin, type Wreck } from './outdoor-features.ts';
+import { wadeDepth, waterLevel, type Water } from './room-templates.ts';
 import { climbable, fieldGrade, fieldHeight, maxGrade, obstaclesAt, orient, outward, planningGrade, socketAt, surfaceAt } from './room-templates.ts';
 import { clearAt } from './room.ts';
 import type { Heightfield, Point3, RoomWall } from './room-templates.ts';
@@ -69,6 +70,8 @@ export interface Outdoors {
   // wrecks (cover), and worn trails from the arrival to each door. `marks`
   // tags each height-map point: 1 trail, 2 riverbed.
   river: River; fords: Point3[]; ruins: Ruin[]; wrecks: Wreck[]; trails: Point3[][]; marks: Uint8Array;
+  // Water in the riverbed (also on the geometry), and the bridges over it.
+  water: Water; bridges: Bridge[];
 }
 export const outdoorSize = 160;
 const outdoorCache = new Map<number,Outdoors>();
@@ -129,14 +132,17 @@ export function outdoors(seed: number): Outdoors {
       // can walk along the floor to where the ditch fades out into a crossing.
       -scale*2.8*smooth((1-Math.abs(creases(x/34+offsets[1]+shift,z/34+offsets[2]))/0.16)/0.55)*smooth((fade(x/23+shift,z/23+offsets[3])+0.15)/0.5);
     const arrivalLevel = base(ax,az), fordLevels = river.fords.map(f => ({x:f.x,z:f.z,y:base(f.x,f.z)}));
+    // Around each ford the hillside eases toward the ford's own height, so
+    // its gentle banks aren't tipped too steep by the slope they sit on.
+    const shaped = (x: number, z: number) => {
+      let y = base(x,z);
+      for (const f of fordLevels) { const d = Math.hypot(x-f.x,z-f.z); if (d < 22) y += (f.y-y)*(1-smooth((d-12)/10)); }
+      return y;
+    };
     const n = outdoorSize+1, h: number[] = new Array(n*n);
     for (let k=0;k<n;k++) for (let i=0;i<n;i++) {
       const x = i-half, z = k-half;
-      let y = base(x,z);
-      // Around each ford the hillside eases toward the ford's own height, so
-      // its gentle banks aren't tipped too steep by the slope they sit on.
-      for (const f of fordLevels) { const d = Math.hypot(x-f.x,z-f.z); if (d < 16) y += (f.y-y)*(1-smooth((d-9)/7)); }
-      y -= river.points.length ? riverCut(river,x,z) : 0;
+      let y = shaped(x,z);
       // The building's plot, with the bell in front, is level at 0.
       const plot = Math.max(Math.abs(x-building.x)-building.w/2-8,Math.abs(z-building.z-2)-building.d/2-9,0);
       y *= smooth(plot/12);
@@ -161,6 +167,39 @@ export function outdoors(seed: number): Outdoors {
     g.props.push({x:bell.x,z:bell.z,w:1.3,d:1.3,y:0,h:2.7,kind:'bell',room});
     // Nowhere to get stuck: fill any ground that has no way back out.
     for (let pass=0;pass<6 && unstrand(g,ground,{x:ax,y:arrivalLevel,z:az});pass++);
+    // Then the riverbed, carved after: falling into it away from a ford is a
+    // hazard by design. Never cut below the floor at the river's middle, so
+    // its banks hold no deep pockets.
+    if (river.points.length) {
+      const before = {...ground,h:[...h]};
+      for (let j=0;j<n*n;j++) {
+        const x = ground.x0+(j % n), z = ground.z0+Math.floor(j/n), cut = riverCut(river,x,z);
+        if (cut <= 0) continue;
+        const c = riverNearest(river,x,z);
+        h[j] = Math.round(Math.max(h[j]-cut,fieldHeight(before,c.x,c.z)-riverDepth)*100)/100;
+      }
+    }
+    // Water in the riverbed, and dilapidated bridges over it.
+    const water = riverWater(river,height);
+    g.water = water;
+    const bridges = river.points.length ? placeBridges(random(featureSeed ^ 0x6b43a9b5),river,water,ground,half) : [];
+    // Level a pad of ground at each landing to the deck's height, a little
+    // under it, so stepping on or off is one small step whichever way the
+    // bank tilts, easing back into the hillside over a few metres.
+    for (const b of bridges) for (const l of landings(b)) {
+      const cross = b.along === 'x' ? b.z : b.x;
+      for (let j=0;j<n*n;j++) {
+        const x = ground.x0+(j % n), z = ground.z0+Math.floor(j/n), t = (b.along === 'x' ? x : z)-l.edge, c = Math.abs((b.along === 'x' ? z : x)-cross);
+        const out = t*l.out, beyond = Math.max(0,c-1.8,out-3,-out-0.6);
+        if (beyond >= 3) continue;
+        const pad = l.y-0.06, w = 1-smooth(beyond/3);
+        h[j] = Math.round((h[j]+(pad-h[j])*w)*100)/100;
+      }
+    }
+    for (const b of bridges) {
+      for (const pl of b.planks) g.surfaces.push({x:pl.x,z:pl.z,w:pl.w,d:pl.d,y:pl.y,rise:pl.rise,...(pl.along ? {along:pl.along} : {}),room});
+      for (const r of b.rails) g.walls.push(wall(room,r.x-r.w/2,r.z-r.d/2,r.x+r.w/2,r.z+r.d/2,r.y,r.h));
+    }
     // Ruins and wrecks, on gentle ground clear of the plots, the riverbed
     // and each other.
     const pick = random(featureSeed+attempt), taken: {x: number; z: number; r: number}[] = [];
@@ -169,6 +208,8 @@ export function outdoors(seed: number): Outdoors {
       Math.max(Math.abs(x),Math.abs(z))+r < half-16 && river.points.every(p => Math.hypot(p.x-x,p.z-z) > r+riverFloor+9) &&
       taken.every(t => Math.hypot(t.x-x,t.z-z) > t.r+r+1.5);
     const claim = (x: number, z: number, r: number) => { taken.push({x,z,r}); };
+    // Keep the bridges' landings open.
+    for (const b of bridges) for (const e of [b.planks[0],b.planks.at(-1)!]) claim(e.x,e.z,3);
     const ruins = placeRuins(pick,ground,half,clear,claim), wrecks = placeWrecks(pick,ground,half,clear,claim);
     for (const r of ruins) {
       for (const b of r.pieces) g.walls.push(wall(room,b.x-b.w/2,b.z-b.d/2,b.x+b.w/2,b.z+b.d/2,b.y,b.h));
@@ -183,6 +224,8 @@ export function outdoors(seed: number): Outdoors {
       if (Math.abs(x-building.x) < building.w/2+12 && Math.abs(z-building.z-2) < building.d/2+13) continue;
       if (Math.hypot(x-ax,z-az) < 12 || rocks.some(r => Math.abs(r.x-x) < (r.w+w)/2+2 && Math.abs(r.z-z) < (r.d+dd)/2+2)) continue;
       if (taken.some(t => Math.hypot(t.x-x,t.z-z) < t.r+Math.max(w,dd))) continue;
+      // Out of the riverbed, its fords and its banks.
+      if (river.points.some(p => Math.hypot(p.x-x,p.z-z) < riverFloor+15+Math.max(w,dd)/2)) continue;
       // Only on gentle ground, a metre clear of anything steep: a boulder
       // half buried in a ditch wall could pen someone in against it.
       let gentle = true;
@@ -198,7 +241,9 @@ export function outdoors(seed: number): Outdoors {
     const spawns = [-1.2,1.2].map(side => stand(ax+Math.cos(face)*side,az-Math.sin(face)*side,face));
     // Worn trails from the arrival to each door, around everything placed.
     const index = collisionIndex(g), wander = noise(featureSeed ^ 0x2545f491);
-    const trails = doors.map(d => trail(ground,g.surfaces[0],(x,z,y) => index.clear(x,z,y,0.6),(x,z) => wander(x/12,z/12)*0.5+0.5,{x:ax,z:az},d.exit));
+    // Never through water deeper than a wade.
+    const dry = (x: number, z: number, y: number) => { const l = waterLevel(water,x,z); return l === undefined || l-y <= wadeDepth+0.5; };
+    const trails = doors.map(d => trail(ground,g.surfaces[0],(x,z,y) => index.clear(x,z,y,0.6) && dry(x,z,y),(x,z) => wander(x/12,z/12)*0.5+0.5,{x:ax,z:az},d.exit));
     const marks = new Uint8Array(n*n);
     for (let j=0;j<n*n;j++) if (river.points.length && riverCut(river,ground.x0+(j % n),ground.z0+Math.floor(j/n)) > riverDepth*0.7) marks[j] = 2;
     for (const line of trails) for (const p of line ?? []) for (let dz=-1;dz<=1;dz++) for (let dx=-1;dx<=1;dx++) {
@@ -208,7 +253,7 @@ export function outdoors(seed: number): Outdoors {
     const world: Outdoors = {
       seed,geometry:g,size:outdoorSize,ground,arrival:{x:ax,y:arrivalLevel,z:az},spawns,building,doors,door,exit:doors[0].exit,rocks,bell,
       ringing:{x:bell.x,y:0,z:bell.z+1.5,yaw:0},
-      river,fords:river.fords.map(f => ({x:f.x,y:height(f.x,f.z),z:f.z})),ruins,wrecks,trails:trails.map(t => t ?? []),marks,
+      river,fords:river.fords.map(f => ({x:f.x,y:height(f.x,f.z),z:f.z})),ruins,wrecks,trails:trails.map(t => t ?? []),marks,water,bridges,
     };
     const reached = walkable(g,spawns[0],[],0.5);
     if (scale === 0 || (trails.every(Boolean) && [...doors.map(d => d.exit),world.ringing,spawns[1]].every(p => reached(p)))) {
@@ -323,6 +368,9 @@ export function riftZones(seed: number): Point3[] {
     if (!far(map.arrival,30) || !far(map.door,18) || !far(map.bell,18)) continue;
     // Fairly level ground, clear for 2 m around.
     if ([[2,0],[-2,0],[0,2],[0,-2]].some(([dx,dz]) => Math.abs(height(x+dx,z+dz)-y) > 0.7)) continue;
+    // Not in the riverbed's water.
+    const wet = g.water ? waterLevel(g.water,x,z) : undefined;
+    if (wet !== undefined && wet > y-0.5) continue;
     if (!clearAt(x,z,2,obstaclesAt(g,y)) || !reached(here)) continue;
     zones.push(here);
   }

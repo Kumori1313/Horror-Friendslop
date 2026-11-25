@@ -6,20 +6,23 @@ import type { Body, Flight } from '../flight.ts';
 import { geometryFor, nearbyDoor, playerRadius, spawnPoints } from '../layout.ts';
 import type { Layout, Geometry, Rect } from '../layout.ts';
 
-import { climbable, obstaclesAt, surfaceAt, surfaceHeight } from '../room-templates.ts';
-import { assignment, batonReach, bellSpan, swingTime, catalog, deliverySpot, distance, diverBody, finished, flareTime, gone, nearestPickup, prices, wallet } from '../mission.ts';
+import { climbable, headHeight, obstaclesAt, surfaceAt, surfaceHeight, wadeDepth, waterLevel } from '../room-templates.ts';
+import { assignment, batonReach, bellSpan, breathTime, swingTime, catalog, deliverySpot, distance, diverBody, finished, flareTime, gone, nearestPickup, prices, wallet } from '../mission.ts';
 import { doorReach, home, insideDoors, outdoors, placeOf, riftOpen, riftReach, riftSpot } from '../places.ts';
 import type { Place, Stand } from '../places.ts';
 import { bodyOf, expeditionSeed, itemKinds, spawnSalvage } from '../salvage.ts';
 import { generateLayout } from './generate-layout.ts';
-import { advanceMission, newContract, newMission, stun, wake, wipeSeed } from './mission.ts';
+import { advanceMission, die, newContract, newMission, stun, wake, wipeSeed } from './mission.ts';
 
 // Operator movement shared by the host and by clients predicting their own
 // operator, so both agree on walls, stairs and closed bulkheads.
 export function moveOperator(p: Player, input: Input, dt: number, geometry: Geometry | undefined, opened: readonly string[] = []) {
   p.yaw = input.yaw;
   p.pitch = input.pitch;
-  const step = 3.3 * dt / Math.max(1, Math.hypot(input.forward, input.right));
+  // Wading past the knees slows an operator down.
+  const level = geometry?.water ? waterLevel(geometry.water,p.x,p.z) : undefined;
+  const wading = level !== undefined && level-(p.feetY ?? 0) > wadeDepth;
+  const step = 3.3 * (wading ? 0.6 : 1) * dt / Math.max(1, Math.hypot(input.forward, input.right));
   const x = p.x + (Math.cos(p.yaw) * input.right - Math.sin(p.yaw) * input.forward) * step;
   const z = p.z - (Math.cos(p.yaw) * input.forward + Math.sin(p.yaw) * input.right) * step;
   stepTo(p,x,p.z,geometry,opened);
@@ -208,14 +211,18 @@ export class Simulation {
       if (this.state.lamp.owner === p.id) this.hold(p);
     }
     // A flashlight thrown into the exit rift turns up at home.
-    if (advance(this.state.lamp,dt) && this.state.lamp.homeward) {
+    const landed = advance(this.state.lamp,dt);
+    if (landed && this.state.lamp.homeward) {
       Object.assign(this.state.lamp,{...home().lamp,y:0.14,pitch:0,place:'home'});
       delete this.state.lamp.homeward;
     }
+    // Into deep water: lost once it lands.
+    if (this.state.lamp.sinks && !this.state.lamp.flight) { Object.assign(this.state.lamp,{lost:true,on:false}); delete this.state.lamp.sinks; }
     this.time += dt;
     for (const h of mission?.haul ?? []) {
       // Bought gear thrown into the exit rift turns up at home.
       if (advance(h,dt) && h.homeward) { Object.assign(h,deliverySpot(mission!),{place:'home'}); delete h.homeward; }
+      if (h.sinks && !h.flight) { h.used = true; delete h.sinks; }
       // A lit flare burns down wherever it is, then it's gone.
       if (h.burn !== undefined) {
         h.burn -= dt;
@@ -234,6 +241,18 @@ export class Simulation {
         lamp.charge = Math.max(0,chargeOf(lamp)-whole);
       }
       if (chargeOf(lamp) <= 0) lamp.on = false;
+    }
+    // Head under water: breath runs out after `breathTime`, and they drown.
+    if (mission?.stage === 'explore' && this.layout) {
+      const water = outdoors(this.layout.seed).geometry.water;
+      for (const p of this.state.players) {
+        if (placeOf(p) !== 'outside' || mission.dead?.includes(p.id) || mission.escaped?.includes(p.id) || !water) continue;
+        const level = waterLevel(water,p.x,p.z), under = level !== undefined && level-(p.feetY ?? 0) > headHeight;
+        const held = mission.drowning?.find(d => d.id === p.id);
+        if (!under) { if (held) mission.drowning = mission.drowning!.filter(d => d !== held); continue; }
+        if (!held) (mission.drowning ??= []).push({id:p.id,seconds:breathTime-dt});
+        else if ((held.seconds -= dt) <= 0) die(this.state,mission,p.id,true);
+      }
     }
     if (mission?.stage === 'explore') {
       this.elapsed += dt;
@@ -392,12 +411,16 @@ export class Simulation {
         }
       }
     }
+    // Ending up in deep water, it sinks once it lands.
+    const water = place === 'outside' && layout ? outdoors(layout.seed).geometry.water : undefined, level = water ? waterLevel(water,rest.x,rest.z) : undefined;
+    const sinks = level !== undefined && level-rest.y > wadeDepth+0.5;
     this.release(p,item);
     if (item === lampSlot) {
       const lamp: Lamp = this.state.lamp;
       Object.assign(lamp,{owner:null,x:rest.x,y:rest.y+body.h,z:rest.z,pitch:0,stowed:false},mission ? {place} : {});
       if (flight) lamp.flight = flight; else delete lamp.flight;
       if (banked) lamp.homeward = true;
+      else if (sinks) lamp.sinks = true;
     } else if (mission) {
       const h = mission.haul.find(entry => entry.id === item);
       if (!h) return;
@@ -407,6 +430,7 @@ export class Simulation {
       if (banked) { if (h.kind) h.homeward = true; else h.banked = true; }
       // A flare lights as it leaves the hand.
       if (h.kind === 'flare' && h.burn === undefined) h.burn = flareTime;
+      if (sinks && !h.banked && !h.homeward) h.sinks = true;
     }
   }
 
@@ -556,7 +580,7 @@ export class Simulation {
     this.state.opened = [];
     // Bought gear that came home stays; everything else went with the facility.
     Object.assign(mission,{stage:'home',haul:wipe ? [] : mission.haul.filter(h => h.kind),down:[],awake:false,diver:{mode:'dormant',bay:'',seconds:0}});
-    for (const key of ['arrival','bell','rift','enraged','escaped','dead','clock'] as const) delete mission[key];
+    for (const key of ['arrival','bell','rift','enraged','escaped','dead','clock','drowning'] as const) delete mission[key];
     this.fillSlots();
   }
 }

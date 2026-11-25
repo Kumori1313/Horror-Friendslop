@@ -1,7 +1,7 @@
 import { clearAt } from './room.ts';
 import type { Point } from './room.ts';
 
-import { assembleTemplates, cell, climbable, planningGrade, corridorKinds, destinationPool, isCorridor, orient, roomTemplates, socketAt, storey, surfaceAt, surfaceHeight, obstaclesAt } from './room-templates.ts';
+import { assembleTemplates, cell, climbable, planningGrade, wadeDepth, waterLevel, corridorKinds, destinationPool, isCorridor, orient, roomTemplates, socketAt, storey, supports, surfaceAt, surfaceHeight, obstaclesAt } from './room-templates.ts';
 import type { PlacedSurface, Placement, Point3, Solid, TemplateGeometry, TemplateKind, TemplateLink } from './room-templates.ts';
 
 export const generatorVersion = 7;
@@ -218,7 +218,7 @@ export function collisionIndex(g: Geometry, opened: readonly string[] = [], reac
       for (const s of surfaces(x,z)) {
         if (Math.abs(x-s.x)>s.w/2+1e-6 || Math.abs(z-s.z)>s.d/2+1e-6) continue;
         const delta = Math.abs(surfaceHeight(s,x,z)-feet);
-        if (delta<=step && delta<difference) { best = s; difference = delta; }
+        if (delta<=step && supports(s,delta,best,difference)) { best = s; difference = delta; }
       }
       return best;
     },
@@ -233,6 +233,11 @@ export function collisionIndex(g: Geometry, opened: readonly string[] = [], reac
 
 // Flood fill on a 0.25 m lattice with the simulation's own support and clearance
 // rules. Points closer than a wall's clearance cannot straddle it at this spacing.
+// Water too deep to wade at (x, z) for feet at `feet`.
+export function deep(g: Geometry, x: number, z: number, feet: number) {
+  const level = g.water ? waterLevel(g.water,x,z) : undefined;
+  return level !== undefined && level-feet > wadeDepth+0.5;
+}
 // A coarser `step` suits the large outdoor map.
 export function walkable(g: Geometry, from: Point3, opened: readonly string[] = [], step = 0.25) {
   const seen = new Set<number>();
@@ -253,6 +258,8 @@ export function walkable(g: Geometry, from: Point3, opened: readonly string[] = 
         // on rolling ground 0.3 m either side too, like the route planner.
         if (seen.has(key) || !climbable(s,feet,nextFeet,x,z,planningGrade) || !climbable(s,feet,nextFeet,x-dx*step/2,z-dz*step/2,planningGrade) || !index.clear(x,z,nextFeet)) continue;
         if (s.field && [-0.3,0.3].some(side => !climbable(s,feet,nextFeet+1,x+dz*side,z+dx*side,planningGrade))) continue;
+        // Never through water deeper than a wade.
+        if (deep(g,x,z,nextFeet)) continue;
         seen.add(key);
         queue.push([ix+dx,iz+dz,nextFeet]);
       }

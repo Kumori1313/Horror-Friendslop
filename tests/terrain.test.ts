@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { collisionIndex, geometryFor, walkable, type Geometry } from '../src/layout.ts';
 import { trajectory, launchFrom } from '../src/flight.ts';
 import { groundAt, insideDoors, outdoors, placeOf, riftZones } from '../src/places.ts';
-import { climbable, fieldHeight, maxGrade, surfaceAt, type Heightfield } from '../src/room-templates.ts';
+import { climbable, fieldHeight, maxGrade, surfaceAt, waterLevel, type Heightfield } from '../src/room-templates.ts';
 import { route } from '../src/route.ts';
 import { bodyOf } from '../src/salvage.ts';
 import { generateLayout } from '../src/server/generate-layout.ts';
@@ -114,10 +114,15 @@ test('walking down into a ditch is allowed, and nowhere you can get down to leav
   for (let seed=1;seed<=12;seed++) {
     const map = outdoors(seed), g = map.geometry, s = g.surfaces[0], step = 0.5, span = 281, x0 = -70;
     const h = (i: number, k: number) => groundAt(map,x0+i*step,x0+k*step);
-    const index = collisionIndex(g), open = (i: number, k: number) => index.clear(x0+i*step,x0+k*step,h(i,k));
+    // The river's channel is a hazard by design: falling in away from a ford
+    // can drown you. So the flood doesn't walk through it, and reaching it
+    // counts as a way out (into the hazard), not as being stranded.
+    const wet = (i: number, k: number) => waterLevel(map.water,x0+i*step,x0+k*step) !== undefined;
+    const index = collisionIndex(g), open = (i: number, k: number) => index.clear(x0+i*step,x0+k*step,h(i,k)) && !wet(i,k);
     const may = (ai: number, ak: number, bi: number, bk: number) => climbable(s,h(ai,ak),h(bi,bk),x0+bi*step,x0+bk*step);
     const flood = (forward: boolean) => {
       const start = [Math.round((map.spawns[0].x-x0)/step),Math.round((map.spawns[0].z-x0)/step)], seen = new Set([start[1]*span+start[0]]), queue = [start];
+      if (!forward) for (let k=0;k<span;k++) for (let i=0;i<span;i++) if (wet(i,k)) { seen.add(k*span+i); queue.push([i,k]); }
       for (let q=0;q<queue.length;q++) {
         const [i,k] = queue[q];
         for (const [di,dk] of [[1,0],[-1,0],[0,1],[0,-1]]) {

@@ -40,8 +40,11 @@ export const wareInfo: Record<Ware,{name: string; about: string}> = {
 // bought item, which has no spawn spot in the facility to say what it is.
 // `burn`: a lit flare's seconds left. `homeward`: bought gear thrown into the
 // exit rift, which turns up at home when its flight ends.
-export interface Haul extends Point3 { id: string; owner: number | null; banked?: boolean; flight?: Flight; place?: Place; used?: boolean; kind?: ItemKind; burn?: number; homeward?: boolean }
+// `sinks`: thrown or dropped into deep water, it is lost once it lands.
+export interface Haul extends Point3 { id: string; owner: number | null; banked?: boolean; flight?: Flight; place?: Place; used?: boolean; kind?: ItemKind; burn?: number; homeward?: boolean; sinks?: boolean }
 export const flareTime = 60;
+// Seconds of breath with the head under water.
+export const breathTime = 4;
 // Where bought gear is laid out at home: a row in front of the terminal.
 export function deliverySpot(mission: Mission) {
   const t = home().terminal;
@@ -84,6 +87,8 @@ export interface Mission {
   // Operators who went into the exit rift, and those who died.
   escaped?: number[];
   dead?: number[];
+  // Operators with their head under water, and the breath they have left.
+  drowning?: {id: number; seconds: number}[];
   outcome?: Outcome;
   contract: Contract;
   haul: Haul[];

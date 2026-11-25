@@ -1,4 +1,4 @@
-import { collisionIndex, geometryFor, playerRadius } from './layout.ts';
+import { collisionIndex, deep, geometryFor, playerRadius } from './layout.ts';
 import type { Geometry, Layout } from './layout.ts';
 import { climbable, planningGrade, surfaceHeight } from './room-templates.ts';
 import type { Point3 } from './room-templates.ts';
@@ -35,7 +35,8 @@ function plan(layout: Layout | Geometry, from: Point3, to: Point3, margin: numbe
   const key = (ix: number, iz: number, feet: number) => ((ix+4096)*8192+iz+4096)*128+Math.round(feet*4);
   interface Node { ix: number; iz: number; feet: number; heading: number; cost: number; slope: number; previous?: Node }
   // Ramps and stairs are entered and left along their slope (0 = x, 1 = z).
-  const slopeOf = (s: {rise?: number; along?: 'x'}) => s.rise ? (s.along ? 0 : 1) : -1;
+  // A deck that barely tilts, like a bridge's planks, can be crossed any way.
+  const slopeOf = (s: {rise?: number; along?: 'x'; w: number; d: number}) => s.rise && Math.abs(s.rise) > 0.35*(s.along ? s.w : s.d) ? (s.along ? 0 : 1) : -1;
   const best = new Map<number,number>();
   const heap: Node[] = [];
   const push = (n: Node) => {
@@ -84,6 +85,7 @@ function plan(layout: Layout | Geometry, from: Point3, to: Point3, margin: numbe
       if ((slope >= 0 && slope !== heading >> 1) || (n.slope >= 0 && n.slope !== heading >> 1) || !climbable(s,n.feet,feet,x,z,planningGrade) || !climbable(s,n.feet,feet,x-dx*step/2,z-dz*step/2,planningGrade)) return;
       // On rolling ground, keep 0.3 m either side gentle too, for a walker that strays.
       if (s.field && [-0.3,0.3].some(side => !climbable(s,n.feet,feet+1,x+dz*side,z+dx*side,planningGrade))) return;
+      if (deep(g,x,z,feet)) return;
       const cost = n.cost+1+(n.heading >= 0 && n.heading !== heading ? turn : 0);
       const id = key(n.ix+dx,n.iz+dz,feet)*4+heading+1;
       if (cost >= (best.get(id) ?? Infinity) || !open(x,z,feet,heading,!!s.field)) return;

@@ -5,7 +5,7 @@ import { environment, materialLibrary } from './materials.ts';
 import { anchor, geometryFor, type Geometry, type Layout } from './layout.ts';
 import { home, outdoors, placeOf, type Place } from './places.ts';
 import { buildHome, buildOutdoors } from './world-scene.ts';
-import { obstaclesAt, roomTemplates, socketAt, surfaceAt } from './room-templates.ts';
+import { obstaclesAt, roomTemplates, socketAt, surfaceAt, waterLevel } from './room-templates.ts';
 import { portalGraph, visibleRooms, type PortalGraph } from './visibility.ts';
 import { batteryLife, chargeOf, lampSlot, selected, walls } from './room.ts';
 import type { Snapshot } from './room.ts';
@@ -373,13 +373,15 @@ export function createScene(canvas: HTMLCanvasElement, generated = false) {
   const night = {background:0x070a0e,fog:0x0a0e13,skyLevel:0.5,moonLevel:0.4};
   let looked = '';
   const mix = (a: number, b: number, t: number) => new T.Color(a).lerp(new T.Color(b),t);
-  function look(place: Place, clock = 0) {
-    const dusk = place === 'outside' ? Math.min(1,clock/nightfall) : 0, key = place+'/'+dusk.toFixed(3);
+  function look(place: Place, clock = 0, under = false) {
+    const dusk = place === 'outside' ? Math.min(1,clock/nightfall) : 0, key = place+'/'+dusk.toFixed(3)+'/'+under;
     if (key === looked) return;
     looked = key;
     const l = looks[place];
     (scene.background as T.Color).copy(mix(l.background,night.background,dusk));
     (scene.fog as T.FogExp2).color.copy(mix(l.fog,night.fog,dusk)); (scene.fog as T.FogExp2).density = l.density;
+    // Under water: murky, green, and close.
+    if (under) { (scene.background as T.Color).setHex(0x0a1c1c); (scene.fog as T.FogExp2).color.setHex(0x0c2421); (scene.fog as T.FogExp2).density = 0.35; }
     sky.color.setHex(l.sky); sky.groundColor.setHex(l.skyGround); sky.intensity = l.skyLevel+(night.skyLevel-l.skyLevel)*dusk;
     skylight.color.setHex(l.moon); skylight.intensity = l.moonLevel+(night.moonLevel-l.moonLevel)*dusk;
     camera.far = l.far; camera.updateProjectionMatrix();
@@ -475,7 +477,8 @@ export function createScene(canvas: HTMLCanvasElement, generated = false) {
     const me = state?.players.find(p => p.id === self);
     // Without a contract everything is inside, as it always was.
     const here: Place | undefined = !state?.mission ? (layout ? 'inside' : undefined) : me ? placeOf(me) : undefined;
-    if (generated && here) look(here,state?.mission?.clock);
+    const water = here === 'outside' && layout ? outdoors(layout.seed).geometry.water : undefined, surface = water ? waterLevel(water,camera.position.x,camera.position.z) : undefined;
+    if (generated && here) look(here,state?.mission?.clock,surface !== undefined && camera.position.y < surface);
     // Build only the place this camera is in. Home drops the expedition.
     if (here === 'home') {
       facility?.dispose(); facility = undefined; loaded = undefined; portals = undefined;

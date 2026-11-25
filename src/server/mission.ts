@@ -191,13 +191,15 @@ export function endExpedition(layout: Layout, state: Snapshot, mission: Mission)
 
 // A downed operator nobody reached in time dies. They drop what they carry
 // where they fell, so a partner can still recover it.
-function die(state: Snapshot, mission: Mission, id: number) {
+// Drowned in deep water, what they carried sinks and is lost with them.
+export function die(state: Snapshot, mission: Mission, id: number, sunk = false) {
   mission.down = mission.down.filter(d => d.id !== id);
+  mission.drowning = mission.drowning?.filter(d => d.id !== id);
   (mission.dead ??= []).push(id);
   const p = state.players.find(q => q.id === id);
   if (!p) return;
-  for (const h of mission.haul) if (h.owner === id) Object.assign(h,{owner:null,x:p.x,y:p.feetY ?? 0,z:p.z,place:p.place});
-  if (state.lamp.owner === id) Object.assign(state.lamp,{owner:null,x:p.x,z:p.z,y:(p.feetY ?? 0)+0.14,pitch:0,stowed:false,place:p.place});
+  for (const h of mission.haul) if (h.owner === id) Object.assign(h,{owner:null,x:p.x,y:p.feetY ?? 0,z:p.z,place:p.place},sunk ? {used:true} : {});
+  if (state.lamp.owner === id) Object.assign(state.lamp,{owner:null,x:p.x,z:p.z,y:(p.feetY ?? 0)+0.14,pitch:0,stowed:false,place:p.place},sunk ? {lost:true,on:false} : {});
   p.slots = p.slots?.map(() => null);
 }
 

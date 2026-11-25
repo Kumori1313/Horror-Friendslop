@@ -3,7 +3,7 @@
 // from the arrival to the building's doors. Pure functions of the seed and
 // the ground, so every client builds the same map. Like `places.ts`, no
 // Node-only APIs.
-import { climbable, fieldGrade, fieldHeight, planningGrade, type Heightfield, type Surface } from './room-templates.ts';
+import { climbable, fieldGrade, fieldHeight, fordAt, planningGrade, waterLevel, type Heightfield, type Surface, type Water } from './room-templates.ts';
 
 const smooth = (t: number) => { const c = Math.max(0,Math.min(1,t)); return c*c*(3-2*c); };
 type Rng = () => number;
@@ -11,7 +11,10 @@ type Area = {x: number; z: number; r: number};
 
 // The riverbed: a meandering centre line across the map. `t` runs along it.
 export interface River { points: {x: number; z: number; t: number}[]; fords: {x: number; z: number; t: number}[] }
-export const riverDepth = 2.6, riverFloor = 3.2;
+export const riverDepth = 4.5, riverFloor = 3.2;
+// Water over the riverbed's floor: over a head in the channel, about waist
+// deep at a ford.
+export const deepWater = 2.6, fordWater = 0.7;
 
 export function riverCourse(next: Rng, half: number, keep: Area[]): River | undefined {
   for (let tries=0;tries<12;tries++) {
@@ -36,6 +39,28 @@ export function riverCourse(next: Rng, half: number, keep: Area[]): River | unde
   }
 }
 
+// How much of a ford there is at (x, z).
+export const fordness = (river: River, x: number, z: number) => fordAt(river.fords,x,z);
+
+// The water in the riverbed: the floor's height at each point of the centre
+// line, and the river's fords (see `waterLevel`).
+export function riverWater(river: River, height: (x: number, z: number) => number): Water {
+  const points = river.points.map(p => ({x:p.x,z:p.z,floor:height(p.x,p.z)}));
+  return {points,fords:river.fords.map(f => ({x:f.x,z:f.z,floor:height(f.x,f.z)})),deep:deepWater,shallow:fordWater,width:riverFloor};
+}
+
+// The nearest point of the river's centre line to (x, z).
+export function riverNearest(river: River, x: number, z: number) {
+  let best = Infinity, at = {x:0,z:0};
+  const p = river.points;
+  for (let i=1;i<p.length;i++) {
+    const ax = p[i-1].x, az = p[i-1].z, sx = p[i].x-ax, sz = p[i].z-az, len = sx*sx+sz*sz;
+    const u = Math.max(0,Math.min(1,((x-ax)*sx+(z-az)*sz)/len)), qx = ax+sx*u, qz = az+sz*u, d = (qx-x)**2+(qz-z)**2;
+    if (d < best) { best = d; at = {x:qx,z:qz}; }
+  }
+  return at;
+}
+
 // How far below the ground the riverbed cuts at (x, z): a level floor
 // between banks too steep to climb, which widen into gentle slopes at a ford.
 export function riverCut(river: River, x: number, z: number) {
@@ -47,12 +72,13 @@ export function riverCut(river: River, x: number, z: number) {
     if (d < best) { best = d; along = p[i-1].t+(p[i].t-p[i-1].t)*u; }
   }
   const d = Math.sqrt(best);
-  if (d > riverFloor+9) return 0;
-  const ford = Math.max(0,...river.fords.map(f => smooth(1-Math.abs(along-f.t)/9)));
+  if (d > riverFloor+14) return 0;
+  const ford = fordness(river,x,z);
   // Banks 2.5 m wide: far too steep to climb, but wide enough for the 1 m
-  // height map to draw without a sawtooth edge.
-  const bank = 2.5+6*ford;
-  return riverDepth*(d <= riverFloor ? 1 : smooth(1-(d-riverFloor)/bank));
+  // height map to draw without a sawtooth edge; at a ford, 13.5 m, gentle.
+  const bank = 2.5+11*ford;
+  // Shallower at a ford, so its banks stay gentle even on a hillside.
+  return riverDepth*(1-0.35*ford)*(d <= riverFloor ? 1 : smooth(1-(d-riverFloor)/bank));
 }
 
 // Ground gentle enough to build on, a margin clear of anything steep.
@@ -184,4 +210,88 @@ export function trail(f: Heightfield, ground: Surface, open: (x: number, z: numb
     out.push(line.at(-1)!); line = out;
   }
   return line.map(p => ({x:p.x,y:fieldHeight(f,p.x,p.z),z:p.z}));
+}
+
+// Dilapidated bridges over the riverbed, square to the map (walkable surfaces
+// are axis-aligned), where the river runs roughly along an axis, away from
+// the fords and each other. A deck of plank rows, each in two halves: here
+// and there a half is missing (never two rows running, so there is always a
+// way over), and stretches of railing are gone. A misstep drops you into
+// the water.
+export interface Plank { x: number; z: number; w: number; d: number; y: number; rise: number; along?: 'x' }
+export interface Bridge { along: 'x' | 'z'; x: number; z: number; length: number; planks: Plank[]; rails: Block[]; posts: Block[] }
+// Half the width of a bridge's deck: each row is two planks this wide.
+const half2 = 0.7;
+export function placeBridges(next: Rng, river: River, water: Water, f: Heightfield, half: number): Bridge[] {
+  const p = river.points, bridges: Bridge[] = [], want = next() < 0.5 ? 2 : 3;
+  const order = p.map((_,i) => i).filter(i => i > 0 && i < p.length-1 && Math.max(Math.abs(p[i].x),Math.abs(p[i].z)) < half-16);
+  for (let i=order.length-1;i>0;i--) { const k = Math.floor(next()*(i+1)); [order[i],order[k]] = [order[k],order[i]]; }
+  for (const i of order) {
+    if (bridges.length >= want) break;
+    const c = p[i], dx = p[i+1].x-p[i-1].x, dz = p[i+1].z-p[i-1].z, len = Math.hypot(dx,dz);
+    if (river.fords.some(fd => Math.hypot(fd.x-c.x,fd.z-c.z) < 10) || bridges.some(b => Math.hypot(b.x-c.x,b.z-c.z) < 18)) continue;
+    // The river runs within 45 degrees of one axis; the bridge spans the other.
+    const runsX = Math.abs(dx)/len >= Math.SQRT1_2, runsZ = !runsX;
+    if (!runsX && !runsZ) continue;
+    const along: 'x' | 'z' = runsZ ? 'x' : 'z', level = waterLevel(water,c.x,c.z);
+    if (level === undefined) continue;
+    // Out from the middle each way to firm ground well above the water, then a little further.
+    const at = (s: number) => along === 'x' ? {x:c.x+s,z:c.z} : {x:c.x,z:c.z+s};
+    const end = (sign: number) => {
+      // The first ground well above the water that is also gentle for a
+      // couple of metres on, so the deck lands on something walkable.
+      for (let s=riverFloor+2;s<24;s+=0.5) {
+        const q = at(sign*s), on = at(sign*(s+1.5));
+        const above = (x: number, z: number) => fieldHeight(f,x,z) >= Math.max(level,waterLevel(water,x,z) ?? -Infinity)+0.5;
+        if (above(q.x,q.z) && above(on.x,on.z) && gentle(f,on.x,on.z,1.5,1.5,0.25,0.65)) return sign*(s+0.5);
+      }
+    };
+    const a = end(-1), b = end(1);
+    if (a === undefined || b === undefined || b-a > 30) continue;
+    // Both landings, and the ground beyond them, clear of the river, so a
+    // bridge never lands beside another bend of it.
+    if ([a,a-3,b,b+3].some(s => { const q = at(s), r = riverNearest(river,q.x,q.z); return Math.hypot(r.x-q.x,r.z-q.z) < riverFloor+3; })) continue;
+    // The deck lands just above the ground along its outer edges; the map
+    // then levels a pad of ground at each landing to meet it (`landings`).
+    const landing = (s: number, side: number) => {
+      let top = -Infinity;
+      for (let w=0.1;w<=1.4;w+=0.25) { const q = at(s), x = along === 'x' ? q.x : q.x+side*w, z = along === 'x' ? q.z+side*w : q.z; top = Math.max(top,fieldHeight(f,x,z)); }
+      return top+0.06;
+    };
+    const level2 = [(landing(a,-1)+landing(a,1))/2,(landing(b,-1)+landing(b,1))/2], ends = new Map([[-1,level2],[1,level2]]), length = b-a;
+    if (Math.abs(level2[1]-level2[0]) > length*0.3) continue;
+    const rows = Math.round(length), step = length/rows, planks: Plank[] = [], rails: Block[] = [], posts: Block[] = [];
+    let gapped = false;
+    for (let r=0;r<rows;r++) {
+      const mid = a+r*step+step/2, deck = (side: number) => { const [u,v] = ends.get(side)!; return u+(v-u)*(r/rows); }, slope = (side: number) => { const [u,v] = ends.get(side)!; return (v-u)/rows; };
+      const gap: number = !gapped && r > 1 && r < rows-2 && next() < 0.22 ? (next() < 0.5 ? -1 : 1) : 0;
+      gapped = gap !== 0;
+      for (const side of [-1,1]) {
+        if (side === gap) continue;
+        const q = at(mid), [u,v] = ends.get(side)!, y = u+(v-u)*(r/rows), tilt = (v-u)/rows;
+        planks.push(along === 'x' ? {x:q.x,z:q.z+side*half2,w:step,d:half2*2,y,rise:tilt,along:'x'} : {x:q.x+side*half2,z:q.z,w:half2*2,d:step,y,rise:tilt});
+      }
+      // Railings, a metre high, with stretches gone.
+      for (const side of [-1,1]) {
+        if (next() < 0.4) continue;
+        const q = at(mid), top = Math.max(deck(side),deck(side)+slope(side));
+        rails.push(along === 'x' ? {x:q.x,z:q.z+side*(half2*2+0.04),w:step,d:0.08,y:top-0.05,h:1.05} : {x:q.x+side*(half2*2+0.04),z:q.z,w:0.08,d:step,y:top-0.05,h:1.05});
+      }
+      // Posts down to the riverbed every few rows.
+      if (r % 3 === 1) for (const side of [-1,1]) {
+        const q = at(mid), px = along === 'x' ? q.x : q.x+side*(half2*2-0.05), pz = along === 'x' ? q.z+side*(half2*2-0.05) : q.z, foot = fieldHeight(f,px,pz)-0.3;
+        posts.push({x:px,z:pz,w:0.22,d:0.22,y:foot,h:deck(side)-foot});
+      }
+    }
+    bridges.push({along,x:c.x,z:c.z,length,planks,rails,posts});
+  }
+  return bridges;
+}
+
+// Where each bridge meets the bank: the deck's outer edge, its height, and
+// which way is outward along the span.
+export function landings(b: Bridge) {
+  const key = (q: Plank) => b.along === 'x' ? q.x : q.z, size = (q: Plank) => b.along === 'x' ? q.w : q.d;
+  const first = b.planks.reduce((m,q) => key(q) < key(m) ? q : m), last = b.planks.reduce((m,q) => key(q) > key(m) ? q : m);
+  return [{edge:key(first)-size(first)/2,y:first.y,out:-1},{edge:key(last)+size(last)/2,y:last.y+last.rise,out:1}];
 }

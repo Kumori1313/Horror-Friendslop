@@ -143,6 +143,8 @@ export function missionHud(preferences: Preferences, operator = (id: number) => 
     if (m.rift) alerts.push('Rift closes in '+clock(m.rift.seconds));
     if (m.escaped?.includes(self.id)) alerts.push('You made it out. Waiting for the rift to close');
     if (m.dead?.includes(self.id)) alerts.push('You died. Your crew can still make it out');
+    // Under water: the breath left, and partners going under.
+    for (const d of m.drowning ?? []) alerts.push(d.id === self.id ? 'Under water! Get your head up · '+Math.max(0,Math.ceil(d.seconds))+'s' : operator(d.id)+' is under water');
     for (const id of m.dead ?? []) if (id !== self.id) alerts.push(operator(id)+' died');
     for (const id of m.escaped ?? []) if (id !== self.id) alerts.push(operator(id)+' made it out');
     for (const d of m.down) alerts.push((d.id === self.id ? 'You are down. Your partner can revive you' :

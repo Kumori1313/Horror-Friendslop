@@ -21,7 +21,7 @@ export interface Player extends Point { feetY?: number; connected: boolean; id: 
 // `homeward` marks a flashlight thrown into the exit rift: it goes home once its flight ends.
 // `charge` is the battery left, in whole seconds switched on (missing means full).
 // `lost`: left behind at the end of an expedition; the crew must buy another.
-export interface Lamp extends Point { owner: number | null; on: boolean; y: number; yaw: number; pitch: number; stowed?: boolean; flight?: Flight; place?: Place; homeward?: boolean; charge?: number; lost?: boolean }
+export interface Lamp extends Point { owner: number | null; on: boolean; y: number; yaw: number; pitch: number; stowed?: boolean; flight?: Flight; place?: Place; homeward?: boolean; charge?: number; lost?: boolean; sinks?: boolean }
 // A full battery lasts six minutes switched on; clipped on, it drains at half rate.
 export const batteryLife = 360;
 export const chargeOf = (lamp: Lamp) => lamp.charge ?? batteryLife;

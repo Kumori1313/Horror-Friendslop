@@ -136,6 +136,7 @@ function terrain(map: Outdoors) {
   const material = new T.MeshStandardMaterial({vertexColors:true,map:scrub(),roughness:1,metalness:0});
   const h = (x: number, z: number) => fieldHeight(f,x,z);
   const scrubColor = new T.Color(0x3a4530), dirtColor = new T.Color(0x6a5a44), gravel = new T.Color(0x6d6b62), c = new T.Color();
+  const trailColor = new T.Color(0x857a64), siltColor = new T.Color(0x6e6c63);
   const b = map.building;
   function mesh(x0: number, z0: number, step: number) {
     const cells = chunk/step, side = cells+1, position: number[] = [], normal: number[] = [], color: number[] = [], uv: number[] = [], index: number[] = [];
@@ -145,6 +146,9 @@ function terrain(map: Outdoors) {
       const slope = Math.min(1,Math.hypot(gx,gz)/0.55);
       c.copy(scrubColor).lerp(dirtColor,slope);
       if (Math.abs(x-b.x) < b.w/2+6 && Math.abs(z-b.z-2) < b.d/2+8) c.lerp(gravel,0.7);
+      // Worn trails and the dry riverbed's silt, from the map's marks.
+      const mark = map.marks[Math.round(z-f.z0)*f.n+Math.round(x-f.x0)] ?? 0;
+      if (mark === 1) c.lerp(trailColor,0.75); else if (mark === 2) c.lerp(siltColor,0.8);
       color.push(c.r,c.g,c.b);
       return position.length/3-1;
     };
@@ -185,7 +189,6 @@ export function buildOutdoors(map: Outdoors, library: Library) {
     for (const z of [-4,4]) for (const side of [-1,1]) b.box(rust,0x2a2f2e,f.x+side*(f.w/2+0.02),y,f.z+z,0.06,0.9,2.4);
   }
   b.box(rust,0x8a6a52,map.door.x,3.2,map.door.z+0.8,3.6,0.18,1.6);
-  b.build(root);
   // Each fire exit: a plain door banded in green under a green lamp, no light cast.
   const green = new T.MeshBasicMaterial({color:0x4fd18b});
   for (const d of map.doors.slice(1)) {
@@ -222,6 +225,39 @@ export function buildOutdoors(map: Outdoors, library: Library) {
     root.add(rocks);
     for (const g of shapes) g.dispose();
   }
+  // Ruins: broken concrete walls, standing in the ground.
+  const concrete = b.surface('concrete');
+  for (const r of map.ruins) for (const p of r.pieces) b.box(concrete,0x8c8a80,p.x,p.y+p.h/2,p.z,p.w,p.h,p.d);
+  // Wrecks, rusted through. The lit ones keep a faint lamp, glowing only.
+  const rustMat = new T.MeshStandardMaterial({color:0x6a4a36,roughness:0.85,metalness:0.4,map:rust.map ?? null});
+  const lamps: {mesh: T.Mesh; base: T.Color; phase: number}[] = [];
+  const lampAt = (x: number, y: number, z: number, color: number) => {
+    const m = new T.Mesh(new T.SphereGeometry(0.13,10,6),new T.MeshBasicMaterial({color}));
+    m.position.set(x,y,z); root.add(m); lamps.push({mesh:m,base:new T.Color(color),phase:x*1.7+z});
+  };
+  for (const w of map.wrecks) {
+    const [main] = w.boxes, top = (k: number) => w.boxes[k].y+w.boxes[k].h;
+    if (w.kind === 'tank' || w.kind === 'pipes') {
+      // Cylinders lying along the wreck's length.
+      const length = w.along === 'x' ? main.w : main.d;
+      const rows = w.kind === 'tank' ? [[0,1.5]] : [[-0.55,0.5],[0.55,0.5],[0,0.5]];
+      rows.forEach(([offset,radius],i) => {
+        const cyl = new T.Mesh(new T.CylinderGeometry(radius,radius,length,w.kind === 'tank' ? 20 : 12,1,w.kind === 'pipes'),rustMat);
+        if (w.kind === 'pipes') (cyl.material as T.Material).side = T.DoubleSide;
+        const lift = w.kind === 'tank' ? 1.5 : i < 2 ? 0.5 : 1.36;
+        cyl.position.set(main.x+(w.along === 'z' ? offset : 0),top(0)-main.h+0.3+lift-0.3,main.z+(w.along === 'x' ? offset : 0));
+        cyl.rotation.set(w.along === 'z' ? Math.PI/2 : 0,0,w.along === 'x' ? Math.PI/2 : 0);
+        root.add(cyl);
+      });
+      if (w.lit) lampAt(main.x,top(0)+0.1,main.z,0xff3b2a);
+    } else {
+      // Boxes: the crane's boom, cab and counterweight; the truck's body and cab.
+      w.boxes.forEach((p,i) => b.box(i === 0 && w.kind === 'crane' ? b.surface('grating') : rust,w.kind === 'truck' && i === 0 ? 0x5b6b55 : 0x8a6a52,p.x,p.y+p.h/2,p.z,p.w,p.h,p.d));
+      const cab = w.boxes[1];
+      if (w.lit && cab) lampAt(cab.x,cab.y+cab.h+0.12,cab.z,0xffa236);
+    }
+  }
+  b.build(root);
   const arrival = rift(0x9b7bff);
   arrival.group.position.set(map.arrival.x,map.arrival.y+1.2,map.arrival.z);
   // It faces the building it brought the crew to.
@@ -254,6 +290,11 @@ export function buildOutdoors(map: Outdoors, library: Library) {
   return {
     root,seed:map.seed,
     update(time: number, arrivalOpen: boolean, open?: {x: number; y?: number; z: number}, rung = false) {
+      // The wrecks' lamps flicker, now and then going nearly out.
+      for (const l of lamps) {
+        const f = Math.sin(time*3.1+l.phase)*Math.sin(time*7.3+l.phase*2) > 0.6 ? 0.25 : 0.85+0.15*Math.sin(time*11+l.phase);
+        (l.mesh.material as T.MeshBasicMaterial).color.copy(l.base).multiplyScalar(f);
+      }
       arrival.group.visible = arrivalOpen;
       if (arrivalOpen) arrival.spin(time);
       exit.group.visible = pillar.visible = !!open;

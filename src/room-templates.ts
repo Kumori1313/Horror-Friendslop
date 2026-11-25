@@ -24,7 +24,7 @@ export const climbable = (s:Surface,from:number,to:number,x:number,z:number,limi
 export const planningGrade = maxGrade*0.9;
 export interface Socket { name:string; side:Side; x:number; z:number; y:number }
 export type PropKind = 'machine' | 'shelf' | 'tank' | 'locker' | 'crate' | 'console' | 'pump' | 'chiller' |
-  'switchboard' | 'relay' | 'generator' | 'filter' | 'bench' | 'desk' | 'pipe' | 'terminal' | 'rock' | 'bell';
+  'switchboard' | 'relay' | 'generator' | 'filter' | 'bench' | 'desk' | 'pipe' | 'terminal' | 'rock' | 'bell' | 'wreck';
 export interface Prop extends Patch { kind:PropKind; h:number; y?:number }
 export interface RoomTemplate {
   name:string;

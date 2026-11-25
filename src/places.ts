@@ -1,4 +1,5 @@
 import { collisionIndex, connections, geometryFor, walkable, type Geometry, type Layout } from './layout.ts';
+import { placeRuins, placeWrecks, riverCourse, riverCut, riverDepth, riverFloor, trail, type River, type Ruin, type Wreck } from './outdoor-features.ts';
 import { climbable, fieldGrade, fieldHeight, maxGrade, obstaclesAt, orient, outward, planningGrade, socketAt, surfaceAt } from './room-templates.ts';
 import { clearAt } from './room.ts';
 import type { Heightfield, Point3, RoomWall } from './room-templates.ts';
@@ -64,6 +65,10 @@ export interface Outdoors {
   // The bell in front of the main door, and where to stand to ring it.
   bell: Point3; ringing: Stand;
   rocks: {x: number; y: number; z: number; w: number; d: number; h: number}[];
+  // Landmarks: the dry riverbed and its fords (the choke points), ruins and
+  // wrecks (cover), and worn trails from the arrival to each door. `marks`
+  // tags each height-map point: 1 trail, 2 riverbed.
+  river: River; fords: Point3[]; ruins: Ruin[]; wrecks: Wreck[]; trails: Point3[][]; marks: Uint8Array;
 }
 export const outdoorSize = 160;
 const outdoorCache = new Map<number,Outdoors>();
@@ -109,6 +114,9 @@ export function outdoors(seed: number): Outdoors {
   const ax = Math.round(Math.sin(angle)*reach), az = Math.round(Math.cos(angle)*reach);
   const offsets = [next(),next(),next(),next()].map(v => v*1000);
   const rockSeeds = Array.from({length:400},() => [next(),next(),next(),next(),next()]);
+  // The dry riverbed keeps well clear of the building and the arrival.
+  const river = riverCourse(next,half,[{x:building.x,z:building.z,r:34},{x:ax,z:az,r:18}]) ?? {points:[],fords:[]};
+  const featureSeed = Math.floor(next()*2**31);
   // Every door and the bell must be reachable on foot, and nowhere an
   // operator can get down to may leave them stranded. Try other ditches
   // first, then gentler ground.
@@ -120,11 +128,15 @@ export function outdoors(seed: number): Outdoors {
       // floor about 3 m wide between steep walls, so an operator who drops in
       // can walk along the floor to where the ditch fades out into a crossing.
       -scale*2.8*smooth((1-Math.abs(creases(x/34+offsets[1]+shift,z/34+offsets[2]))/0.16)/0.55)*smooth((fade(x/23+shift,z/23+offsets[3])+0.15)/0.5);
-    const arrivalLevel = base(ax,az);
+    const arrivalLevel = base(ax,az), fordLevels = river.fords.map(f => ({x:f.x,z:f.z,y:base(f.x,f.z)}));
     const n = outdoorSize+1, h: number[] = new Array(n*n);
     for (let k=0;k<n;k++) for (let i=0;i<n;i++) {
       const x = i-half, z = k-half;
       let y = base(x,z);
+      // Around each ford the hillside eases toward the ford's own height, so
+      // its gentle banks aren't tipped too steep by the slope they sit on.
+      for (const f of fordLevels) { const d = Math.hypot(x-f.x,z-f.z); if (d < 16) y += (f.y-y)*(1-smooth((d-9)/7)); }
+      y -= river.points.length ? riverCut(river,x,z) : 0;
       // The building's plot, with the bell in front, is level at 0.
       const plot = Math.max(Math.abs(x-building.x)-building.w/2-8,Math.abs(z-building.z-2)-building.d/2-9,0);
       y *= smooth(plot/12);
@@ -149,13 +161,28 @@ export function outdoors(seed: number): Outdoors {
     g.props.push({x:bell.x,z:bell.z,w:1.3,d:1.3,y:0,h:2.7,kind:'bell',room});
     // Nowhere to get stuck: fill any ground that has no way back out.
     for (let pass=0;pass<6 && unstrand(g,ground,{x:ax,y:arrivalLevel,z:az});pass++);
+    // Ruins and wrecks, on gentle ground clear of the plots, the riverbed
+    // and each other.
+    const pick = random(featureSeed+attempt), taken: {x: number; z: number; r: number}[] = [];
+    const clear = (x: number, z: number, r: number) =>
+      !(Math.abs(x-building.x) < building.w/2+14+r && Math.abs(z-building.z-2) < building.d/2+15+r) && Math.hypot(x-ax,z-az) > 16+r &&
+      Math.max(Math.abs(x),Math.abs(z))+r < half-16 && river.points.every(p => Math.hypot(p.x-x,p.z-z) > r+riverFloor+9) &&
+      taken.every(t => Math.hypot(t.x-x,t.z-z) > t.r+r+3);
+    const claim = (x: number, z: number, r: number) => { taken.push({x,z,r}); };
+    const ruins = placeRuins(pick,ground,half,clear,claim), wrecks = placeWrecks(pick,ground,half,clear,claim);
+    for (const r of ruins) {
+      for (const b of r.pieces) g.walls.push(wall(room,b.x-b.w/2,b.z-b.d/2,b.x+b.w/2,b.z+b.d/2,b.y,b.h));
+      for (const b of r.rubble) g.props.push({x:b.x,z:b.z,w:b.w,d:b.d,y:b.y,h:b.h,kind:'rock',room});
+    }
+    for (const w of wrecks) for (const b of w.boxes) g.props.push({x:b.x,z:b.z,w:b.w,d:b.d,y:b.y,h:b.h,kind:'wreck',room});
     // Boulders, sitting in the ground, clear of the plots and of each other.
-    const rocks: Outdoors['rocks'] = [];
+    const rocks: Outdoors['rocks'] = ruins.flatMap(r => r.rubble.map(b => ({x:b.x,y:b.y,z:b.z,w:b.w,d:b.d,h:b.h})));
     for (const [a,b,c,d,e] of rockSeeds) {
       if (rocks.length >= 60) break;
       const w = 0.8+a*2, dd = 0.8+b*2, rh = 0.6+c*2, x = (d-0.5)*(outdoorSize-28), z = (e-0.5)*(outdoorSize-28);
       if (Math.abs(x-building.x) < building.w/2+12 && Math.abs(z-building.z-2) < building.d/2+13) continue;
       if (Math.hypot(x-ax,z-az) < 12 || rocks.some(r => Math.abs(r.x-x) < (r.w+w)/2+2 && Math.abs(r.z-z) < (r.d+dd)/2+2)) continue;
+      if (taken.some(t => Math.hypot(t.x-x,t.z-z) < t.r+Math.max(w,dd))) continue;
       // Only on gentle ground, a metre clear of anything steep: a boulder
       // half buried in a ditch wall could pen someone in against it.
       let gentle = true;
@@ -169,12 +196,22 @@ export function outdoors(seed: number): Outdoors {
     // Spawns side by side, facing the building.
     const face = Math.atan2(ax,az);
     const spawns = [-1.2,1.2].map(side => stand(ax+Math.cos(face)*side,az-Math.sin(face)*side,face));
+    // Worn trails from the arrival to each door, around everything placed.
+    const index = collisionIndex(g), wander = noise(featureSeed ^ 0x2545f491);
+    const trails = doors.map(d => trail(ground,g.surfaces[0],(x,z,y) => index.clear(x,z,y,0.6),(x,z) => wander(x/12,z/12)*0.5+0.5,{x:ax,z:az},d.exit));
+    const marks = new Uint8Array(n*n);
+    for (let j=0;j<n*n;j++) if (river.points.length && riverCut(river,ground.x0+(j % n),ground.z0+Math.floor(j/n)) > riverDepth*0.7) marks[j] = 2;
+    for (const line of trails) for (const p of line ?? []) for (let dz=-1;dz<=1;dz++) for (let dx=-1;dx<=1;dx++) {
+      const i = Math.round(p.x-ground.x0)+dx, k = Math.round(p.z-ground.z0)+dz;
+      if (i >= 0 && k >= 0 && i < n && k < n && Math.hypot(ground.x0+i-p.x,ground.z0+k-p.z) <= 1.3) marks[k*n+i] = 1;
+    }
     const world: Outdoors = {
       seed,geometry:g,size:outdoorSize,ground,arrival:{x:ax,y:arrivalLevel,z:az},spawns,building,doors,door,exit:doors[0].exit,rocks,bell,
       ringing:{x:bell.x,y:0,z:bell.z+1.5,yaw:0},
+      river,fords:river.fords.map(f => ({x:f.x,y:height(f.x,f.z),z:f.z})),ruins,wrecks,trails:trails.map(t => t ?? []),marks,
     };
     const reached = walkable(g,spawns[0],[],0.5);
-    if (scale === 0 || ([...doors.map(d => d.exit),world.ringing,spawns[1]].every(p => reached(p)))) {
+    if (scale === 0 || (trails.every(Boolean) && [...doors.map(d => d.exit),world.ringing,spawns[1]].every(p => reached(p)))) {
       if (outdoorCache.size > 4) outdoorCache.clear();
       outdoorCache.set(seed,world);
       return world;

@@ -258,9 +258,11 @@ export function walkable(g: Geometry, from: Point3, opened: readonly string[] = 
       }
     }
   }
+  // Looked up at the nearest lattice point, with the floor's height there:
+  // on a slope the query point's own height can round differently.
   return (p: Point3) => {
-    const s = surfaceAt(g,p.x,p.z,p.y);
-    return seen.has(node(Math.round(p.x/step),Math.round(p.z/step),s ? surfaceHeight(s,p.x,p.z) : p.y));
+    const ix = Math.round(p.x/step), iz = Math.round(p.z/step), s = surfaceAt(g,ix*step,iz*step,p.y);
+    return seen.has(node(ix,iz,s ? surfaceHeight(s,ix*step,iz*step) : p.y));
   };
 }
 

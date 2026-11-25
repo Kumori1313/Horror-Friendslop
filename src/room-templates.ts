@@ -5,7 +5,22 @@ export const cell = 4, storey = 4, doorWidth = 2.4, doorHeight = 2.5;
 export type Side = 'north' | 'east' | 'south' | 'west';
 export interface Point3 { x:number; y:number; z:number }
 export interface Patch { x:number; z:number; w:number; d:number }
-export interface Surface extends Patch { y:number; rise?:number; along?:'x'; stairs?:boolean; catwalk?:boolean }
+export interface Surface extends Patch { y:number; rise?:number; along?:'x'; stairs?:boolean; catwalk?:boolean; field?:Heightfield }
+// Ground shaped by a height map: `n` by `n` heights, `step` metres apart,
+// from the corner (x0, z0). A surface with a field covers the whole map; its
+// `y` is below the lowest height, so the ground is solid all the way down.
+export interface Heightfield { x0:number; z0:number; step:number; n:number; h:number[] }
+// The steepest ground an operator can walk up: 35 degrees.
+export const maxGrade = 0.7;
+// Can feet at `from` step up or down to `to`, at (x, z)? Ground steeper than
+// `maxGrade` is a wall both ways, whatever the direction of the step, so no
+// one can walk down into a ditch they can't climb back out of. Only a height
+// map limits the slope; floors, ramps and stairs don't.
+// Planning (`walkable`, `route`) passes a stricter `limit`, as it samples
+// only every half metre: whatever it calls walkable, an operator can walk.
+export const climbable = (s:Surface,from:number,to:number,x:number,z:number,limit = maxGrade) =>
+  !s.field || Math.abs(to-from) <= 1e-4 || fieldGrade(s.field,x,z) <= limit*limit;
+export const planningGrade = maxGrade*0.9;
 export interface Socket { name:string; side:Side; x:number; z:number; y:number }
 export type PropKind = 'machine' | 'shelf' | 'tank' | 'locker' | 'crate' | 'console' | 'pump' | 'chiller' |
   'switchboard' | 'relay' | 'generator' | 'filter' | 'bench' | 'desk' | 'pipe' | 'terminal' | 'rock' | 'bell';
@@ -256,8 +271,26 @@ export function assembleTemplates(rooms:Placement[],links:(TemplateLink & {door?
 }
 
 export function surfaceHeight(s:Surface,x:number,z:number) {
+  if (s.field) return fieldHeight(s.field,x,z);
   const t = s.along ? (x-s.x)/s.w+0.5 : (z-s.z)/s.d+0.5;
   return s.y+(s.rise??0)*Math.max(0,Math.min(1,t));
+}
+
+// The squared steepness of the ground at (x, z), across a metre centred on
+// it. The ground's height is continuous, so this changes smoothly too, with
+// no jump at the edge of a height-map cell for a walker drifting across it.
+export function fieldGrade(f:Heightfield,x:number,z:number) {
+  const gx = fieldHeight(f,x+0.5,z)-fieldHeight(f,x-0.5,z), gz = fieldHeight(f,x,z+0.5)-fieldHeight(f,x,z-0.5);
+  return gx*gx+gz*gz;
+}
+
+// Bilinear between the four nearest heights; plain arithmetic, so every
+// browser computes the same ground for throws.
+export function fieldHeight(f:Heightfield,x:number,z:number) {
+  const fx = Math.max(0,Math.min(f.n-1.000001,(x-f.x0)/f.step)), fz = Math.max(0,Math.min(f.n-1.000001,(z-f.z0)/f.step));
+  const i = Math.floor(fx), k = Math.floor(fz), u = fx-i, v = fz-k, row = k*f.n;
+  const a = f.h[row+i], b = f.h[row+i+1], c = f.h[row+f.n+i], d = f.h[row+f.n+i+1];
+  return (a*(1-u)+b*u)*(1-v)+(c*(1-u)+d*u)*v;
 }
 
 // Prefer the reachable surface nearest the current feet. This distinguishes

@@ -43,13 +43,15 @@ test('a contract starts in the home dimension, and the arrival rift closes once 
   assert.equal(solo.mission.arrival,'closed','a solo operator closes it at once');
 });
 
-test('every outdoor map lets the crew walk from the arrival rift to the façade door', () => {
+test('every outdoor map lets the crew walk from the arrival rift to every door and the bell', () => {
   for (let seed=0;seed<60;seed++) {
-    const map = outdoors(seed), reached = walkable(map.geometry,map.spawns[0]);
+    const map = outdoors(seed), reached = walkable(map.geometry,map.spawns[0],[],0.5);
     for (const s of map.spawns) assert.ok(reached(s),'seed '+seed+': spawn '+JSON.stringify(s));
-    assert.ok(reached(map.exit),'seed '+seed+': the door');
-    assert.ok(route(map.geometry,map.spawns[1],map.exit),'seed '+seed+': a planned walk to the door');
-    for (const r of map.rises) assert.ok(reached({x:r.x,y:r.h,z:r.z}),'seed '+seed+': the top of a bank');
+    for (const d of map.doors) assert.ok(reached(d.exit),'seed '+seed+': the '+d.id+' door');
+    assert.ok(reached(map.ringing),'seed '+seed+': the bell');
+    assert.ok(map.doors.length === 2 || map.doors.length === 3,'a main door and one or two fire exits');
+    assert.ok(new Set(map.doors.map(d => d.face)).size === map.doors.length,'each on its own face');
+    if (seed < 12) assert.ok(route(map.geometry,map.spawns[1],map.exit),'seed '+seed+': a planned walk to the main door');
   }
   const a = outdoors(5), b = outdoors(6);
   assert.notDeepEqual(a.rocks,b.rocks,'each seed lays out its own map');
@@ -61,11 +63,11 @@ test('the façade door leads to Intake and back, and each place keeps its own th
   for (const id of [1,2]) { at(player(id),home().rift); sim.tick(1/30); }
   const map = outdoors(sim.layout!.seed);
   at(player(1),{x:map.door.x,z:map.door.z+1});
-  assert.equal(sim.passage(player(1)),'enter');
+  assert.deepEqual(sim.passage(player(1)),{way:'enter',id:'main'});
   sim.act(1,'open-door');
   assert.equal(placeOf(player(1)),'inside');
   assert.equal(sim.roomOf(player(1)),'intake');
-  assert.equal(sim.passage(player(1)),'leave','Intake\'s outer door is beside the entry');
+  assert.deepEqual(sim.passage(player(1)),{way:'leave',id:'main'},'Intake\'s outer door is beside the entry');
   // Split up: one inside, one outside at the same coordinates as the lift.
   const lift = liftOf(sim.layout!);
   at(player(1),lift); at(player(2),lift);

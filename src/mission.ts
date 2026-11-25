@@ -76,7 +76,8 @@ export interface Mission {
   // Ringing the bell (by an operator) opens the exit rift for `seconds` and
   // enrages every creature for the rest of the expedition.
   bell?: number;
-  rift?: {x: number; z: number; seconds: number};
+  // `y`: the ground under the exit rift (missing means 0).
+  rift?: {x: number; y?: number; z: number; seconds: number};
   // Whole seconds since the expedition left home; the outdoors darkens with it.
   clock?: number;
   enraged?: boolean;

@@ -1,7 +1,7 @@
-import { walkable, type Geometry } from './layout.ts';
-import { obstaclesAt, surfaceAt } from './room-templates.ts';
+import { connections, geometryFor, walkable, type Geometry, type Layout } from './layout.ts';
+import { fieldHeight, obstaclesAt, orient, outward, socketAt, surfaceAt } from './room-templates.ts';
 import { clearAt } from './room.ts';
-import type { Point3, RoomWall } from './room-templates.ts';
+import type { Heightfield, Point3, RoomWall } from './room-templates.ts';
 
 // An operator, the flashlight or a piece of salvage is in one of three
 // places, each with its own coordinates: the crew's home dimension, the
@@ -47,111 +47,163 @@ function random(seed: number) {
 }
 
 // The open map around a facility, derived from the expedition seed like its
-// salvage, so it costs nothing on the network. The facility stands at the
-// north end behind its fixed façade; the arrival rift opens at the south end.
-export interface Rise { x: number; z: number; w: number; d: number; h: number; ramp: {x: number; z: number; w: number; d: number; along?: 'x'; rise: number} }
+// salvage, so it costs nothing on the network. The facility stands in the
+// middle on a level plot, with its main door in the south face and the bell
+// in front of it, and one or two fire exits in other faces. The arrival rift
+// opens on any side, well out. Around them the ground rolls: hills, ditches
+// and slopes from a height map, rising to cliffs at the edge.
+export type Face = 'south' | 'east' | 'west' | 'north';
+export interface Doorway { id: string; face: Face; door: Point3; exit: Stand }
 export interface Outdoors {
-  seed: number; geometry: Geometry; size: number;
+  seed: number; geometry: Geometry; size: number; ground: Heightfield;
   arrival: Point3; spawns: Stand[];
-  // The façade: its footprint, its door, and where an operator leaving the
-  // facility stands outside it.
+  // The building: its footprint, its doors (the main door first), and the
+  // main door and where an operator leaving through it stands.
   building: {x: number; z: number; w: number; d: number; h: number};
-  door: Point3; exit: Stand;
-  // The bell in front of the façade, and where to stand to ring it.
+  doors: Doorway[]; door: Point3; exit: Stand;
+  // The bell in front of the main door, and where to stand to ring it.
   bell: Point3; ringing: Stand;
-  rises: Rise[];
-  rocks: {x: number; z: number; w: number; d: number; h: number}[];
+  rocks: {x: number; y: number; z: number; w: number; d: number; h: number}[];
 }
-export const outdoorSize = 96;
+export const outdoorSize = 160;
 const outdoorCache = new Map<number,Outdoors>();
+
+// Smooth value noise in [-1, 1], from the seed, in plain arithmetic.
+function noise(seed: number) {
+  const corner = (i: number, k: number) => {
+    let h = (Math.imul(i,0x27d4eb2d) ^ Math.imul(k,0x165667b1) ^ seed) >>> 0;
+    h = Math.imul(h ^ (h >>> 15),0x85ebca6b) >>> 0; h ^= h >>> 13;
+    return (h >>> 0)/2147483648-1;
+  };
+  return (x: number, z: number) => {
+    const i = Math.floor(x), k = Math.floor(z), u = x-i, v = z-k;
+    const su = u*u*(3-2*u), sv = v*v*(3-2*v);
+    const a = corner(i,k), b = corner(i+1,k), c = corner(i,k+1), d = corner(i+1,k+1);
+    return (a+(b-a)*su)*(1-sv)+(c+(d-c)*su)*sv;
+  };
+}
+const smooth = (t: number) => { const c = Math.max(0,Math.min(1,t)); return c*c*(3-2*c); };
+
 export function outdoors(seed: number): Outdoors {
   const found = outdoorCache.get(seed);
   if (found) return found;
-  const g = emptyGeometry(), room = 'outside', half = outdoorSize/2, next = random(seed ^ 0x0d7e1a);
-  // Cliffs ring the map.
-  g.walls.push(wall(room,-half,-half-1,half,-half,0,8),wall(room,-half,half,half,half+1,0,8),wall(room,-half-1,-half,-half,half,0,8),wall(room,half,-half,half+1,half,0,8));
-  const building = {x:0,z:-35,w:24,d:18,h:9};
-  g.walls.push({...wall(room,building.x-building.w/2,building.z-building.d/2,building.x+building.w/2,building.z+building.d/2,0,building.h)});
-  const door = {x:0,y:0,z:building.z+building.d/2};
-  const arrival = {x:0,y:0,z:32};
-  const bell = {x:door.x+5,y:0,z:door.z+7};
-  g.props.push({x:bell.x,z:bell.z,w:1.3,d:1.3,y:0,h:2.7,kind:'bell',room});
-  // Keep the walk from the rift to the door, and the ground around both, clear.
-  const keepClear = (x: number, z: number, w: number, d: number) =>
-    Math.abs(x) < w/2+5 && z > door.z-1 && z < arrival.z+6 ||
-    Math.abs(x-building.x) < building.w/2+w/2+4 && Math.abs(z-building.z) < building.d/2+d/2+4;
-  const placed: {x: number; z: number; w: number; d: number}[] = [];
-  const overlaps = (x: number, z: number, w: number, d: number, gap: number) => placed.some(o => Math.abs(o.x-x) < (o.w+w)/2+gap && Math.abs(o.z-z) < (o.d+d)/2+gap);
-  // Two or three raised banks, each with a ramp up one side.
-  const rises: Rise[] = [];
-  for (let tries=0; rises.length < 2+Math.floor(next()*2) && tries < 60; tries++) {
-    const w = 8+Math.floor(next()*3)*2, d = 8+Math.floor(next()*3)*2, h = 1.5;
-    const x = Math.round((next()-0.5)*(outdoorSize-w-16)), z = Math.round((next()-0.5)*(outdoorSize-d-16));
-    if (keepClear(x,z,w+8,d+8) || overlaps(x,z,w+8,d+8,2)) continue;
-    const side = Math.floor(next()*4), run = 6, width = 3;
-    // The ramp climbs toward the bank from the chosen side.
-    const ramp = side === 0 ? {x,z:z+d/2+run/2,w:width,d:run,rise:-h} : side === 1 ? {x,z:z-d/2-run/2,w:width,d:run,rise:h} :
-      side === 2 ? {x:x+w/2+run/2,z,w:run,d:width,along:'x' as const,rise:-h} : {x:x-w/2-run/2,z,w:run,d:width,along:'x' as const,rise:h};
-    rises.push({x,z,w,d,h,ramp});
-    placed.push({x,z,w:w+(ramp.along ? run*2 : 0),d:d+(ramp.along ? 0 : run*2)});
-    g.surfaces.push({x,z,w,d,y:h,room});
-    // A reversed ramp starts high: its base is the bank's top at the near end.
-    g.surfaces.push(ramp.rise > 0 ? {x:ramp.x,z:ramp.z,w:ramp.w,d:ramp.d,y:0,rise:h,along:ramp.along,room} : {x:ramp.x,z:ramp.z,w:ramp.w,d:ramp.d,y:h,rise:-h,along:ramp.along,room});
-    // The bank's sides, with a gap where the ramp meets it.
-    const gap = (lo: number, hi: number, at: number) => [[lo,at-width/2],[at+width/2,hi]];
-    const sides: [number,number,number,number][] = [];
-    for (const [a,b] of side === 0 ? gap(x-w/2,x+w/2,x) : [[x-w/2,x+w/2]]) sides.push([a,z+d/2,b,z+d/2+0.06]);
-    for (const [a,b] of side === 1 ? gap(x-w/2,x+w/2,x) : [[x-w/2,x+w/2]]) sides.push([a,z-d/2-0.06,b,z-d/2]);
-    for (const [a,b] of side === 2 ? gap(z-d/2,z+d/2,z) : [[z-d/2,z+d/2]]) sides.push([x+w/2,a,x+w/2+0.06,b]);
-    for (const [a,b] of side === 3 ? gap(z-d/2,z+d/2,z) : [[z-d/2,z+d/2]]) sides.push([x-w/2-0.06,a,x-w/2,b]);
-    for (const [x0,z0,x1,z1] of sides) g.walls.push(wall(room,x0,z0,x1,z1,0,h));
-  }
-  // The ground is every part of the map that isn't a bank or a ramp. It must
-  // not run underneath them: at a ramp's foot, ground and ramp are the same
-  // height, and an operator would stay on the ground and walk into the bank.
-  const holes = rises.flatMap(r => [{x:r.x,z:r.z,w:r.w,d:r.d},r.ramp]);
-  for (const piece of without({x:0,z:0,w:outdoorSize,d:outdoorSize},holes)) g.surfaces.push({...piece,y:0,room});
-  // Scattered boulders, clear of the path, the banks and each other.
-  const rocks: Outdoors['rocks'] = [];
-  for (let tries=0; rocks.length < 22 && tries < 400; tries++) {
-    const w = 0.8+next()*1.8, d = 0.8+next()*1.8, h = 0.6+next()*1.8;
-    const x = (next()-0.5)*(outdoorSize-6), z = (next()-0.5)*(outdoorSize-6);
-    if (keepClear(x,z,w,d) || overlaps(x,z,w,d,1.5)) continue;
-    rocks.push({x,z,w,d,h});
-    placed.push({x,z,w,d});
-    g.props.push({x,z,w,d,y:0,h,kind:'rock',room});
-  }
-  const world: Outdoors = {
-    seed,geometry:g,size:outdoorSize,arrival,building,door,rises,rocks,bell,
-    ringing:{x:bell.x,y:0,z:bell.z+1.5,yaw:0},
-    spawns:[{x:-1.2,y:0,z:arrival.z-2,yaw:0},{x:1.2,y:0,z:arrival.z-2,yaw:0}],
-    exit:{x:door.x,y:0,z:door.z+1.4,yaw:Math.PI},
+  const next = random(seed ^ 0x0d7e1a), half = outdoorSize/2, room = 'outside';
+  const building = {x:0,z:0,w:24,d:18,h:9};
+  // Doors: the main door in the south face; one or two fire exits in others.
+  const faces: Face[] = ['east','west','north'];
+  for (let i=faces.length-1;i>0;i--) { const k = Math.floor(next()*(i+1)); [faces[i],faces[k]] = [faces[k],faces[i]]; }
+  const doorway = (id: string, face: Face, along: number): Doorway => {
+    const x = face === 'east' ? building.w/2 : face === 'west' ? -building.w/2 : along;
+    const z = face === 'south' ? building.d/2 : face === 'north' ? -building.d/2 : along;
+    const [ox,oz] = face === 'east' ? [1,0] : face === 'west' ? [-1,0] : face === 'south' ? [0,1] : [0,-1];
+    // Leaving, an operator stands 1.4 m out, facing away from the building.
+    const yaw = {south:Math.PI,north:0,east:-Math.PI/2,west:Math.PI/2}[face];
+    return {id,face,door:{x,y:0,z},exit:{x:x+ox*1.4,y:0,z:z+oz*1.4,yaw}};
   };
-  if (outdoorCache.size > 4) outdoorCache.clear();
-  outdoorCache.set(seed,world);
-  return world;
-}
-
-type Area = {x: number; z: number; w: number; d: number};
-// Rectangles covering `outer` except the `holes`: cut into strips at every
-// hole's x edges, then each strip at the z edges of the holes crossing it.
-function without(outer: Area, holes: Area[]): Area[] {
-  const lo = (a: Area, k: 'x' | 'z') => a[k]-(k === 'x' ? a.w : a.d)/2, hi = (a: Area, k: 'x' | 'z') => a[k]+(k === 'x' ? a.w : a.d)/2;
-  const cuts = (k: 'x' | 'z', within: Area[], from: number, to: number) =>
-    [...new Set([from,to,...within.flatMap(h => [lo(h,k),hi(h,k)]).filter(v => v > from && v < to)])].sort((a,b) => a-b);
-  const pieces: Area[] = [];
-  const xs = cuts('x',holes,lo(outer,'x'),hi(outer,'x'));
-  for (let i=1;i<xs.length;i++) {
-    const x0 = xs[i-1], x1 = xs[i], crossing = holes.filter(h => lo(h,'x') < x1 && hi(h,'x') > x0);
-    const zs = cuts('z',crossing,lo(outer,'z'),hi(outer,'z'));
-    for (let j=1;j<zs.length;j++) {
-      const z0 = zs[j-1], z1 = zs[j];
-      if (crossing.some(h => lo(h,'z') < z1 && hi(h,'z') > z0)) continue;
-      pieces.push({x:(x0+x1)/2,z:(z0+z1)/2,w:x1-x0,d:z1-z0});
+  const fire = faces.slice(0,next() < 0.5 ? 1 : 2).map((face,i) =>
+    doorway('fire-'+(i+1),face,(next()-0.5)*((face === 'north' ? building.w : building.d)-6)));
+  const doors = [doorway('main','south',0),...fire];
+  const door = doors[0].door, bell = {x:door.x+5,y:0,z:door.z+7};
+  // The arrival rift opens on any side of the building, 55 to 65 m out.
+  const angle = next()*Math.PI*2, reach = 55+next()*10;
+  const ax = Math.round(Math.sin(angle)*reach), az = Math.round(Math.cos(angle)*reach);
+  const offsets = [next(),next(),next(),next()].map(v => v*1000);
+  const rockSeeds = Array.from({length:400},() => [next(),next(),next(),next(),next()]);
+  // Try gentler ground until every door and the bell can be reached on foot.
+  for (let attempt=0;;attempt++) {
+    const scale = attempt < 5 ? 1-attempt*0.18 : 0;
+    const hills = noise(seed ^ 0x9e3779b9), creases = noise(seed ^ 0x7f4a7c15);
+    const base = (x: number, z: number) => scale*(6*hills(x/46+offsets[0],z/46+offsets[1])+2.2*hills(x/19+offsets[2],z/19+offsets[3])+0.7*hills(x/8,z/8+offsets[0]))
+      // Ditches: troughs along the zero lines of a second noise, rounded at
+      // the rim and the bottom so the slope eases in instead of jumping.
+      -scale*2.8*smooth(1-Math.abs(creases(x/34+offsets[1],z/34+offsets[2]))/0.14);
+    const arrivalLevel = base(ax,az);
+    const n = outdoorSize+1, h: number[] = new Array(n*n);
+    for (let k=0;k<n;k++) for (let i=0;i<n;i++) {
+      const x = i-half, z = k-half;
+      let y = base(x,z);
+      // The building's plot, with the bell in front, is level at 0.
+      const plot = Math.max(Math.abs(x-building.x)-building.w/2-8,Math.abs(z-building.z-2)-building.d/2-9,0);
+      y *= smooth(plot/12);
+      // The arrival area is level too, at the height of the ground there.
+      const near = Math.hypot(x-ax,z-az);
+      y += (arrivalLevel-y)*(1-smooth((near-7)/8));
+      // Cliffs ring the map: the ground rises too steeply to climb.
+      const out = Math.max(Math.abs(x),Math.abs(z))-(half-12);
+      if (out > 0) y += out*1.6;
+      h[k*n+i] = Math.round(y*100)/100;
+    }
+    const ground: Heightfield = {x0:-half,z0:-half,step:1,n,h};
+    const low = Math.min(...h), height = (x: number, z: number) => fieldHeight(ground,x,z);
+    const g = emptyGeometry();
+    g.surfaces.push({x:0,z:0,w:outdoorSize,d:outdoorSize,y:low-2,room,field:ground});
+    // Invisible walls just inside the cliffs, in case anything gets that far.
+    for (const [x0,z0,x1,z1] of [[-half,-half,half,-half+0.5],[-half,half-0.5,half,half],[-half,-half,-half+0.5,half],[half-0.5,-half,half,half]]) g.walls.push(wall(room,x0,z0,x1,z1,low-5,80));
+    g.walls.push(wall(room,building.x-building.w/2,building.z-building.d/2,building.x+building.w/2,building.z+building.d/2,0,building.h));
+    g.props.push({x:bell.x,z:bell.z,w:1.3,d:1.3,y:0,h:2.7,kind:'bell',room});
+    // Boulders, sitting in the ground, clear of the plots and of each other.
+    const rocks: Outdoors['rocks'] = [];
+    for (const [a,b,c,d,e] of rockSeeds) {
+      if (rocks.length >= 60) break;
+      const w = 0.8+a*2, dd = 0.8+b*2, rh = 0.6+c*2, x = (d-0.5)*(outdoorSize-28), z = (e-0.5)*(outdoorSize-28);
+      if (Math.abs(x-building.x) < building.w/2+12 && Math.abs(z-building.z-2) < building.d/2+13) continue;
+      if (Math.hypot(x-ax,z-az) < 12 || rocks.some(r => Math.abs(r.x-x) < (r.w+w)/2+2 && Math.abs(r.z-z) < (r.d+dd)/2+2)) continue;
+      const y = Math.min(height(x-w/2,z-dd/2),height(x+w/2,z-dd/2),height(x-w/2,z+dd/2),height(x+w/2,z+dd/2))-0.15;
+      rocks.push({x,y,z,w,d:dd,h:rh});
+      g.props.push({x,z,w,d:dd,y,h:rh,kind:'rock',room});
+    }
+    const stand = (x: number, z: number, yaw: number): Stand => ({x,y:height(x,z),z,yaw});
+    // Spawns side by side, facing the building.
+    const face = Math.atan2(ax,az);
+    const spawns = [-1.2,1.2].map(side => stand(ax+Math.cos(face)*side,az-Math.sin(face)*side,face));
+    const world: Outdoors = {
+      seed,geometry:g,size:outdoorSize,ground,arrival:{x:ax,y:arrivalLevel,z:az},spawns,building,doors,door,exit:doors[0].exit,rocks,bell,
+      ringing:{x:bell.x,y:0,z:bell.z+1.5,yaw:0},
+    };
+    const reached = walkable(g,spawns[0],[],0.5);
+    if (scale === 0 || ([...doors.map(d => d.exit),world.ringing,spawns[1]].every(p => reached(p)))) {
+      if (outdoorCache.size > 4) outdoorCache.clear();
+      outdoorCache.set(seed,world);
+      return world;
     }
   }
-  return pieces;
 }
+// Where the doors of a facility come out inside. The main door is Intake's
+// outer door. Each fire exit is a door in a wall where a room has a doorway
+// left unused, in a room deep inside: as far from Intake as the facility
+// allows, from the seed. `door` is on the wall; `entry` is where an operator
+// coming in stands, facing into the room.
+export interface InsideDoor { id: string; room: string; door: Point3; entry: Stand; outward: [number,number] }
+const insideCache = new WeakMap<Layout,InsideDoor[]>();
+export function insideDoors(layout: Layout): InsideDoor[] {
+  let found = insideCache.get(layout);
+  if (found) return found;
+  found = [{id:'main',room:'intake',door:intakeDoor,entry:intakeEntry,outward:[0,1]}];
+  if (!layout.tour) {
+    const fire = outdoors(layout.seed).doors.slice(1), used = new Set(layout.passages.flatMap(l => [l.a+'/'+l.from,l.b+'/'+l.to]));
+    const hops = connections(layout), g = geometryFor(layout), next = random(layout.seed ^ 0x2f6b1c);
+    const deep = layout.rooms.filter(r => r.kind !== 'intake' && r.kind !== 'corridor' && r.kind !== 'stairwell')
+      .sort((a,b) => hops('intake',b.id)-hops('intake',a.id) || (a.id < b.id ? -1 : 1));
+    for (const d of fire) {
+      for (const r of deep.slice(0,Math.max(4,Math.ceil(deep.length/2))).sort(() => next()-0.5)) {
+        if (found.some(e => e.room === r.id)) continue;
+        const spot = orient(r.template,r.turn).sockets.filter(s => !used.has(r.id+'/'+s.name)).map(s => ({s,at:socketAt(r,s.name)!})).find(({s,at}) => {
+          const [dx,dz] = outward(s.side), entry = {x:at.x-dx*1.3,z:at.z-dz*1.3};
+          return !!surfaceAt(g,entry.x,entry.z,at.y) && clearAt(entry.x,entry.z,0.45,obstaclesAt(g,at.y));
+        });
+        if (!spot) continue;
+        const [dx,dz] = outward(spot.s.side);
+        found.push({id:d.id,room:r.id,door:{x:spot.at.x,y:spot.at.y,z:spot.at.z},entry:{x:spot.at.x-dx*1.3,y:spot.at.y,z:spot.at.z-dz*1.3,yaw:Math.atan2(dx,dz)},outward:[dx,dz]});
+        break;
+      }
+    }
+  }
+  insideCache.set(layout,found);
+  return found;
+}
+
+// The height of the ground anywhere on the outdoor map.
+export const groundAt = (map: Outdoors, x: number, z: number) => fieldHeight(map.ground,x,z);
 
 // Where the exit rift may open: open ground on a 2 m grid, reachable on foot
 // from the bell, at least 30 m from where the crew arrived and 18 m from
@@ -160,13 +212,14 @@ const zoneCache = new Map<number,Point3[]>();
 export function riftZones(seed: number): Point3[] {
   const found = zoneCache.get(seed);
   if (found) return found;
-  const map = outdoors(seed), g = map.geometry, reached = walkable(g,map.ringing), zones: Point3[] = [];
-  const half = map.size/2-6;
+  const map = outdoors(seed), g = map.geometry, reached = walkable(g,map.ringing,[],0.5), zones: Point3[] = [];
+  const half = map.size/2-14, height = (x: number, z: number) => groundAt(map,x,z);
   for (let x=-half;x<=half;x+=2) for (let z=-half;z<=half;z+=2) {
-    const here = {x,y:0,z}, far = (p: Point3, d: number) => Math.hypot(p.x-x,p.z-z) >= d;
+    const y = height(x,z), here = {x,y,z}, far = (p: Point3, d: number) => Math.hypot(p.x-x,p.z-z) >= d;
     if (!far(map.arrival,30) || !far(map.door,18) || !far(map.bell,18)) continue;
-    const ground = surfaceAt(g,x,z,0);
-    if (!ground || ground.y !== 0 || ground.rise || !clearAt(x,z,2,obstaclesAt(g,0)) || !reached(here)) continue;
+    // Fairly level ground, clear for 2 m around.
+    if ([[2,0],[-2,0],[0,2],[0,-2]].some(([dx,dz]) => Math.abs(height(x+dx,z+dz)-y) > 0.7)) continue;
+    if (!clearAt(x,z,2,obstaclesAt(g,y)) || !reached(here)) continue;
     zones.push(here);
   }
   if (zoneCache.size > 4) zoneCache.clear();

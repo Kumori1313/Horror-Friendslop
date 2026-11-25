@@ -320,11 +320,12 @@ function start(render: ReturnType<typeof createScene>, mode?: Crew | 'solo', sce
     const opened = openedHere(s);
     const door = place === 'inside' && geometry ? nearbyDoor(p,geometry,opened) : undefined;
     const down = s.mission?.down.some(d => d.id === id) || !!s.mission?.dead?.includes(id);
-    // The façade door from outside, or Intake's outer door from inside.
-    const way = layout && s.mission?.stage === 'explore' && !down ? passageFor(p,layout.seed,s.mission.arrival === 'closed') : undefined;
-    // At the façade door or the bell before everyone is through the rift.
+    // A door of the building, from outside or within: the main door or a fire exit.
+    const passage = layout && s.mission?.stage === 'explore' && !down ? passageFor(p,layout,s.mission.arrival === 'closed') : undefined;
+    const way = passage?.way, by = passage?.id === 'main' ? '' : ' by the fire exit';
+    // At a door or the bell before everyone is through the rift.
     const map = layout && s.mission?.arrival === 'open' && place === 'outside' ? outdoors(layout.seed) : undefined;
-    const waiting = !!map && (Math.hypot(p.x-map.door.x,p.z-map.door.z) <= doorReach || Math.hypot(p.x-map.bell.x,p.z-map.bell.z) <= doorReach+0.4);
+    const waiting = !!map && (map.doors.some(d => Math.hypot(p.x-d.door.x,p.z-d.door.z) <= doorReach) || Math.hypot(p.x-map.bell.x,p.z-map.bell.z) <= doorReach+0.4);
     doorButton.hidden = (!door && !way) || !!down;
     doorButton.textContent = way === 'enter' ? 'Enter facility' : way === 'leave' ? 'Leave facility' : 'Open bulkhead';
     const solids = geometry ? solidsAt(geometry,p.feetY ?? 0,opened) : walls;
@@ -373,7 +374,7 @@ function start(render: ReturnType<typeof createScene>, mode?: Crew | 'solo', sce
       prompt.textContent = !s.mission?.dead?.includes(id) ? 'Waiting for rescue' : partner ? 'You died · Watching '+operator(partner.id) : 'You died';
     }
     else if (waiting) prompt.textContent = 'Waiting for the whole crew to come through the rift';
-    else if (way) prompt.textContent = (touchMode ? '' : 'R  ')+(way === 'enter' ? 'Enter the facility' : 'Leave the facility');
+    else if (way) prompt.textContent = (touchMode ? '' : 'R  ')+(way === 'enter' ? 'Enter the facility' : 'Leave the facility')+by;
     else if (door) prompt.textContent = touchMode ? 'Bulkhead within reach' : 'R  Open bulkhead';
     else if (pick) prompt.textContent = touchMode ? pickName[0].toUpperCase()+pickName.slice(1)+' within reach' : 'E  Pick up '+pickName;
     else if (heldKind === 'baton') prompt.textContent = touchMode ? 'Tap Swing to stun the Bell Diver within reach' : 'Click or T  Swing the baton   ·   X  Drop it';

@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { anchor } from '../src/layout.ts';
 import { assignment, catalog, flareTime, items, prices, swingTime, wallet } from '../src/mission.ts';
-import { home, placeOf } from '../src/places.ts';
+import { groundAt, home, outdoors, placeOf } from '../src/places.ts';
 import { batteryLife, chargeOf, slotsOf, type Player } from '../src/room.ts';
 import { generateLayout } from '../src/server/generate-layout.ts';
 import { Simulation } from '../src/server/simulation.ts';
@@ -140,7 +140,7 @@ test('bought gear thrown into the exit rift turns up at home instead of being so
   ring(sim,2);
   const rift = mission().rift!;
   goOutside(sim,1);
-  stand(player(1),{x:rift.x,z:rift.z+1.6});
+  stand(player(1),{x:rift.x,y:groundAt(outdoors(sim.layout!.seed),rift.x,rift.z+1.6),z:rift.z+1.6});
   sim.act(1,'throw',{aim:{yaw:0,pitch:0.2,power:0.25}});
   const cell = bought()[0];
   assert.equal(cell.banked,undefined,'not banked');

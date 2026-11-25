@@ -1,4 +1,4 @@
-import { home, intakeDoor, outdoors, placeOf } from '../src/places.ts';
+import { groundAt, home, intakeDoor, outdoors, placeOf } from '../src/places.ts';
 import { lampSlot, slotsOf } from '../src/room.ts';
 import type { Simulation } from '../src/server/simulation.ts';
 
@@ -41,7 +41,8 @@ export function bank(sim: Simulation, id: number) {
   for (let slot=0;slot<4;slot++) {
     const item = slotsOf(p)[slot];
     if (!item || item === lampSlot) continue;
-    Object.assign(p,{x:rift.x,z:rift.z+2.5,feetY:0});
+    const map = outdoors(sim.layout!.seed);
+    Object.assign(p,{x:rift.x,z:rift.z+2.5,feetY:groundAt(map,rift.x,rift.z+2.5)});
     sim.act(id,'select',{slot});
     sim.act(id,'throw',{aim:{yaw:0,pitch:0.1,power:0.25}});
   }
@@ -50,6 +51,7 @@ export function bank(sim: Simulation, id: number) {
 // Walk into the open rift.
 export function escape(sim: Simulation, id: number) {
   goOutside(sim,id);
-  Object.assign(player(sim,id),{x:sim.state.mission!.rift!.x,z:sim.state.mission!.rift!.z,feetY:0});
+  const rift = sim.state.mission!.rift!;
+  Object.assign(player(sim,id),{x:rift.x,z:rift.z,feetY:groundAt(outdoors(sim.layout!.seed),rift.x,rift.z)});
   sim.tick(1/60);
 }

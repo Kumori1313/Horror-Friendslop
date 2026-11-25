@@ -84,7 +84,7 @@ test('either operator can ring the bell, once: it opens the rift and enrages the
   ring(sim,2);
   assert.deepEqual([mission().bell,mission().enraged],[2,true]);
   const spot = riftSpot(sim.layout!.seed);
-  assert.deepEqual(mission().rift,{x:spot.x,z:spot.z,seconds:riftOpen});
+  assert.deepEqual(mission().rift,{x:spot.x,y:spot.y,z:spot.z,seconds:riftOpen});
   assert.deepEqual(pace(mission()),{wait:1.75,fall:0.75,step:1.4,travel:0.9,wander:5.6,rise:2.5,quiet:1.5,reach:3},'faster, and chasing from farther, for the rest of the expedition');
   run(1);
   ring(sim,1);

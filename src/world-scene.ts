@@ -2,7 +2,8 @@ import * as T from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { Batch } from './facility-scene.ts';
 import type { Library, Surface } from './materials.ts';
-import { home, type Outdoors } from './places.ts';
+import { groundAt, home, type Outdoors } from './places.ts';
+import { fieldHeight } from './room-templates.ts';
 
 // Merge boxes by material, with world-space texture coordinates, so a whole
 // place costs one draw per material.
@@ -109,35 +110,95 @@ export function buildHome(library: Library) {
   };
 }
 
-// The open map around a facility: ground, banks and ramps, boulders, cliffs,
-// and the façade with its lit door. Built when an operator first goes outside
-// and disposed when the crew is home.
+// Scrubby ground, speckled, tiled every 4 m; vertex colours do the rest.
+let groundTexture: T.CanvasTexture | undefined;
+function scrub() {
+  if (groundTexture) return groundTexture;
+  const canvas = document.createElement('canvas'); canvas.width = canvas.height = 256;
+  const ctx = canvas.getContext('2d')!, img = ctx.createImageData(256,256);
+  let n = 0x9e3779b9;
+  const rnd = () => { n ^= n << 13; n ^= n >>> 17; n ^= n << 5; return ((n >>> 0)%1000)/1000; };
+  for (let i=0;i<256*256;i++) { const v = 150+rnd()*105; img.data.set([v,v,v,255],i*4); }
+  ctx.putImageData(img,0,0);
+  ctx.globalAlpha = 0.25;
+  for (let i=0;i<900;i++) { ctx.fillStyle = rnd() < 0.5 ? '#ffffff' : '#555555'; ctx.fillRect(rnd()*256,rnd()*256,1+rnd()*3,1+rnd()*2); }
+  groundTexture = new T.CanvasTexture(canvas);
+  groundTexture.wrapS = groundTexture.wrapT = T.RepeatWrapping; groundTexture.colorSpace = T.SRGBColorSpace;
+  return groundTexture;
+}
+
+// The ground: 32 m chunks, each drawn finely near the camera and coarsely
+// far off (4 m), with a short skirt hiding the seams between the two. Normals
+// come from the height map itself, so chunk edges shade alike. Dark scrub on
+// level ground, dirt on slopes, gravel on the building's plot.
+function terrain(map: Outdoors) {
+  const f = map.ground, half = map.size/2, chunk = 32, group = new T.Group();
+  const material = new T.MeshStandardMaterial({vertexColors:true,map:scrub(),roughness:1,metalness:0});
+  const h = (x: number, z: number) => fieldHeight(f,x,z);
+  const scrubColor = new T.Color(0x3a4530), dirtColor = new T.Color(0x6a5a44), gravel = new T.Color(0x6d6b62), c = new T.Color();
+  const b = map.building;
+  function mesh(x0: number, z0: number, step: number) {
+    const cells = chunk/step, side = cells+1, position: number[] = [], normal: number[] = [], color: number[] = [], uv: number[] = [], index: number[] = [];
+    const vertex = (x: number, y: number, z: number) => {
+      const gx = (h(x+0.5,z)-h(x-0.5,z)), gz = (h(x,z+0.5)-h(x,z-0.5)), len = Math.hypot(gx,1,gz);
+      position.push(x,y,z); normal.push(-gx/len,1/len,-gz/len); uv.push(x/4,z/4);
+      const slope = Math.min(1,Math.hypot(gx,gz)/0.55);
+      c.copy(scrubColor).lerp(dirtColor,slope);
+      if (Math.abs(x-b.x) < b.w/2+6 && Math.abs(z-b.z-2) < b.d/2+8) c.lerp(gravel,0.7);
+      color.push(c.r,c.g,c.b);
+      return position.length/3-1;
+    };
+    for (let k=0;k<side;k++) for (let i=0;i<side;i++) { const x = x0+i*step, z = z0+k*step; vertex(x,h(x,z),z); }
+    for (let k=0;k<cells;k++) for (let i=0;i<cells;i++) { const a = k*side+i; index.push(a,a+side,a+1,a+1,a+side,a+side+1); }
+    // The skirt: each edge vertex again, a metre lower.
+    const edge = (i: number, k: number) => k*side+i;
+    const rim = [...Array.from({length:side},(_,i) => edge(i,0)),...Array.from({length:side},(_,k) => edge(side-1,k)),...Array.from({length:side},(_,i) => edge(side-1-i,side-1)),...Array.from({length:side},(_,k) => edge(0,side-1-k))];
+    const low = rim.map(v => vertex(position[v*3],position[v*3+1]-1,position[v*3+2]));
+    for (let j=0;j+1<rim.length;j++) index.push(rim[j],low[j],rim[j+1],rim[j+1],low[j],low[j+1]);
+    const g = new T.BufferGeometry();
+    g.setAttribute('position',new T.Float32BufferAttribute(position,3)); g.setAttribute('normal',new T.Float32BufferAttribute(normal,3));
+    g.setAttribute('color',new T.Float32BufferAttribute(color,3)); g.setAttribute('uv',new T.Float32BufferAttribute(uv,2));
+    g.setIndex(index); g.computeBoundingSphere();
+    return new T.Mesh(g,material);
+  }
+  for (let z0=-half;z0<half;z0+=chunk) for (let x0=-half;x0<half;x0+=chunk) {
+    const lod = new T.LOD();
+    lod.addLevel(mesh(x0,z0,1),0); lod.addLevel(mesh(x0,z0,4),56);
+    group.add(lod);
+  }
+  return group;
+}
+
+// The open map around a facility: rolling ground, boulders, the building with
+// its lit main door and fire exits, the bell and the rifts. Built when an
+// operator first goes outside and disposed when the crew is home.
 export function buildOutdoors(map: Outdoors, library: Library) {
   const root = new T.Group(), b = batcher(library);
-  const dirt = b.surface('concrete'), wall = b.surface('panel'), rust = b.surface('rust');
-  for (const s of map.geometry.surfaces) {
-    if (s.rise) {
-      // Tilted the same way the facility's ramps are drawn.
-      if (s.along) b.box(dirt,0x8a8672,s.x,s.y+s.rise/2-0.065,s.z,Math.hypot(s.w,s.rise),0.13,s.d,Math.atan2(s.rise,s.w),'z');
-      else b.box(dirt,0x8a8672,s.x,s.y+s.rise/2-0.065,s.z,s.w,0.13,Math.hypot(s.d,s.rise),-Math.atan2(s.rise,s.d),'x');
-      // Solid earth under the ramp, its top just inside the ramp's slab and
-      // its sides 2 mm in from the slab's, so they never flicker together.
-      const yaw = s.along ? (s.rise > 0 ? Math.PI/2 : -Math.PI/2) : (s.rise > 0 ? 0 : Math.PI);
-      const back = Math.sign(s.rise)*0.002;
-      b.box(dirt,0x7d7a65,s.along ? s.x-back : s.x,Math.min(s.y,s.y+s.rise)-0.06+Math.abs(s.rise)/2,s.along ? s.z : s.z-back,(s.along ? s.d : s.w)-0.004,Math.abs(s.rise),(s.along ? s.w : s.d)-0.004,yaw,'wedge');
-    } else if (s.y > 0) b.box(dirt,0x8a8672,s.x,s.y/2,s.z,s.w,s.y,s.d);
-    else b.box(dirt,0x8d8a72,s.x,-0.05,s.z,s.w,0.1,s.d);
-  }
-  // Cliffs at the map's edge, and the façade's mass.
-  const half = map.size/2;
-  for (const [x,z,w,d] of [[0,-half-2,map.size+8,4],[0,half+2,map.size+8,4],[-half-2,0,4,map.size],[half+2,0,4,map.size]]) b.box(dirt,0x4b4a40,x,4,z,w,8,d);
+  const wall = b.surface('panel'), rust = b.surface('rust');
+  root.add(terrain(map));
   const f = map.building;
   b.box(wall,0x9aa39a,f.x,f.h/2,f.z,f.w,f.h,f.d);
   b.box(wall,0x7b847d,f.x,f.h+0.3,f.z,f.w+0.4,0.6,f.d+0.4);
-  // Dark window bands, and a rusted canopy over the door.
-  for (const y of [3.8,6.6]) for (const x of [-8,-4,4,8]) b.box(rust,0x2a2f2e,f.x+x,y,f.z+f.d/2+0.02,2.4,0.9,0.06);
+  // Dark window bands on every face, and a rusted canopy over the main door.
+  for (const y of [3.8,6.6]) {
+    for (const x of [-8,-4,4,8]) for (const side of [-1,1]) b.box(rust,0x2a2f2e,f.x+x,y,f.z+side*(f.d/2+0.02),2.4,0.9,0.06);
+    for (const z of [-4,4]) for (const side of [-1,1]) b.box(rust,0x2a2f2e,f.x+side*(f.w/2+0.02),y,f.z+z,0.06,0.9,2.4);
+  }
   b.box(rust,0x8a6a52,map.door.x,3.2,map.door.z+0.8,3.6,0.18,1.6);
   b.build(root);
+  // Each fire exit: a plain door banded in green under a green lamp, no light cast.
+  const green = new T.MeshBasicMaterial({color:0x4fd18b});
+  for (const d of map.doors.slice(1)) {
+    const [ox,oz] = [Math.sign(d.exit.x-d.door.x),Math.sign(d.exit.z-d.door.z)], across = oz !== 0;
+    const slab = new T.Mesh(new T.BoxGeometry(across ? 1.7 : 0.1,2.5,across ? 0.1 : 1.7),new T.MeshStandardMaterial({color:0x2c3534,roughness:0.5,metalness:0.6}));
+    slab.position.set(d.door.x+ox*0.04,1.25,d.door.z+oz*0.04); root.add(slab);
+    for (const side of [-1,1]) for (let band=0;band<6;band++) {
+      const jamb = new T.Mesh(new T.BoxGeometry(across ? 0.12 : 0.08,0.24,across ? 0.08 : 0.12),green);
+      jamb.position.set(d.door.x+(across ? side*0.95 : ox*0.06),0.26+band*0.4,d.door.z+(across ? oz*0.06 : side*0.95)); root.add(jamb);
+    }
+    const sign = new T.Mesh(new T.BoxGeometry(across ? 0.6 : 0.1,0.16,across ? 0.1 : 0.6),green);
+    sign.position.set(d.door.x+ox*0.1,2.85,d.door.z+oz*0.1); root.add(sign);
+  }
   // The door itself, framed in Intake's amber, under a working lamp.
   const door = new T.Mesh(new T.BoxGeometry(1.7,2.5,0.1),new T.MeshStandardMaterial({color:0x2c3534,roughness:0.5,metalness:0.6}));
   door.position.set(map.door.x,1.25,map.door.z+0.04); root.add(door);
@@ -153,7 +214,7 @@ export function buildOutdoors(map: Outdoors, library: Library) {
   // Boulders: one merged mesh of rough, flat-shaded shapes.
   const shapes = map.rocks.map((r,i) => {
     const g = new T.DodecahedronGeometry(0.5,0);
-    g.scale(r.w*1.08,r.h,r.d*1.08); g.rotateY(i*1.3); g.translate(r.x,r.h/2,r.z);
+    g.scale(r.w*1.08,r.h,r.d*1.08); g.rotateY(i*1.3); g.translate(r.x,r.y+r.h/2,r.z);
     return g;
   });
   if (shapes.length) {
@@ -162,7 +223,9 @@ export function buildOutdoors(map: Outdoors, library: Library) {
     for (const g of shapes) g.dispose();
   }
   const arrival = rift(0x9b7bff);
-  arrival.group.position.set(map.arrival.x,1.2,map.arrival.z);
+  arrival.group.position.set(map.arrival.x,map.arrival.y+1.2,map.arrival.z);
+  // It faces the building it brought the crew to.
+  arrival.group.rotation.y = Math.atan2(map.building.x-map.arrival.x,map.building.z-map.arrival.z);
   root.add(arrival.group);
   // The bell: a dark iron frame in front of the façade, its bell hung from
   // the crossbar. Rung, it swings for a while.
@@ -190,12 +253,13 @@ export function buildOutdoors(map: Outdoors, library: Library) {
   let rungAt: number | undefined;
   return {
     root,seed:map.seed,
-    update(time: number, arrivalOpen: boolean, open?: {x: number; z: number}, rung = false) {
+    update(time: number, arrivalOpen: boolean, open?: {x: number; y?: number; z: number}, rung = false) {
       arrival.group.visible = arrivalOpen;
       if (arrivalOpen) arrival.spin(time);
       exit.group.visible = pillar.visible = !!open;
       if (open) {
-        exit.group.position.set(open.x,1.2,open.z); pillar.position.set(open.x,0,open.z);
+        const y = open.y ?? groundAt(map,open.x,open.z);
+        exit.group.position.set(open.x,y+1.2,open.z); pillar.position.set(open.x,y,open.z);
         // The portal turns to face the façade, where the crew comes from.
         exit.group.rotation.y = Math.atan2(map.door.x-open.x,map.door.z-open.z);
         exit.spin(time);

@@ -5,7 +5,7 @@ import type { Layout, Kind } from './layout.ts';
 import { doorWidth, orient, outward } from './room-templates.ts';
 import { itemKinds, spawnSalvage, type ItemKind } from './salvage.ts';
 import { shellFinish, surfaceFor, worldUV, type Finish, type Library } from './materials.ts';
-import { intakeDoor } from './places.ts';
+import { insideDoors, intakeDoor } from './places.ts';
 
 export const colors: Record<Kind,number> = {
   intake:0xe0b258, relay:0xe6a840, switchboard:0xe0894e, chiller:0x57b9da, pump:0x648d92,
@@ -40,6 +40,8 @@ function unpoweredVariant(material: T.Material) {
   return v;
 }
 const darkLamp = 0x34362f;
+// Fire exits glow green, like the landmarks, powered or not.
+const fireGreen = 0x4fd18b;
 
 // Box vertices for one material within one room, merged into a single draw.
 export class Batch {
@@ -104,7 +106,7 @@ export function buildFacility(layout: Layout, library: Library) {
     return [r.id,g];
   }));
   const {matte,glow} = library;
-  const emissive = new Set([lamp,...Object.values(colors)]);
+  const emissive = new Set([lamp,fireGreen,...Object.values(colors)]);
   const power = new Map(layout.rooms.map(r => [r.id,powered(layout,r.id)]));
   const batches = new Map<string,Map<T.Material,Batch>>();
   const transform = new T.Object3D(), normals = new T.Matrix3(), tint = new T.Color();
@@ -177,6 +179,15 @@ export function buildFacility(layout: Layout, library: Library) {
     box(intake.id,'metal',0x2c3534,d.x,d.y+1.25,d.z+0.03,1.7,2.5,0.05);
     for (const side of [-1,1]) for (let band=0;band<6;band++) box(intake.id,'matte',colors.intake,d.x+side*0.92,d.y+0.26+band*0.4,d.z-0.02,0.12,0.24,0.06);
     label(intake.id,'Exit',d.x,d.y+2.95,d.z-0.06,Math.PI);
+  }
+  // Fire exits: a door in a wall deep inside, banded in green, leading out of
+  // another side of the building.
+  if (!layout.tour) for (const f of insideDoors(layout).slice(1)) {
+    const [ox,oz] = f.outward, across = oz !== 0, inset = 0.14, d = f.door;
+    box(f.room,'metal',0x2c3534,d.x-ox*inset,d.y+1.25,d.z-oz*inset,across ? 1.7 : 0.05,2.5,across ? 0.05 : 1.7);
+    for (const side of [-1,1]) for (let band=0;band<6;band++)
+      box(f.room,'matte',fireGreen,d.x-ox*(inset+0.04)+(across ? side*0.92 : 0),d.y+0.26+band*0.4,d.z-oz*(inset+0.04)+(across ? 0 : side*0.92),across ? 0.12 : 0.06,0.24,across ? 0.06 : 0.12);
+    label(f.room,'Fire exit',d.x-ox*(inset+0.05),d.y+2.95,d.z-oz*(inset+0.05),Math.atan2(-ox,-oz));
   }
   for (const [room,byMaterial] of batches) {
     for (const [material,batch] of byMaterial) groups.get(room)!.add(new T.Mesh(batch.build(),material === glow ? material : power.get(room) ? poweredVariant(material) : unpoweredVariant(material)));

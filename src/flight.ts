@@ -21,7 +21,7 @@ export interface Path { points: number[]; rest: Point3; duration: number }
 export const flightStep = 1/120;
 export const gravity = 12;
 const maxFlight = 8;
-const friction = 6;
+const friction = 6, rolling = 2.5;
 const slab = 0.13;
 const cell = 2;
 
@@ -53,11 +53,11 @@ class Space {
   }
   // The highest floor or prop top under this point, within a step of `bottom`.
   floor(x: number, z: number, bottom: number) {
-    let best: {y: number; prop?: Box} | undefined;
+    let best: {y: number; prop?: Box; ground?: Geometry['surfaces'][number]} | undefined;
     for (const s of this.near(this.floors,x,z)) {
       if (Math.abs(x-s.x) > s.w/2+1e-6 || Math.abs(z-s.z) > s.d/2+1e-6) continue;
       const y = surfaceHeight(s,x,z);
-      if (y <= bottom+0.25 && (!best || y > best.y)) best = {y};
+      if (y <= bottom+0.25 && (!best || y > best.y)) best = {y,ground:s.field ? s : undefined};
     }
     for (const s of this.near(this.solids,x,z)) {
       if (!s.prop || Math.abs(x-s.x) > s.w/2 || Math.abs(z-s.z) > s.d/2) continue;
@@ -78,7 +78,7 @@ class Space {
   }
   // A floor slab whose underside the body's top crosses while rising.
   ceiling(x: number, z: number, from: number, to: number) {
-    return this.near(this.floors,x,z).some(s => !s.rise && Math.abs(x-s.x) < s.w/2 && Math.abs(z-s.z) < s.d/2 && from <= s.y-slab && to > s.y-slab);
+    return this.near(this.floors,x,z).some(s => !s.rise && !s.field && Math.abs(x-s.x) < s.w/2 && Math.abs(z-s.z) < s.d/2 && from <= s.y-slab && to > s.y-slab);
   }
 }
 
@@ -149,10 +149,21 @@ export function trajectory(g: Geometry, opened: readonly string[], start: Launch
         vy = 0;
       } else y = ny;
     }
+    // On rolling ground, an item rolls downhill and rolls on further than it
+    // would slide on a floor; it rests only where the ground is near level.
+    const hill = grounded ? support?.ground : undefined;
+    let level = true;
+    if (hill) {
+      const gx = (surfaceHeight(hill,x+0.25,z)-surfaceHeight(hill,x-0.25,z))*2, gz = (surfaceHeight(hill,x,z+0.25)-surfaceHeight(hill,x,z-0.25))*2;
+      const k = gravity/(1+gx*gx+gz*gz);
+      vx -= gx*k*dt; vz -= gz*k*dt;
+      // Where the pull downhill is weaker than rolling friction, it stops.
+      level = gx*gx+gz*gz < 0.045;
+    }
     if (grounded) {
-      const speed = Math.sqrt(vx*vx+vz*vz), slowed = Math.max(0,speed-friction*dt);
+      const speed = Math.sqrt(vx*vx+vz*vz), slowed = Math.max(0,speed-(hill ? rolling : friction)*dt);
       if (speed > 0) { vx *= slowed/speed; vz *= slowed/speed; }
-      if (slowed < 0.05) {
+      if (slowed < 0.05 && level) {
         // Items never stay on a prop: they slide off its nearest edge, so
         // they always end up on a floor within reach.
         // Each push is just strong enough to clear the edge; if a wall

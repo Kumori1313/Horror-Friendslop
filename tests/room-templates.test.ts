@@ -102,7 +102,6 @@ test('rooms never draw walls in the same place, so their materials cannot flicke
 
 test('ramps are solid underneath: an operator can step off a ramp\'s side but not walk under it', async () => {
   const { moveOperator } = await import('../src/server/simulation.ts');
-  const { outdoors } = await import('../src/places.ts');
   const g = geometryFor(stairwellLayout()), ramp = g.surfaces.find(s => s.rise && !s.stairs)!;
   const walk = (p: Parameters<typeof moveOperator>[0], right: number, forward: number, seconds: number, geometry = g) => {
     for (let t=0;t<seconds;t+=1/30) moveOperator(p,{forward,right,yaw:0,pitch:0},1/30,geometry);
@@ -117,10 +116,4 @@ test('ramps are solid underneath: an operator can step off a ramp\'s side but no
   walk(onRamp,1,0,1);
   assert.ok(Math.abs(onRamp.x-(ramp.x-ramp.w/2-0.25)) < 0.15,'stopped at arm\'s length, x='+onRamp.x);
   assert.equal(onRamp.feetY,0);
-  // Outdoors, walking off a bank's edge drops to the ground, clear of its side.
-  const map = outdoors(19), bank = map.rises[0];
-  const top = {id:1,connected:true,x:bank.x,z:bank.z,feetY:bank.h,yaw:0,pitch:0};
-  const away = bank.ramp.along ? {right:0,forward:bank.ramp.x > bank.x ? -1 : 1} : {right:bank.ramp.z > bank.z ? -1 : 1,forward:0};
-  walk(top,away.right,away.forward,4,map.geometry);
-  assert.equal(top.feetY,0,'dropped off the bank');
 });

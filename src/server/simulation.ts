@@ -6,9 +6,9 @@ import type { Body, Flight } from '../flight.ts';
 import { geometryFor, nearbyDoor, playerRadius, spawnPoints } from '../layout.ts';
 import type { Layout, Geometry, Rect } from '../layout.ts';
 
-import { obstaclesAt, surfaceAt, surfaceHeight } from '../room-templates.ts';
+import { climbable, obstaclesAt, surfaceAt, surfaceHeight } from '../room-templates.ts';
 import { assignment, batonReach, bellSpan, swingTime, catalog, deliverySpot, distance, diverBody, finished, flareTime, gone, nearestPickup, prices, wallet } from '../mission.ts';
-import { doorReach, home, intakeDoor, intakeEntry, outdoors, placeOf, riftOpen, riftReach, riftSpot } from '../places.ts';
+import { doorReach, home, insideDoors, outdoors, placeOf, riftOpen, riftReach, riftSpot } from '../places.ts';
 import type { Place, Stand } from '../places.ts';
 import { bodyOf, expeditionSeed, itemKinds, spawnSalvage } from '../salvage.ts';
 import { generateLayout } from './generate-layout.ts';
@@ -36,7 +36,8 @@ function stepTo(p: Player, x: number, z: number, g: Geometry | undefined, opened
   const feet = p.feetY ?? 0, support = surfaceAt(g,x,z,feet);
   if (support) {
     const to = surfaceHeight(support,x,z);
-    if (!standable(g,x,z,to,opened)) return;
+    // Ground steeper than an operator can climb is a wall.
+    if (!climbable(support,feet,to,x,z) || !standable(g,x,z,to,opened)) return;
     Object.assign(p,{x,z,feetY:to});
     return;
   }
@@ -56,6 +57,8 @@ function stepTo(p: Player, x: number, z: number, g: Geometry | undefined, opened
 function standable(g: Geometry, x: number, z: number, feet: number, opened: readonly string[]) {
   if (!clearAt(x,z,playerRadius,obstaclesAt(g,feet,opened))) return false;
   for (const s of g.surfaces) {
+    // Rolling ground is the floor itself, not something to bump into.
+    if (s.field) continue;
     const cx = Math.max(s.x-s.w/2,Math.min(s.x+s.w/2,x)), cz = Math.max(s.z-s.d/2,Math.min(s.z+s.d/2,z));
     if ((cx-x)**2+(cz-z)**2 >= playerRadius*playerRadius) continue;
     if (surfaceHeight(s,cx,cz) > feet+0.32 && Math.min(s.y,s.y+(s.rise ?? 0))-0.13 < feet+1.75) return false;
@@ -110,7 +113,7 @@ function advance<T extends {flight?: Flight}>(thing: T, dt: number) {
 
 // The exit rift is a column about an operator wide and a little taller.
 const riftRadius = 1;
-const inRift = (rift: {x: number; z: number}, x: number, y: number, z: number) => (x-rift.x)**2+(z-rift.z)**2 < riftRadius*riftRadius && y > -0.2 && y < 2.6;
+const inRift = (rift: {x: number; y?: number; z: number}, x: number, y: number, z: number) => (x-rift.x)**2+(z-rift.z)**2 < riftRadius*riftRadius && y > (rift.y ?? 0)-0.2 && y < (rift.y ?? 0)+2.6;
 
 // Where an operator stands on arriving somewhere: side by side, by seat.
 const beside = (at: Stand, id: number): Stand => ({...at,x:at.x+(id === 1 ? -0.6 : 0.6)*Math.cos(at.yaw),z:at.z-(id === 1 ? -0.6 : 0.6)*Math.sin(at.yaw)});
@@ -284,7 +287,7 @@ export class Simulation {
     const mission = this.state.mission, rift = mission?.rift;
     if (!mission || !rift || gone(mission,p.id)) return;
     // Salvage carried in is banked; bought gear stays in hand.
-    for (const h of mission.haul) if (h.owner === p.id && !h.kind) Object.assign(h,{owner:null,banked:true,x:rift.x,y:0,z:rift.z,place:'outside'});
+    for (const h of mission.haul) if (h.owner === p.id && !h.kind) Object.assign(h,{owner:null,banked:true,x:rift.x,y:rift.y ?? 0,z:rift.z,place:'outside'});
     (mission.escaped ??= []).push(p.id);
     this.moveTo(p,'home',home().spawns[p.id-1] ?? home().spawns[0]);
   }
@@ -297,13 +300,13 @@ export class Simulation {
     mission.bell = p.id;
     mission.enraged = true;
     const spot = riftSpot(this.layout.seed);
-    mission.rift = {x:spot.x,z:spot.z,seconds:riftOpen};
+    mission.rift = {x:spot.x,y:spot.y,z:spot.z,seconds:riftOpen};
   }
 
-  // The façade door and Intake's door to the outside, within reach.
-  passage(p: Player): 'enter' | 'leave' | undefined {
+  // A door of the building within reach, from outside or within.
+  passage(p: Player) {
     if (!this.state.mission || !this.layout || this.state.mission.stage !== 'explore') return;
-    return passageFor(p,this.layout.seed,this.state.mission.arrival === 'closed');
+    return passageFor(p,this.layout,this.state.mission.arrival === 'closed');
   }
 
   // After a sale everyone is back home, with the flashlight in its place.
@@ -361,7 +364,7 @@ export class Simulation {
         for (let i=0;i<path.points.length/3;i++) {
           if (!inRift(rift,path.points[i*3],path.points[i*3+1],path.points[i*3+2])) continue;
           flight.d = Math.max(flightStep,i*flightStep);
-          rest = {x:rift.x,y:0,z:rift.z};
+          rest = {x:rift.x,y:rift.y ?? 0,z:rift.z};
           banked = true;
           break;
         }
@@ -465,9 +468,9 @@ export class Simulation {
     }
     if (action === 'open-door') {
       // R uses the nearest door: the façade, Intake's outer door, or a bulkhead.
-      const way = this.passage(p);
-      if (way === 'enter') this.moveTo(p,'inside',beside(intakeEntry,p.id));
-      else if (way === 'leave' && this.layout) this.moveTo(p,'outside',beside(outdoors(this.layout.seed).exit,p.id));
+      const way = this.passage(p), layout = this.layout;
+      if (way?.way === 'enter' && layout) this.moveTo(p,'inside',beside(insideDoors(layout).find(d => d.id === way.id)!.entry,p.id));
+      else if (way?.way === 'leave' && layout) this.moveTo(p,'outside',beside(outdoors(layout.seed).doors.find(d => d.id === way.id)!.exit,p.id));
       else if (placeOf(p) === 'inside' && this.geometry && this.state.opened) {
         const door = nearbyDoor(p,this.geometry,this.state.opened);
         if (door) this.state.opened.push(door.id);
@@ -561,8 +564,17 @@ export class Simulation {
 // Which door an operator can use from where they stand: the façade door
 // from outside, or Intake's outer door from inside. The façade stays shut
 // until the whole crew has come through the arrival rift.
-export function passageFor(p: Player, seed: number, crewOut: boolean): 'enter' | 'leave' | undefined {
+// Which door an operator can use from where they stand: one of the
+// building's doors from outside, or its inside end from within. `id` names
+// the door: 'main' (the façade and Intake) or a fire exit.
+export function passageFor(p: Player, layout: Layout, crewOut: boolean): {way: 'enter' | 'leave'; id: string} | undefined {
   const place = placeOf(p);
-  if (place === 'outside' && crewOut && distance(p,outdoors(seed).door) <= doorReach) return 'enter';
-  if (place === 'inside' && Math.abs(p.feetY ?? 0) < 1 && distance(p,intakeDoor) <= doorReach) return 'leave';
+  if (place === 'outside' && crewOut) {
+    const d = outdoors(layout.seed).doors.find(d => distance(p,d.door) <= doorReach && insideDoors(layout).some(e => e.id === d.id));
+    if (d) return {way:'enter',id:d.id};
+  }
+  if (place === 'inside') {
+    const d = insideDoors(layout).find(d => Math.abs((p.feetY ?? 0)-d.door.y) < 1 && distance(p,d.door) <= doorReach);
+    if (d) return {way:'leave',id:d.id};
+  }
 }

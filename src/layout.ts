@@ -1,10 +1,10 @@
 import { clearAt } from './room.ts';
 import type { Point } from './room.ts';
 
-import { assembleTemplates, cell, corridorKinds, destinationPool, isCorridor, orient, roomTemplates, socketAt, storey, surfaceAt, surfaceHeight, obstaclesAt } from './room-templates.ts';
+import { assembleTemplates, cell, climbable, planningGrade, corridorKinds, destinationPool, isCorridor, orient, roomTemplates, socketAt, storey, surfaceAt, surfaceHeight, obstaclesAt } from './room-templates.ts';
 import type { PlacedSurface, Placement, Point3, Solid, TemplateGeometry, TemplateKind, TemplateLink } from './room-templates.ts';
 
-export const generatorVersion = 6;
+export const generatorVersion = 7;
 export const playerRadius = 0.25;
 export interface Rect extends Point { w: number; d: number }
 export type Kind = Exclude<TemplateKind,typeof corridorKinds[number]> | 'corridor';
@@ -233,8 +233,9 @@ export function collisionIndex(g: Geometry, opened: readonly string[] = [], reac
 
 // Flood fill on a 0.25 m lattice with the simulation's own support and clearance
 // rules. Points closer than a wall's clearance cannot straddle it at this spacing.
-export function walkable(g: Geometry, from: Point3, opened: readonly string[] = []) {
-  const step = 0.25, seen = new Set<number>();
+// A coarser `step` suits the large outdoor map.
+export function walkable(g: Geometry, from: Point3, opened: readonly string[] = [], step = 0.25) {
+  const seen = new Set<number>();
   const node = (ix: number, iz: number, feet: number) => ((ix+4096)*8192+iz+4096)*128+Math.round(feet*4);
   const index = collisionIndex(g,opened);
   if (index.surface(from.x,from.z,from.y)) {
@@ -248,7 +249,10 @@ export function walkable(g: Geometry, from: Point3, opened: readonly string[] = 
         if (!s) continue;
         const nextFeet = surfaceHeight(s,x,z);
         const key = node(ix+dx,iz+dz,nextFeet);
-        if (seen.has(key) || !index.clear(x,z,nextFeet)) continue;
+        // Checked here and halfway back, a little stricter than walking, and
+        // on rolling ground 0.3 m either side too, like the route planner.
+        if (seen.has(key) || !climbable(s,feet,nextFeet,x,z,planningGrade) || !climbable(s,feet,nextFeet,x-dx*step/2,z-dz*step/2,planningGrade) || !index.clear(x,z,nextFeet)) continue;
+        if (s.field && [-0.3,0.3].some(side => !climbable(s,feet,nextFeet+1,x+dz*side,z+dx*side,planningGrade))) continue;
         seen.add(key);
         queue.push([ix+dx,iz+dz,nextFeet]);
       }

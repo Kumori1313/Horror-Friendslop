@@ -129,10 +129,13 @@ test('bridges cross the river, with holes that drop you in', () => {
   const {m,b,plank} = found;
   // Sidestep from the remaining plank toward the missing one.
   const toward = b.along === 'x' ? Math.sign(b.z-plank.z) : Math.sign(b.x-plank.x);
-  const p = {id:1,connected:true,x:plank.x,z:plank.z,feetY:plank.y+plank.rise/2,yaw:0,pitch:0};
-  for (let i=0;i<30;i++) moveOperator(p,b.along === 'x' ? {forward:-toward,right:0,yaw:0,pitch:0} : {forward:0,right:toward,yaw:0,pitch:0},1/30,m.geometry);
-  assert.ok(p.feetY < plank.y-0.8,'fell through, feet at '+p.feetY.toFixed(2)+' from '+plank.y.toFixed(2));
-  assert.ok((waterLevel(m.water,p.x,p.z) ?? -Infinity) > p.feetY+headHeight,'into deep water');
+  const p: Player = {id:1,connected:true,x:plank.x,z:plank.z,feetY:plank.y+plank.rise/2,yaw:0,pitch:0};
+  // Step through, then let go: falling, then sinking through the water.
+  for (let i=0;i<30 && p.vy === undefined;i++) moveOperator(p,b.along === 'x' ? {forward:-toward,right:0,yaw:0,pitch:0} : {forward:0,right:toward,yaw:0,pitch:0},1/30,m.geometry);
+  assert.ok(p.vy !== undefined,'stepped off into the air');
+  for (let i=0;i<90;i++) moveOperator(p,{forward:0,right:0,yaw:0,pitch:0},1/30,m.geometry);
+  assert.ok(p.feetY! < plank.y-0.8,'fell through, feet at '+p.feetY!.toFixed(2)+' from '+plank.y.toFixed(2));
+  assert.ok((waterLevel(m.water,p.x,p.z) ?? -Infinity) > p.feetY!+headHeight,'into deep water');
 });
 
 test('planning never walks through deep water', () => {

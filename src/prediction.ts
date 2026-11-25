@@ -46,9 +46,14 @@ export class Prediction {
     p.x += dx; p.z += dz;
     for (const s of this.history) { s.x += dx; s.z += dz; s.feetY += dy; }
     // Stand on the surface nearest the corrected height: the host may have the
-    // operator on a step or landing the prediction had not reached.
-    if (geometry) {
-      const target = (p.feetY ?? 0)+dy, surface = surfaceAt(geometry,p.x,p.z,target);
+    // operator on a step or landing the prediction had not reached. In the
+    // air, take the host's fall as well as its height.
+    const target = (p.feetY ?? 0)+dy;
+    if (auth.vy !== undefined || p.vy !== undefined) {
+      p.feetY = target;
+      if (auth.vy === undefined) delete p.vy; else p.vy = auth.vy;
+    } else if (geometry) {
+      const surface = surfaceAt(geometry,p.x,p.z,target);
       p.feetY = surface ? surfaceHeight(surface,p.x,p.z) : auth.feetY;
     }
   }

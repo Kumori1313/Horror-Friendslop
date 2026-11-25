@@ -7,8 +7,8 @@ import { clearAt } from './room.ts';
 // Salvage is part of the facility: every client derives the same items from
 // the layout seed, and snapshots only carry the ones that have moved.
 export type ItemKind = 'valve' | 'gauge' | 'fuse' | 'coil' | 'board' | 'battery' | 'toolbox' | 'bell' | 'cell';
-// Field finds are useful rather than saleable: they are worth nothing at the rift.
-export const fieldFinds: ItemKind[] = ['cell'];
+// Bought, never found: these never spawn in a facility and are worth nothing at the rift.
+export const shopOnly: ItemKind[] = ['cell'];
 // Heavy items throw shorter.
 export const itemKinds: Record<ItemKind,{name: string; value: [number,number]; size: [number,number,number]; color: number; rare?: boolean; heavy?: boolean}> = {
   valve:{name:'Brass valve',value:[15,30],size:[0.36,0.2,0.36],color:0xb08d57},
@@ -79,7 +79,7 @@ export function spawnSalvage(layout: Layout): Salvage[] {
   if (!layout.tour) {
     const next = random(layout.seed ^ 0x5a1f4e7);
     const common: ItemKind[] = ['valve','gauge','fuse','coil'];
-    const all = (Object.keys(itemKinds) as ItemKind[]).filter(k => !fieldFinds.includes(k));
+    const all = (Object.keys(itemKinds) as ItemKind[]).filter(k => !shopOnly.includes(k));
     for (const room of layout.rooms) {
       if (room.kind === 'intake' || room.kind === 'corridor' || room.kind === 'stairwell') continue;
       const loot = !!roomTemplates[room.template].loot;
@@ -98,22 +98,6 @@ export function spawnSalvage(layout: Layout): Salvage[] {
         items.push({id:room.id+'-'+i,kind,value,x:room.x+p.x,y:room.y+p.y,z:room.z+p.z,room:room.id});
         i++;
       }
-    }
-    // One or two spare cells per facility, from their own random stream so
-    // the salvage above stays as it was. Each goes in a room with room to
-    // spare, on open floor clear of the salvage there.
-    const cells = random(layout.seed ^ 0x3c6ef372);
-    const rooms = layout.rooms.filter(r => r.kind !== 'intake' && r.kind !== 'corridor' && r.kind !== 'stairwell' &&
-      items.filter(i => i.room === r.id).length < maxPerRoom && spots(r.template).length);
-    const wanted = cells() < 0.5 ? 1 : 2;
-    for (let n=0; n<wanted && rooms.length; n++) {
-      const room = rooms.splice(Math.floor(cells()*rooms.length),1)[0];
-      const near = items.filter(i => i.room === room.id);
-      const free = spots(room.template).map(s => ({s,p:turnPoint(s,room.turn)}))
-        .filter(({p}) => near.every(i => Math.hypot(room.x+p.x-i.x,room.z+p.z-i.z) >= 1));
-      if (!free.length) continue;
-      const {s,p} = free[Math.floor(cells()*free.length)];
-      items.push({id:'cell-'+room.id,kind:'cell',value:0,x:room.x+p.x,y:room.y+s.y,z:room.z+p.z,room:room.id});
     }
   }
   spawned.set(layout,items);

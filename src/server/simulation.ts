@@ -7,7 +7,7 @@ import { geometryFor, nearbyDoor, playerRadius, spawnPoints } from '../layout.ts
 import type { Layout, Geometry, Rect } from '../layout.ts';
 
 import { obstaclesAt, surfaceAt, surfaceHeight } from '../room-templates.ts';
-import { assignment, distance, diverBody, finished, gone, nearestPickup } from '../mission.ts';
+import { assignment, catalog, distance, diverBody, finished, gone, nearestPickup } from '../mission.ts';
 import { doorReach, home, intakeDoor, intakeEntry, outdoors, placeOf, riftOpen, riftReach, riftSpot } from '../places.ts';
 import type { Place, Stand } from '../places.ts';
 import { bodyOf, expeditionSeed, itemKinds, spawnSalvage } from '../salvage.ts';
@@ -327,7 +327,7 @@ export class Simulation {
     const item = selected(p), mission = this.state.mission, layout = this.layout;
     if (!item) return;
     const feet = {x:p.x,y:p.feetY ?? 0,z:p.z};
-    const kind = item === lampSlot ? 'lamp' : layout && spawnSalvage(layout).find(s => s.id === item)?.kind;
+    const kind = item === lampSlot ? 'lamp' : layout && catalog(layout,mission).find(s => s.id === item)?.kind;
     if (!kind) return;
     let rest = feet, flight: Flight | undefined, banked = false;
     const body: Body = bodyOf(kind), place = placeOf(p), g = this.geometryAt(place);
@@ -435,8 +435,10 @@ export class Simulation {
         const item = choice.item;
         p.slots = slotsOf(p).map((s,i) => i === slot ? item.id : s);
         p.hand = slot;
-        mission.haul = [...mission.haul.filter(h => h.id !== item.id),{id:item.id,owner:id,x:item.x,y:item.y,z:item.z}];
-        wake(layout,mission,this.roomOf(p) ?? item.room);
+        // A bought item keeps its kind; only the facility's own salvage wakes the Diver.
+        const bought = mission.haul.find(h => h.id === item.id)?.kind;
+        mission.haul = [...mission.haul.filter(h => h.id !== item.id),{id:item.id,owner:id,x:item.x,y:item.y,z:item.z,...(bought ? {kind:bought} : {})}];
+        if (!bought) wake(layout,mission,this.roomOf(p) ?? item.room);
         if (lamp.owner === id) this.hold(p);
       }
       return;
@@ -459,7 +461,7 @@ export class Simulation {
     // A spare cell in hand goes into the flashlight its holder carries.
     if (action === 'load' && lamp.owner === id && layout && mission) {
       const item = selected(p), h = mission.haul.find(e => e.id === item && e.owner === id);
-      if (!h || spawnSalvage(layout).find(s => s.id === h.id)?.kind !== 'cell') return;
+      if (!h || catalog(layout,mission).find(s => s.id === h.id)?.kind !== 'cell') return;
       Object.assign(h,{owner:null,used:true});
       this.release(p,h.id);
       lamp.charge = batteryLife; this.spent = 0;

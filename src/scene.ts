@@ -1,5 +1,5 @@
 import * as T from 'three';
-import { itemName, items, pace, stunTime, type Diver } from './mission.ts';
+import { catalog, itemName, items, pace, stunTime, type Diver } from './mission.ts';
 import { buildFacility } from './facility-scene.ts';
 import { environment, materialLibrary } from './materials.ts';
 import { anchor, geometryFor, type Geometry, type Layout } from './layout.ts';
@@ -511,7 +511,7 @@ export function createScene(canvas: HTMLCanvasElement, generated = false) {
       const creature = state.mission?.diver;
       const room = creature && creature.mode !== 'dormant' ? layout?.rooms.find(r => r.id === creature.bay) : undefined;
       diver.visible = here === 'inside' && !!room;
-      const salvageKind = new Map(layout && state.mission ? spawnSalvage(layout).map(s => [s.id,s.kind]) : []);
+      const salvageKind = new Map(layout && state.mission ? catalog(layout,state.mission).map(s => [s.id,s.kind]) : []);
       const heldKind = (p: Snapshot['players'][number]) => {
         const item = selected(p);
         return item && item !== lampSlot ? salvageKind.get(item) : undefined;

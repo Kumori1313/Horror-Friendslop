@@ -193,7 +193,8 @@ export function buildFacility(layout: Layout, library: Library) {
   // One instanced box per kind of salvage, so any number of items costs one
   // draw each. Items in rooms the camera cannot see are left out.
   const salvageMeshes = new Map((Object.keys(itemKinds) as ItemKind[]).map(kind => {
-    const k = itemKinds[kind], count = spawnSalvage(layout).filter(i => i.kind === kind).length;
+    // Room for a few bought items carried in as well.
+    const k = itemKinds[kind], count = spawnSalvage(layout).filter(i => i.kind === kind).length+4;
     const metal = kind !== 'board' && kind !== 'toolbox';
     const mesh = new T.InstancedMesh(Batch.unit,new T.MeshStandardMaterial({color:k.color,roughness:metal ? 0.32 : 0.6,metalness:metal ? 0.85 : 0.2,envMap:metal ? library.reflections ?? null : null,emissive:k.color,emissiveIntensity:kind === 'cell' ? 0.55 : 0.08,envMapIntensity:0.3}),Math.max(1,count));
     mesh.count = 0; mesh.frustumCulled = false; root.add(mesh);

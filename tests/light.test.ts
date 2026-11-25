@@ -4,7 +4,7 @@ import { lampSpawn, powered } from '../src/layout.ts';
 import { items, pack } from '../src/mission.ts';
 import { batteryLife, chargeOf, lampSlot, slotsOf } from '../src/room.ts';
 import type { Player, Snapshot } from '../src/room.ts';
-import { facilityValue, maxPerRoom, spawnSalvage } from '../src/salvage.ts';
+import { facilityValue, spawnSalvage } from '../src/salvage.ts';
 import { generateLayout } from '../src/server/generate-layout.ts';
 import { Simulation } from '../src/server/simulation.ts';
 
@@ -20,7 +20,12 @@ function crew(seed = 19) {
   at(player(1),{...lampSpawn,y:0}); sim.act(1,'take');
   return {sim,mission,player,at,run,lamp};
 }
-const cellOf = (sim: Simulation) => spawnSalvage(sim.layout!).find(i => i.kind === 'cell')!;
+// A spare cell can only be bought; until the shop, put one on the floor as a
+// purchase would, with its kind on its haul entry.
+function buyCell(sim: Simulation, at: {x: number; y: number; z: number}, id = 'bought-cell-1') {
+  sim.state.mission!.haul.push({id,kind:'cell',owner:null,x:at.x,y:at.y,z:at.z,place:'inside'});
+  return {id};
+}
 
 test('Intake is lit, corridors, stairwells and the service tunnel are dark, and about half the other rooms have power', () => {
   let rooms = 0, lit = 0;
@@ -37,17 +42,16 @@ test('Intake is lit, corridors, stairwells and the service tunnel are dark, and 
   assert.ok(lit/rooms > 0.35 && lit/rooms < 0.65,'about half: '+lit+' of '+rooms);
 });
 
-test('every facility hides one or two spare cells, worth nothing, in rooms with room to spare', () => {
+test('spare cells are only ever bought: no facility spawns one, and they add nothing to the quota', () => {
   for (let seed=1;seed<=60;seed++) {
-    const layout = generateLayout(seed), all = spawnSalvage(layout), cells = all.filter(i => i.kind === 'cell');
-    assert.ok(cells.length >= 1 && cells.length <= 2,'seed '+seed+': '+cells.length+' cells');
-    for (const c of cells) {
-      assert.equal(c.value,0);
-      assert.ok(all.filter(i => i.room === c.room && i.kind !== 'cell').length < maxPerRoom,'not in a full room');
-      assert.ok(all.filter(i => i !== c && i.room === c.room).every(i => Math.hypot(i.x-c.x,i.z-c.z) >= 1),'clear of salvage');
-    }
-    assert.equal(facilityValue(layout),all.filter(i => i.kind !== 'cell').reduce((s,i) => s+i.value,0),'cells add nothing to the quota');
+    const layout = generateLayout(seed);
+    assert.equal(spawnSalvage(layout).some(i => i.kind === 'cell'),false,'seed '+seed);
   }
+  const {sim,mission} = crew();
+  buyCell(sim,{x:0,y:0,z:0});
+  const bought = items(sim.layout!,mission()).find(i => i.id === 'bought-cell-1')!;
+  assert.deepEqual([bought.kind,bought.value],['cell',0]);
+  assert.equal(facilityValue(sim.layout!),spawnSalvage(sim.layout!).reduce((s,i) => s+i.value,0));
 });
 
 test('the battery drains while the flashlight is on, at half rate clipped on, and not at all when off', () => {
@@ -74,8 +78,9 @@ test('a flat flashlight switches off and will not switch on until a spare cell g
   sim.act(1,'toggle');
   assert.equal(lamp().on,false,'a flat battery will not switch on');
   // Operator 2 picks up a cell but cannot load a flashlight they don't hold.
-  const cell = cellOf(sim);
-  at(player(2),cell); sim.act(2,'take');
+  const cell = buyCell(sim,{x:player(2).x,y:player(2).feetY ?? 0,z:player(2).z});
+  sim.act(2,'take');
+  assert.equal(mission().awake,undefined,'a bought cell is not salvage: picking it up wakes nothing');
   sim.act(2,'select',{slot:slotsOf(player(2)).indexOf(cell.id)});
   sim.act(2,'load');
   assert.equal(lamp().charge,0);

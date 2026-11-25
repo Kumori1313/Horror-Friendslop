@@ -241,12 +241,12 @@ function start(render: ReturnType<typeof createScene>, mode?: Crew | 'solo', sce
     if (playing) input();
   });
 
-  // Each slot's item: the flashlight or a piece of salvage from this facility.
+  // Each slot's item: the flashlight, salvage from this facility, or something bought.
   let kinds = new Map<string,ItemKind>(), kindsFor: Layout | undefined;
   function kindOf(item: string): ItemKind | 'lamp' | undefined {
     if (item === lampSlot) return 'lamp';
     if (layout && kindsFor !== layout) { kinds = new Map(spawnSalvage(layout).map(s => [s.id,s.kind])); kindsFor = layout; }
-    return kinds.get(item);
+    return kinds.get(item) ?? state?.mission?.haul.find(h => h.id === item)?.kind;
   }
   const nameOf = (kind: ItemKind | 'lamp') => kind === 'lamp' ? 'Flashlight' : itemName(kind);
   let previews: Record<string,string> | undefined;

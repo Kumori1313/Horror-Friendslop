@@ -1,9 +1,9 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { geometryFor, walkable, type Geometry } from '../src/layout.ts';
+import { collisionIndex, geometryFor, walkable, type Geometry } from '../src/layout.ts';
 import { trajectory, launchFrom } from '../src/flight.ts';
 import { groundAt, insideDoors, outdoors, placeOf, riftZones } from '../src/places.ts';
-import { fieldHeight, maxGrade, surfaceAt, type Heightfield } from '../src/room-templates.ts';
+import { climbable, fieldHeight, maxGrade, surfaceAt, type Heightfield } from '../src/room-templates.ts';
 import { route } from '../src/route.ts';
 import { bodyOf } from '../src/salvage.ts';
 import { generateLayout } from '../src/server/generate-layout.ts';
@@ -36,14 +36,10 @@ test('walkable slopes up to 35 degrees; anything steeper is a wall', () => {
   assert.equal(route(steep,{x:-2,y:0,z:0},{x:8,y:6.8,z:0},[0]),undefined);
 });
 
-test('a slope too steep to climb is a wall both ways, so no one is stranded at the bottom', () => {
-  const steep = hillside(1.2), up = fieldHeight(steep.surfaces[0].field!,6,0);
-  const p = {...walker(6),feetY:up};
-  climb(p,steep,4,-1);
-  assert.equal(p.feetY,up,'it won\'t walk down a 50 degree slope either');
-  // The flood fill from the foot never reaches the top, and from the top never the foot.
+test('a slope too steep to climb can be walked down but not up, and a sheer drop is a drop', () => {
+  const steep = hillside(1.2);
+  // The flood fill goes down but never back up.
   assert.equal(walkable(steep,{x:-2,y:0,z:0},[],0.5)({x:8,y:9.6,z:0}),false);
-  // A sheer drop is still a drop: walking off it lands on the ground below.
   const cliff = hillside(4), top = {...walker(3),feetY:12};
   climb(top,cliff,2,-1);
   assert.ok(top.feetY! < 12,'fell off the cliff, feet '+top.feetY);
@@ -103,4 +99,37 @@ test('fire exits lead into rooms deep inside and back out of their own door', ()
   assert.equal(placeOf(p),'outside');
   assert.ok(Math.hypot(p.x-fire.exit.x,p.z-fire.exit.z) < 1,'out of the same fire exit');
   assert.ok(surfaceAt(map.geometry,p.x,p.z,p.feetY ?? 0));
+});
+
+test('walking down into a ditch is allowed, and nowhere you can get down to leaves you stranded', () => {
+  // Down a 50 degree slope: allowed now; back up: not.
+  const steep = hillside(1.2), up = fieldHeight(steep.surfaces[0].field!,6,0);
+  const p = {...walker(6),feetY:up};
+  climb(p,steep,3,-1);
+  assert.ok(p.x < 0.5,'walked down to the foot, x='+p.x);
+  climb(p,steep,3,1);
+  assert.ok(p.x < 0.6,'and cannot walk back up, x='+p.x);
+  // On real maps, at half-metre spacing and the real walking rule: from
+  // everywhere reachable from the arrival, the arrival is reachable again.
+  for (let seed=1;seed<=12;seed++) {
+    const map = outdoors(seed), g = map.geometry, s = g.surfaces[0], step = 0.5, span = 281, x0 = -70;
+    const h = (i: number, k: number) => groundAt(map,x0+i*step,x0+k*step);
+    const index = collisionIndex(g), open = (i: number, k: number) => index.clear(x0+i*step,x0+k*step,h(i,k));
+    const may = (ai: number, ak: number, bi: number, bk: number) => climbable(s,h(ai,ak),h(bi,bk),x0+bi*step,x0+bk*step);
+    const flood = (forward: boolean) => {
+      const start = [Math.round((map.spawns[0].x-x0)/step),Math.round((map.spawns[0].z-x0)/step)], seen = new Set([start[1]*span+start[0]]), queue = [start];
+      for (let q=0;q<queue.length;q++) {
+        const [i,k] = queue[q];
+        for (const [di,dk] of [[1,0],[-1,0],[0,1],[0,-1]]) {
+          const ni = i+di, nk = k+dk, key = nk*span+ni;
+          if (ni < 0 || nk < 0 || ni >= span || nk >= span || seen.has(key) || !open(ni,nk)) continue;
+          if (forward ? !may(i,k,ni,nk) : !may(ni,nk,i,k)) continue;
+          seen.add(key); queue.push([ni,nk]);
+        }
+      }
+      return seen;
+    };
+    const out = flood(true), back = flood(false), stuck = [...out].filter(j => !back.has(j));
+    assert.ok(stuck.length <= 4,'seed '+seed+': '+stuck.length+' half-metre spots with no way back, e.g. '+stuck.slice(0,3).map(j => (x0+(j % span)*step)+','+(x0+Math.floor(j/span)*step)).join(' '));
+  }
 });

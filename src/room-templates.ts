@@ -12,14 +12,15 @@ export interface Surface extends Patch { y:number; rise?:number; along?:'x'; sta
 export interface Heightfield { x0:number; z0:number; step:number; n:number; h:number[] }
 // The steepest ground an operator can walk up: 35 degrees.
 export const maxGrade = 0.7;
-// Can feet at `from` step up or down to `to`, at (x, z)? Ground steeper than
-// `maxGrade` is a wall both ways, whatever the direction of the step, so no
-// one can walk down into a ditch they can't climb back out of. Only a height
-// map limits the slope; floors, ramps and stairs don't.
-// Planning (`walkable`, `route`) passes a stricter `limit`, as it samples
-// only every half metre: whatever it calls walkable, an operator can walk.
+// Can feet at `from` step to `to`, at (x, z)? Stepping up onto ground
+// steeper than `maxGrade` is not allowed, whatever the direction of the step;
+// down and across, it is. (The outdoor generator makes sure that anywhere an
+// operator can get down to, they can climb back out of.) Only a height map
+// limits the slope; floors, ramps and stairs don't. Planning (`walkable`,
+// `route`) passes a stricter `limit`, as it samples only every half metre:
+// whatever it calls walkable, an operator can walk.
 export const climbable = (s:Surface,from:number,to:number,x:number,z:number,limit = maxGrade) =>
-  !s.field || Math.abs(to-from) <= 1e-4 || fieldGrade(s.field,x,z) <= limit*limit;
+  !s.field || to <= from+1e-4 || fieldGrade(s.field,x,z) <= limit*limit;
 export const planningGrade = maxGrade*0.9;
 export interface Socket { name:string; side:Side; x:number; z:number; y:number }
 export type PropKind = 'machine' | 'shelf' | 'tank' | 'locker' | 'crate' | 'console' | 'pump' | 'chiller' |

@@ -1,5 +1,5 @@
-import { connections, geometryFor, walkable, type Geometry, type Layout } from './layout.ts';
-import { fieldHeight, obstaclesAt, orient, outward, socketAt, surfaceAt } from './room-templates.ts';
+import { collisionIndex, connections, geometryFor, walkable, type Geometry, type Layout } from './layout.ts';
+import { climbable, fieldGrade, fieldHeight, maxGrade, obstaclesAt, orient, outward, planningGrade, socketAt, surfaceAt } from './room-templates.ts';
 import { clearAt } from './room.ts';
 import type { Heightfield, Point3, RoomWall } from './room-templates.ts';
 
@@ -109,14 +109,17 @@ export function outdoors(seed: number): Outdoors {
   const ax = Math.round(Math.sin(angle)*reach), az = Math.round(Math.cos(angle)*reach);
   const offsets = [next(),next(),next(),next()].map(v => v*1000);
   const rockSeeds = Array.from({length:400},() => [next(),next(),next(),next(),next()]);
-  // Try gentler ground until every door and the bell can be reached on foot.
+  // Every door and the bell must be reachable on foot, and nowhere an
+  // operator can get down to may leave them stranded. Try other ditches
+  // first, then gentler ground.
   for (let attempt=0;;attempt++) {
-    const scale = attempt < 5 ? 1-attempt*0.18 : 0;
-    const hills = noise(seed ^ 0x9e3779b9), creases = noise(seed ^ 0x7f4a7c15);
+    const scale = attempt < 4 ? 1 : attempt < 9 ? 1-(attempt-3)*0.16 : 0, shift = attempt*97.3;
+    const hills = noise(seed ^ 0x9e3779b9), creases = noise(seed ^ 0x7f4a7c15), fade = noise(seed ^ 0x51a3c2e9);
     const base = (x: number, z: number) => scale*(6*hills(x/46+offsets[0],z/46+offsets[1])+2.2*hills(x/19+offsets[2],z/19+offsets[3])+0.7*hills(x/8,z/8+offsets[0]))
-      // Ditches: troughs along the zero lines of a second noise, rounded at
-      // the rim and the bottom so the slope eases in instead of jumping.
-      -scale*2.8*smooth(1-Math.abs(creases(x/34+offsets[1],z/34+offsets[2]))/0.14);
+      // Ditches: troughs along the zero lines of a second noise, with a level
+      // floor about 3 m wide between steep walls, so an operator who drops in
+      // can walk along the floor to where the ditch fades out into a crossing.
+      -scale*2.8*smooth((1-Math.abs(creases(x/34+offsets[1]+shift,z/34+offsets[2]))/0.16)/0.55)*smooth((fade(x/23+shift,z/23+offsets[3])+0.15)/0.5);
     const arrivalLevel = base(ax,az);
     const n = outdoorSize+1, h: number[] = new Array(n*n);
     for (let k=0;k<n;k++) for (let i=0;i<n;i++) {
@@ -137,10 +140,15 @@ export function outdoors(seed: number): Outdoors {
     const low = Math.min(...h), height = (x: number, z: number) => fieldHeight(ground,x,z);
     const g = emptyGeometry();
     g.surfaces.push({x:0,z:0,w:outdoorSize,d:outdoorSize,y:low-2,room,field:ground});
-    // Invisible walls just inside the cliffs, in case anything gets that far.
-    for (const [x0,z0,x1,z1] of [[-half,-half,half,-half+0.5],[-half,half-0.5,half,half],[-half,-half,-half+0.5,half],[half-0.5,-half,half,half]]) g.walls.push(wall(room,x0,z0,x1,z1,low-5,80));
+    // Invisible walls just short of the cliffs' foot: the cliffs are scenery,
+    // and where ground sloping toward the edge meets them it could pen
+    // someone in.
+    const edge = half-13;
+    for (const [x0,z0,x1,z1] of [[-edge,-edge-0.5,edge,-edge],[-edge,edge,edge,edge+0.5],[-edge-0.5,-edge,-edge,edge],[edge,-edge,edge+0.5,edge]]) g.walls.push(wall(room,x0,z0,x1,z1,low-5,80));
     g.walls.push(wall(room,building.x-building.w/2,building.z-building.d/2,building.x+building.w/2,building.z+building.d/2,0,building.h));
     g.props.push({x:bell.x,z:bell.z,w:1.3,d:1.3,y:0,h:2.7,kind:'bell',room});
+    // Nowhere to get stuck: fill any ground that has no way back out.
+    for (let pass=0;pass<6 && unstrand(g,ground,{x:ax,y:arrivalLevel,z:az});pass++);
     // Boulders, sitting in the ground, clear of the plots and of each other.
     const rocks: Outdoors['rocks'] = [];
     for (const [a,b,c,d,e] of rockSeeds) {
@@ -148,6 +156,11 @@ export function outdoors(seed: number): Outdoors {
       const w = 0.8+a*2, dd = 0.8+b*2, rh = 0.6+c*2, x = (d-0.5)*(outdoorSize-28), z = (e-0.5)*(outdoorSize-28);
       if (Math.abs(x-building.x) < building.w/2+12 && Math.abs(z-building.z-2) < building.d/2+13) continue;
       if (Math.hypot(x-ax,z-az) < 12 || rocks.some(r => Math.abs(r.x-x) < (r.w+w)/2+2 && Math.abs(r.z-z) < (r.d+dd)/2+2)) continue;
+      // Only on gentle ground, a metre clear of anything steep: a boulder
+      // half buried in a ditch wall could pen someone in against it.
+      let gentle = true;
+      for (let px=x-w/2-1;px<=x+w/2+1 && gentle;px+=0.5) for (let pz=z-dd/2-1;pz<=z+dd/2+1 && gentle;pz+=0.5) gentle = fieldGrade(ground,px,pz) <= 0.25;
+      if (!gentle) continue;
       const y = Math.min(height(x-w/2,z-dd/2),height(x+w/2,z-dd/2),height(x-w/2,z+dd/2),height(x+w/2,z+dd/2))-0.15;
       rocks.push({x,y,z,w,d:dd,h:rh});
       g.props.push({x,z,w,d:dd,y,h:rh,kind:'rock',room});
@@ -200,6 +213,60 @@ export function insideDoors(layout: Layout): InsideDoor[] {
   }
   insideCache.set(layout,found);
   return found;
+}
+
+// Raise any ground an operator could walk down to from `from` but not climb
+// back out of. Walking downhill is always allowed, so ground is safe if a
+// level or downhill path leads from it to ground that can walk back to
+// `from`. Working on a half-metre lattice, stranded points get the height
+// they need, from the safe ground outward in order of height (a ditch section
+// with no way out fills to its lowest rim), and the height map's points
+// around each are raised to match. Returns how many points were stranded.
+function unstrand(g: Geometry, f: Heightfield, from: Point3) {
+  const step = f.step/2, n = (f.n-1)*2+1, s = g.surfaces[0], index = collisionIndex(g);
+  const at = (j: number) => ({x:f.x0+(j % n)*step,z:f.z0+Math.floor(j/n)*step});
+  const h = new Float64Array(n*n), open = new Uint8Array(n*n);
+  for (let j=0;j<n*n;j++) { const p = at(j); h[j] = fieldHeight(f,p.x,p.z); open[j] = index.clear(p.x,p.z,h[j]) ? 1 : 0; }
+  const neighbours = (j: number) => { const i = j % n, k = Math.floor(j/n); return [i+1 < n ? j+1 : -1,i > 0 ? j-1 : -1,k+1 < n ? j+n : -1,k > 0 ? j-n : -1].filter(v => v >= 0); };
+  // A move from a to b, onto b: downhill always; uphill onto gentle ground.
+  // The way back out must be comfortably gentle (the planning limit).
+  const may = (a: number, b: number, limit: number) => { const p = at(b); return climbable(s,h[a],h[b],p.x,p.z,limit); };
+  const start = Math.round((from.z-f.z0)/step)*n+Math.round((from.x-f.x0)/step);
+  const flood = (forward: boolean) => {
+    const seen = new Uint8Array(n*n), queue = [start];
+    seen[start] = 1;
+    for (let q=0;q<queue.length;q++) for (const b of neighbours(queue[q])) {
+      if (seen[b] || !open[b] || !(forward ? may(queue[q],b,maxGrade) : may(b,queue[q],planningGrade))) continue;
+      seen[b] = 1; queue.push(b);
+    }
+    return seen;
+  };
+  const out = flood(true), back = flood(false);
+  let stranded = 0;
+  for (let j=0;j<n*n;j++) if (out[j] && !back[j]) stranded++;
+  if (!stranded) return 0;
+  // Priority flood from the safe ground, lowest first.
+  const heap: number[] = [], done = new Uint8Array(n*n), need = Float64Array.from(h);
+  const less = (a: number, b: number) => need[heap[a]] < need[heap[b]];
+  const push = (j: number) => { heap.push(j); for (let c=heap.length-1;c>0;) { const p = (c-1) >> 1; if (!less(c,p)) break; [heap[c],heap[p]] = [heap[p],heap[c]]; c = p; } };
+  const pop = () => { const top = heap[0], last = heap.pop()!; if (heap.length) { heap[0] = last; for (let c=0;;) { const l = 2*c+1, r = l+1; let m = c; if (l < heap.length && less(l,m)) m = l; if (r < heap.length && less(r,m)) m = r; if (m === c) break; [heap[m],heap[c]] = [heap[c],heap[m]]; c = m; } } return top; };
+  for (let j=0;j<n*n;j++) if (back[j]) { done[j] = 1; push(j); }
+  while (heap.length) {
+    const c = pop();
+    for (const b of neighbours(c)) {
+      if (done[b] || !(out[b] && !back[b])) continue;
+      done[b] = 1;
+      if (need[b] < need[c]) need[b] = need[c];
+      push(b);
+    }
+  }
+  // Raise the height map's points around every raised lattice point.
+  for (let j=0;j<n*n;j++) {
+    if (need[j] <= h[j]) continue;
+    const i = j % n, k = Math.floor(j/n), vi = [Math.floor(i/2),Math.ceil(i/2)], vk = [Math.floor(k/2),Math.ceil(k/2)];
+    for (const a of vi) for (const b of vk) { const v = b*f.n+a; if (f.h[v] < need[j]) f.h[v] = Math.round(need[j]*100+0.5)/100; }
+  }
+  return stranded;
 }
 
 // The height of the ground anywhere on the outdoor map.

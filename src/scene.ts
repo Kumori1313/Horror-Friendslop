@@ -1,5 +1,5 @@
 import * as T from 'three';
-import { catalog, itemName, items, pace, stunTime, type Diver } from './mission.ts';
+import { catalog, itemName, items, pace, stunTime, swingTime, type Diver } from './mission.ts';
 import { buildFacility } from './facility-scene.ts';
 import { environment, materialLibrary } from './materials.ts';
 import { anchor, geometryFor, type Geometry, type Layout } from './layout.ts';
@@ -208,11 +208,11 @@ export function createScene(canvas: HTMLCanvasElement, generated = false) {
     scene.add(light,light.target);
     return light;
   });
-  // A baton swing: a quick chop down and back, 0.3 s. Your own starts when
-  // you press; partners' when their swing count rises.
+  // A baton swing: a chop down and back over `swingTime`. Your own starts
+  // when you press; partners' when their swing count rises.
   let ownSwing = -Infinity;
   const swungAt = new Map<number,{n: number; at: number}>();
-  const chop = (start: number, now: number) => { const f = (now-start)/300; return f >= 0 && f < 1 ? -Math.sin(f*Math.PI)*1.3 : 0; };
+  const chop = (start: number, now: number) => { const f = (now-start)/(swingTime*1000); return f >= 0 && f < 1 ? -Math.sin(f*Math.PI)*1.3 : 0; };
   // Lit flares: a fixed pool of red point lights, so shaders never change.
   const flareLights = Array.from({length:2},() => { const light = new T.PointLight(0xff5a3a,0,9,1.2); scene.add(light); return light; });
   function lightRooms(lamps: Map<string,{x: number; y: number; z: number; height: number; reach: number}> | undefined, drawn: Set<string> | undefined, dt: number) {

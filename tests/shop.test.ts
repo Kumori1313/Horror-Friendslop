@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { anchor } from '../src/layout.ts';
-import { assignment, catalog, flareTime, items, prices, wallet } from '../src/mission.ts';
+import { assignment, catalog, flareTime, items, prices, swingTime, wallet } from '../src/mission.ts';
 import { home, placeOf } from '../src/places.ts';
 import { batteryLife, chargeOf, slotsOf, type Player } from '../src/room.ts';
 import { generateLayout } from '../src/server/generate-layout.ts';
@@ -181,7 +181,10 @@ test('the stun baton stuns the Bell Diver only when its bell is within reach ahe
   sim.act(1,'swing');
   assert.equal(mission.diver.stun,undefined,'behind');
   sim.act(1,'swing');
-  assert.equal(p1.swings,3,'a second swing within a second is ignored');
+  assert.equal(p1.swings,3,'a second swing before the first has finished is ignored');
+  sim.tick(swingTime);
+  sim.act(1,'swing');
+  assert.equal(p1.swings,4,'once it has, the next swing goes');
 });
 
 test('a diagnostics grant fills the wallet without counting toward the quota', () => {

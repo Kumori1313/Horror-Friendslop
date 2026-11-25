@@ -7,7 +7,7 @@ import { geometryFor, nearbyDoor, playerRadius, spawnPoints } from '../layout.ts
 import type { Layout, Geometry, Rect } from '../layout.ts';
 
 import { obstaclesAt, surfaceAt, surfaceHeight } from '../room-templates.ts';
-import { assignment, batonReach, bellSpan, catalog, deliverySpot, distance, diverBody, finished, flareTime, gone, nearestPickup, prices, wallet } from '../mission.ts';
+import { assignment, batonReach, bellSpan, swingTime, catalog, deliverySpot, distance, diverBody, finished, flareTime, gone, nearestPickup, prices, wallet } from '../mission.ts';
 import { doorReach, home, intakeDoor, intakeEntry, outdoors, placeOf, riftOpen, riftReach, riftSpot } from '../places.ts';
 import type { Place, Stand } from '../places.ts';
 import { bodyOf, expeditionSeed, itemKinds, spawnSalvage } from '../salvage.ts';
@@ -516,11 +516,12 @@ export class Simulation {
   }
 
   // A swing of the stun baton in hand stuns the Bell Diver if its bell is in
-  // the swinger's room, within reach ahead and overhead. Once a second.
+  // the swinger's room, within reach ahead and overhead. The next swing waits
+  // for this one to finish (less a little, for presses bunched by the network).
   private swing(p: Player) {
     const mission = this.state.mission, layout = this.layout, item = selected(p);
     if (!mission || !layout || mission.stage !== 'explore' || !item || catalog(layout,mission).find(s => s.id === item)?.kind !== 'baton') return;
-    if (this.time-(this.swungAt.get(p.id) ?? -Infinity) < 0.9) return;
+    if (this.time-(this.swungAt.get(p.id) ?? -Infinity) < swingTime*0.8) return;
     this.swungAt.set(p.id,this.time);
     p.swings = (p.swings ?? 0)+1;
     const bell = bellSpan(layout,mission.diver,mission), feet = p.feetY ?? 0;

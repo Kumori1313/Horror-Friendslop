@@ -64,8 +64,10 @@ export function bellSpan(layout: Layout, diver: Diver, mission: Mission) {
   else if (diver.mode === 'rising') { const f = Math.min(1,Math.max(0,diver.seconds)/p.rise); lowered = depth*f*f*(3-2*f); }
   return {x:diver.x ?? a.x,z:diver.z ?? a.z,bottom:top-0.7-lowered,top:top-lowered};
 }
-// A baton swing reaches 1.7 m ahead and 2.1 m above the swinger's feet.
+// A baton swing reaches 1.7 m ahead and 2.1 m above the swinger's feet. It
+// takes `swingTime` seconds, and the next can start only once it's done.
 export const batonReach = {ahead:1.7,up:2.1};
+export const swingTime = 0.45;
 export interface Mission {
   solo?: boolean;
   stage: Stage;

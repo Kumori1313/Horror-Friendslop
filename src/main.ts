@@ -1,5 +1,5 @@
 import { bindPreferences } from './preferences.ts';
-import { assignment, finished, gone, itemName, nearestPickup, prices, wallet, wareInfo } from './mission.ts';
+import { assignment, finished, gone, itemName, nearestPickup, prices, swingTime, wallet, wareInfo } from './mission.ts';
 import { spawnSalvage, type ItemKind } from './salvage.ts';
 import { missionHud } from './mission-hud.ts';
 import { mountDiagnostics } from './diagnostics.ts';
@@ -174,13 +174,17 @@ function start(render: ReturnType<typeof createScene>, mode?: Crew | 'solo', sce
     updateHud(state);
   }
   // Hold to throw: the longer the hold, up to 0.9 s, the harder the throw.
-  let charging: number | undefined;
+  let charging: number | undefined, lastSwing = -Infinity;
   const power = () => charging === undefined ? 0 : Math.min(1,(performance.now()-charging)/900);
   function startThrow() {
     const p = state?.players.find(player => player.id === id);
     const item = p && selected({...p,hand:handOf(p)});
-    // A stun baton swings at once instead of being thrown.
-    if (playing && item && kindOf(item) === 'baton') { act('swing'); render.swing(); return; }
+    // A stun baton swings at once instead of being thrown, but only once the
+    // last swing has finished.
+    if (playing && item && kindOf(item) === 'baton') {
+      if (performance.now()-lastSwing < swingTime*1000) return;
+      lastSwing = performance.now(); act('swing'); render.swing(); return;
+    }
     if (!playing || !p || !geometry || !item || charging !== undefined) return;
     charging = performance.now();
     charge.hidden = false;

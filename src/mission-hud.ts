@@ -3,7 +3,7 @@ import chainTwo from './audio/chain-2.wav?url';
 import type { Layout } from './layout.ts';
 import type { Player, Snapshot } from './room.ts';
 import type { Preferences } from './preferences.ts';
-import { finished, healthOf, heldBy, hears, itemName, listen, lossPercent, maxHealth } from './mission.ts';
+import { finished, flatOn, healthOf, heldBy, hears, itemName, listen, lossPercent, maxHealth } from './mission.ts';
 import { placeOf } from './places.ts';
 
 const el = (id: string) => document.getElementById(id)!;
@@ -164,10 +164,32 @@ export function missionHud(preferences: Preferences, operator = (id: number) => 
       }
     }
   }
+  // Stalkers: heavy footfalls when one walks near, a shriek as one winds up
+  // to charge, a howl from far off when a new one arrives.
+  const seenCharges = new Map<number,number>(), stalkerSeen = new Map<number,{x: number; z: number}>();
+  let stalkersKnown: number | undefined, nextStep = 0, stepHeard = 0;
+  function stalkerCues(state: Snapshot, self: Player) {
+    const m = state.mission!, now = performance.now(), out = placeOf(self) === 'outside', all = m.stalkers ?? [];
+    if (stalkersKnown !== undefined && all.length > stalkersKnown && out) { noise(0.25,1.6,180); noise(0.12,1.4,420); subtitle('A long howl from the hills'); }
+    stalkersKnown = all.length;
+    for (const s of all) {
+      const d = Math.hypot(s.x-self.x,s.z-self.z), last = stalkerSeen.get(s.id), moving = !!last && Math.hypot(last.x-s.x,last.z-s.z) > 0.01;
+      stalkerSeen.set(s.id,{x:s.x,z:s.z});
+      const charges = s.charges ?? 0, seen = seenCharges.get(s.id);
+      if (seen !== undefined && charges > seen && out && d < 45) { noise(0.6*(1-d/45),0.7,2600); noise(0.4*(1-d/45),0.5,1400); subtitle('A shriek: something is charging!'); }
+      seenCharges.set(s.id,charges);
+      if (out && moving && d < 30 && now >= nextStep) {
+        nextStep = now+(s.mode === 'charge' ? 120 : s.mode === 'stalk' ? 330 : 520);
+        noise(0.3*(1-d/30),0.12,90);
+        if (now-stepHeard > 12000) subtitle('Heavy footfalls nearby');
+        stepHeard = now;
+      }
+    }
+  }
   function update(layout: Layout, state: Snapshot, self: Player, room: string | undefined, briefing: boolean) {
     const m = state.mission!;
     vitals(state,!briefing && m.stage === 'explore' && placeOf(self) !== 'home');
-    if (m.stage === 'explore') { hurtCue(self); gnawerCues(state,self); lurkerCues(state,self); }
+    if (m.stage === 'explore') { hurtCue(self); gnawerCues(state,self); lurkerCues(state,self); stalkerCues(state,self); }
     const c = m.contract;
     const end = finished(m.stage), report = end || m.stage === 'settled';
     el('result').hidden = !report;
@@ -235,6 +257,7 @@ export function missionHud(preferences: Preferences, operator = (id: number) => 
     // Under water: the breath left, and partners going under.
     for (const d of m.drowning ?? []) alerts.push(d.id === self.id ? 'Under water! Get your head up · '+Math.max(0,Math.ceil(d.seconds))+'s' : operator(d.id)+' is under water');
     // Held by the Lurker.
+    for (const p of state.players) if (flatOn(m,p.id)) alerts.push(p.id === self.id ? 'Knocked flat! Get up and get to cover' : operator(p.id)+' was knocked flat');
     for (const p of state.players) if (heldBy(m,p.id)) alerts.push(p.id === self.id ? 'Something has you! Mash Space to struggle' : operator(p.id)+' is being dragged into the river! Hit it to free them');
     for (const id of m.dead ?? []) if (id !== self.id) alerts.push(operator(id)+' died');
     for (const id of m.escaped ?? []) if (id !== self.id) alerts.push(operator(id)+' made it out');

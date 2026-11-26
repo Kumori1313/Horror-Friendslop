@@ -3,6 +3,7 @@ import { storey, type Point3 } from '../room-templates.ts';
 import { gone, healthOf, items, kept, maxHealth, pace, recoverAfter, recoverRate, recoverTo, sameStorey, sprawl, stunTime } from '../mission.ts';
 import { spawnGnawers, stepGnawers } from './gnawers.ts';
 import { spawnLurkers, stepLurkers } from './lurkers.ts';
+import { stepStalkers } from './stalkers.ts';
 import type { Contract, Diver, Mission, Receipt } from '../mission.ts';
 import type { Player, Snapshot } from '../room.ts';
 import { expeditionSeed, facilityValue } from '../salvage.ts';
@@ -243,5 +244,6 @@ export function advanceMission(layout: Layout, state: Snapshot, mission: Mission
   const threats = hooks.threats ?? [], harm = (p: Player, damage: number) => hurt(state,mission,p,damage);
   stepGnawers(layout,state,mission,dt,random,threats.filter(t => t.place === 'inside'),harm,hooks.drop ?? (() => undefined));
   stepLurkers(layout,state,mission,dt,random,threats.filter(t => t.place === 'outside'),harm);
+  stepStalkers(layout,state,mission,dt,random,threats.filter(t => t.place === 'outside'),harm);
   hunt(layout,state,mission,dt,locate,random);
 }

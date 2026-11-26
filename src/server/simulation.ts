@@ -4,12 +4,13 @@ import { flightStep, gravity, launchFrom, positionAt, trajectory } from '../flig
 import type { Body, Flight, Path } from '../flight.ts';
 import { flareFear, swat } from './gnawers.ts';
 import { struggle, swatLurker } from './lurkers.ts';
+import { swatStalker } from './stalkers.ts';
 
 import { geometryFor, inPit, nearbyDoor, playerRadius, spawnPoints } from '../layout.ts';
 import type { Layout, Geometry, Rect } from '../layout.ts';
 
 import { climbable, headHeight, obstaclesAt, pitKill, surfaceAt, surfaceHeight, wadeDepth, waterLevel, type Point3, type Solid } from '../room-templates.ts';
-import { assignment, batonReach, bellSpan, breathTime, heldBy, recoverAfter, revivedHealth, swingTime, catalog, deliverySpot, distance, diverBody, finished, flareTime, gone, nearestPickup, prices, wallet } from '../mission.ts';
+import { assignment, batonReach, bellSpan, breathTime, flatOn, heldBy, recoverAfter, revivedHealth, swingTime, catalog, deliverySpot, distance, diverBody, finished, flareTime, gone, nearestPickup, prices, wallet } from '../mission.ts';
 import { doorReach, home, insideDoors, outdoors, placeOf, riftOpen, riftReach, riftSpot } from '../places.ts';
 import type { Place, Stand } from '../places.ts';
 import { bodyOf, expeditionSeed, itemKinds, spawnSalvage } from '../salvage.ts';
@@ -329,9 +330,9 @@ export class Simulation {
         continue;
       }
       const place = placeOf(p);
-      // Held by the Lurker: no walking, only looking about and struggling
-      // (each fresh press of the jump key), while it drags them.
-      if (mission && heldBy(mission,p.id)) {
+      // Held by the Lurker or knocked flat by a stalker: no walking, only
+      // looking about and (held) struggling, each fresh press of the jump key.
+      if (mission && (heldBy(mission,p.id) || flatOn(mission,p.id))) {
         p.yaw = input.yaw; p.pitch = input.pitch;
         if (input.jump && !this.jumping.get(p.id)) struggle(mission,p.id);
         this.jumping.set(p.id,!!input.jump);
@@ -737,7 +738,7 @@ export class Simulation {
     p.swings = (p.swings ?? 0)+1;
     // A Gnawer within reach ahead takes the hit first; outside, the Lurker.
     if (placeOf(p) === 'inside' && swat(layout,this.state,mission,p)) return;
-    if (placeOf(p) === 'outside') { swatLurker(mission,this.state,p); return; }
+    if (placeOf(p) === 'outside') { if (!swatStalker(mission,p)) swatLurker(mission,this.state,p); return; }
     const bell = bellSpan(layout,mission.diver,mission), feet = p.feetY ?? 0;
     if (!bell || placeOf(p) !== 'inside' || this.roomOf(p) !== mission.diver.bay) return;
     const dx = bell.x-p.x, dz = bell.z-p.z, d = Math.hypot(dx,dz);
@@ -767,7 +768,7 @@ export class Simulation {
     this.state.opened = [];
     // Bought gear that came home stays; everything else went with the facility.
     Object.assign(mission,{stage:'home',haul:wipe ? [] : mission.haul.filter(h => h.kind),down:[],awake:false,diver:{mode:'dormant',bay:'',seconds:0}});
-    for (const key of ['arrival','bell','rift','enraged','escaped','dead','clock','drowning','gnawers','lurkers'] as const) delete mission[key];
+    for (const key of ['arrival','bell','rift','enraged','escaped','dead','clock','drowning','gnawers','lurkers','stalkers','prowl','flat'] as const) delete mission[key];
     this.fillSlots();
   }
 }

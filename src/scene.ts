@@ -1,5 +1,5 @@
 import * as T from 'three';
-import { catalog, itemName, items, pace, stunTime, swingTime, type Diver } from './mission.ts';
+import { catalog, flatOn, itemName, items, pace, stunTime, swingTime, type Diver, type Stalker } from './mission.ts';
 import { buildFacility } from './facility-scene.ts';
 import { environment, materialLibrary } from './materials.ts';
 import { anchor, geometryFor, type Geometry, type Layout } from './layout.ts';
@@ -241,6 +241,48 @@ export function createScene(canvas: HTMLCanvasElement, generated = false) {
     model = {group,arm,shaft,hand};
     lurkerModels.set(id,model);
     return model;
+  }
+  // A stalker: a gaunt thing on four long, jointless legs, its back above
+  // an operator's head, a long low skull and two pale eyes. Its legs cycle
+  // with how far it moves; winding up it drops its head and hunches; stunned,
+  // it lists to one side.
+  const stalkerSkin = new T.MeshStandardMaterial({color:0x3b3731,roughness:0.75});
+  const stalkerBone = new T.MeshStandardMaterial({color:0x8c8576,roughness:0.6});
+  const stalkerModels = new Map<number,{group: T.Group; pose: T.Group; head: T.Group; legs: T.Group[]; phase: number; last: T.Vector3}>();
+  function stalkerModel(id: number) {
+    let model = stalkerModels.get(id);
+    if (model) return model;
+    const group = new T.Group(), pose = new T.Group(), head = new T.Group(), legs: T.Group[] = [];
+    group.add(pose);
+    // Forward is -z.
+    box(0,2.05,0.1,0.55,0.45,1.7,stalkerSkin,pose);
+    for (const z of [-0.5,-0.1,0.3,0.7]) box(0,2.32,z,0.12,0.14,0.22,stalkerBone,pose);
+    head.position.set(0,2.15,-0.85); pose.add(head);
+    box(0,-0.05,-0.35,0.3,0.3,0.75,stalkerBone,head);
+    box(0,-0.22,-0.45,0.26,0.08,0.6,stalkerSkin,head);
+    for (const side of [-1,1]) box(side*0.1,0.05,-0.66,0.07,0.06,0.03,eye,head);
+    for (const [x,z] of [[-0.3,-0.6],[0.3,-0.6],[-0.3,0.75],[0.3,0.75]]) {
+      const hip = new T.Group(); hip.position.set(x,2,z); pose.add(hip); legs.push(hip);
+      box(0,-1,0,0.1,2,0.1,stalkerSkin,hip);
+    }
+    scene.add(group);
+    model = {group,pose,head,legs,phase:0,last:new T.Vector3()};
+    stalkerModels.set(id,model);
+    return model;
+  }
+  function poseStalker(s: Stalker, update: number, now: number, dt: number, reducedMotion: boolean) {
+    const model = stalkerModel(s.id), at = glide('s'+s.id,update,s.x,s.y,s.z,now,model.group.position);
+    const moved = model.last.distanceTo(at);
+    model.last.copy(at); model.group.position.copy(at);
+    const turn = Math.atan2(Math.sin(s.yaw-model.group.rotation.y),Math.cos(s.yaw-model.group.rotation.y));
+    model.group.rotation.y += turn*Math.min(1,dt*(s.mode === 'charge' ? 20 : 6));
+    model.phase += Math.min(moved,1)*2.6;
+    const stride = reducedMotion ? 0.12 : s.mode === 'charge' ? 0.7 : 0.35;
+    model.legs.forEach((leg,i) => { leg.rotation.x = stride*Math.sin(model.phase+(i === 0 || i === 3 ? 0 : Math.PI)); });
+    const ease = Math.min(1,dt*8), hunch = s.mode === 'windup' ? 0.25 : s.mode === 'charge' ? 0.15 : 0;
+    model.pose.rotation.x += (hunch-model.pose.rotation.x)*ease;
+    model.pose.rotation.z += ((s.mode === 'stunned' ? 0.3 : 0)-model.pose.rotation.z)*ease;
+    model.head.rotation.x += ((s.mode === 'windup' ? -0.45 : s.mode === 'search' ? 0.2 : 0)-model.head.rotation.x)*ease;
   }
   // Tines hang 1.2 m below the rim, shortened under low ceilings so they
   // stay above head height.
@@ -605,13 +647,21 @@ export function createScene(canvas: HTMLCanvasElement, generated = false) {
         }
       }
       for (const [id,model] of lurkerModels) if (!state.mission?.lurkers?.some(l => l.id === id)) { scene.remove(model.group); lurkerModels.delete(id); }
+      // Stalkers show only outside.
+      for (const s of state.mission?.stalkers ?? []) {
+        const model = stalkerModel(s.id);
+        model.group.visible = here === 'outside';
+        if (model.group.visible) poseStalker(s,state.update,performance.now(),dt,reducedMotion);
+      }
+      for (const [id,model] of stalkerModels) if (!state.mission?.stalkers?.some(s => s.id === id)) { scene.remove(model.group); stalkerModels.delete(id); }
       const salvageKind = new Map(layout && state.mission ? catalog(layout,state.mission).map(s => [s.id,s.kind]) : []);
       const heldKind = (p: Snapshot['players'][number]) => {
         const item = selected(p);
         return item && item !== lampSlot ? salvageKind.get(item) : undefined;
       };
       for (const p of state.players) {
-        const down = state.mission?.down.some(d => d.id === p.id);
+        // Knocked flat by a stalker looks like being down, for a moment.
+        const down = state.mission?.down.some(d => d.id === p.id) || flatOn(state.mission,p.id);
         const dead = !!state.mission?.dead?.includes(p.id);
         if (p.id === self) {
           // No body for whoever the camera looks through. One drawn earlier
@@ -805,5 +855,7 @@ export function createScene(canvas: HTMLCanvasElement, generated = false) {
   resize(); window.addEventListener('resize',resize);
   // For testing builds: where each Gnawer's model is drawn, and whether it shows.
   const gnawersDrawn = () => [...gnawerModels].map(([id,m]) => ({id,x:m.group.position.x,y:m.group.position.y,z:m.group.position.z,visible:m.group.visible,yaw:m.group.rotation.y}));
-  return Object.assign(render,{stats,previews,gnawersDrawn,swing:() => { ownSwing = performance.now(); }});
+  const stalkersDrawn = () => ({camera:{...camera.position,dir:camera.getWorldDirection(new T.Vector3())},stalkers:[...stalkerModels].map(([id,m]) => ({id,x:m.group.position.x,y:m.group.position.y,z:m.group.position.z,visible:m.group.visible,inScene:!!m.group.parent,screen:m.group.position.clone().add(new T.Vector3(0,2,0)).project(camera)}))});
+  // (camera and screen: for browser checks of what the view shows)
+  return Object.assign(render,{stats,previews,gnawersDrawn,stalkersDrawn,swing:() => { ownSwing = performance.now(); }});
 }

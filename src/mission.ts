@@ -100,7 +100,21 @@ export interface Mission {
   gnawers?: Gnawer[];
   // The river's Lurker, outside from the start.
   lurkers?: Lurker[];
+  // Stalkers roaming outside: none at first, more the longer the crew spends
+  // outside (`prowl`, whole seconds with anyone outside), one more at the bell.
+  stalkers?: Stalker[];
+  prowl?: number;
+  // Operators knocked flat by a stalker's charge, and for how much longer.
+  flat?: {id: number; seconds: number}[];
 }
+// A stalker: a tall, gaunt thing on four long legs that roams outside, hunts
+// by sight (cover breaks it), and charges anyone it sees within range: a
+// wind-up (`windup`), a straight rush (`charge`) that knocks flat and hurts
+// whoever it hits, then a stumble round (`recover`) before it comes again.
+// `charges` counts its charges, so every client hears each wind-up once.
+export interface Stalker { id: number; x: number; y: number; z: number; yaw: number; mode: 'roam' | 'stalk' | 'search' | 'windup' | 'charge' | 'recover' | 'stunned' | 'flee'; charges?: number }
+// Whether this operator is lying knocked flat.
+export const flatOn = (mission: Mission | undefined, id: number) => !!mission?.flat?.some(f => f.id === id);
 // The Lurker: a long dark thing under the river's deep water. It patrols the
 // channel, comes along the river toward anyone it hears moving nearby, and
 // grabs anyone within reach (`grab`: the operator it holds), dragging them

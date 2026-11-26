@@ -8,7 +8,7 @@ import { anchor, connections, geometryFor, neighbours, type Layout } from '../la
 import { batonReach, catalog, gone, type Gnawer, type Mission } from '../mission.ts';
 import { placeOf } from '../places.ts';
 import { slotsOf, type Player, type Snapshot } from '../room.ts';
-import { roomTemplates, surfaceAt, type Point3 } from '../room-templates.ts';
+import { roomTemplates, surfaceAt, surfaceHeight, type Point3 } from '../room-templates.ts';
 import { route } from '../route.ts';
 
 // Metres per second in each mode; faster once the bell has rung.
@@ -20,13 +20,13 @@ export const biteReach = 1.2, biteEvery = 1.6, recoil = 3, fleeTime = 10, flareF
 export const biteDamage = [10,16] as const;
 const notice = 7, enraged = 1.3;
 
-interface Plan { path: Point3[]; until: number; cooldown: number; target?: string | number; replan: number }
+interface Plan { path: Point3[]; until: number; cooldown: number; target?: string | number; replan: number; fails: number }
 const plans = new WeakMap<Mission,Map<number,Plan>>();
 function planOf(mission: Mission, id: number) {
   let all = plans.get(mission);
   if (!all) plans.set(mission,all = new Map());
   let plan = all.get(id);
-  if (!plan) all.set(id,plan = {path:[],until:0,cooldown:0,replan:0});
+  if (!plan) all.set(id,plan = {path:[],until:0,cooldown:0,replan:0,fails:0});
   return plan;
 }
 
@@ -47,10 +47,20 @@ const roomAt = (layout: Layout, p: Point3) => surfaceAt(geometryFor(layout),p.x,
 const near = (a: Point3, b: Point3, reach: number) => Math.hypot(a.x-b.x,a.z-b.z) <= reach && Math.abs(a.y-b.y) < 1.2;
 const feet = (p: Player): Point3 => ({x:p.x,y:p.feetY ?? 0,z:p.z});
 // Plan a walk from where it stands, on the planner operators' routes use.
+// Should it ever be somewhere no route leads from, after a few tries it is
+// back at its nest.
 function walkTo(layout: Layout, g: Gnawer, plan: Plan, to: Point3) {
   const path = route(geometryFor(layout),g,to,[0.25,0],0.6);
   plan.path = path ? path.slice(1) : [];
+  plan.fails = path ? 0 : plan.fails+1;
+  if (plan.fails >= 4) { Object.assign(g,{x:g.nest.x,y:g.nest.y,z:g.nest.z}); plan.fails = 0; }
   return !!path;
+}
+// Send a roaming Gnawer somewhere (for tests): it walks there and waits.
+export function sendTo(layout: Layout, mission: Mission, g: Gnawer, to: Point3) {
+  const plan = planOf(mission,g.id);
+  g.mode = 'roam'; plan.until = 60;
+  return walkTo(layout,g,plan,to);
 }
 // Salvage an operator carries (not the flashlight, not bought gear).
 function loot(layout: Layout, mission: Mission, p: Player) {
@@ -148,7 +158,7 @@ export function stepGnawers(layout: Layout, state: Snapshot, mission: Mission, d
         else if (!g.carry) scare(layout,state,mission,g,recoil);
       }
     }
-    move(g,plan,speeds[g.mode]*fast,dt);
+    move(layout,g,plan,speeds[g.mode]*fast,dt);
     if (g.carry) {
       const h = mission.haul.find(e => e.id === g.carry);
       if (h) Object.assign(h,{x:g.x,y:g.y+0.1,z:g.z});
@@ -203,17 +213,24 @@ function decide(layout: Layout, mission: Mission, g: Gnawer, plan: Plan, prey: P
   if (!room || !walkTo(layout,g,plan,anchor(room))) plan.until = 1;
 }
 
-// Along its path at `speed`, turning to face the way it goes.
-function move(g: Gnawer, plan: Plan, speed: number, dt: number) {
+// Along its path at `speed`, turning to face the way it goes. Its height
+// follows the floor beneath it, a little at a time, as an operator's does: a
+// path keeps only its corners, and one leg can run along a landing and then
+// down a flight, so easing from one corner's height to the next would sink
+// it into the landing.
+function move(layout: Layout, g: Gnawer, plan: Plan, speed: number, dt: number) {
+  const geometry = geometryFor(layout);
   let left = speed*dt;
   while (left > 0 && plan.path.length) {
     const to = plan.path[0], dx = to.x-g.x, dz = to.z-g.z, d = Math.hypot(dx,dz);
-    if (d < 1e-6) { g.y = to.y; plan.path.shift(); continue; }
-    const step = Math.min(left,d), f = step/d;
-    g.x += dx*f; g.z += dz*f; g.y += (to.y-g.y)*f;
+    if (d < 1e-6) { plan.path.shift(); continue; }
+    const step = Math.min(left,d,0.25), f = step/d;
+    g.x += dx*f; g.z += dz*f;
+    const floor = surfaceAt(geometry,g.x,g.z,g.y);
+    g.y = floor ? surfaceHeight(floor,g.x,g.z) : g.y+(to.y-g.y)*f;
     g.yaw = Math.atan2(-dx,-dz);
     left -= step;
-    if (step >= d-1e-9) { g.y = to.y; plan.path.shift(); }
+    if (step >= d-1e-9) plan.path.shift();
   }
   g.x = Math.round(g.x*100)/100; g.z = Math.round(g.z*100)/100; g.y = Math.round(g.y*100)/100; g.yaw = Math.round(g.yaw*100)/100;
 }

@@ -224,6 +224,10 @@ export class Simulation {
 
   constructor(layout?: Layout, mode: 'solo' | 'coop' = 'coop', start: 'home' | 'inside' = 'home') {
     this.layout = layout;
+    if (layout) {
+      let s = (layout.seed ^ 0x5bd1e995) >>> 0;
+      this.random = () => { s = (Math.imul(s ^ (s >>> 15),0x2c1b3c6d)+0x6d2b79f5) >>> 0; return ((s ^ (s >>> 13)) >>> 0)/2**32; };
+    }
     this.start = layout && !layout.tour ? start : 'inside';
     if (layout) {
       this.state.opened = [];
@@ -252,6 +256,8 @@ export class Simulation {
   state: Snapshot = { round: crypto.randomUUID(), update: 0, players: [], lamp: { x: 0, y: 0.14, z: 2, yaw: 0, pitch: 0, on: true, owner: null } };
   inputs = new Map<number, Input>();
   // Where the Diver wanders and which chain clip it rattles. Tests replace it.
+  // Chance for creatures (the Diver's chain clips, the Gnawers' wandering),
+  // seeded from the layout so a run repeats from its seed. Tests replace it.
   random: () => number = Math.random;
   // Battery drained since the flashlight's charge last dropped a whole
   // second. The charge itself moves in whole seconds so a lit flashlight
@@ -386,11 +392,15 @@ export class Simulation {
     return out;
   }
 
-  // A Gnawer's bite knocks salvage (not the flashlight, not bought gear) out
-  // of the victim's hand, to their feet.
+  // A Gnawer's bite tears salvage (not the flashlight, not bought gear) from
+  // the victim, to their feet: what is in hand if it is salvage, otherwise
+  // the first piece carried.
   private knock(p: Player) {
-    const item = selected(p), h = item && item !== lampSlot ? this.state.mission?.haul.find(e => e.id === item && e.owner === p.id) : undefined;
-    if (!item || !h || h.kind) return;
+    const haul = this.state.mission?.haul ?? [];
+    const loot = (item: string | null) => !!item && item !== lampSlot && haul.some(e => e.id === item && e.owner === p.id && !e.kind);
+    const held = selected(p), item = loot(held ?? null) ? held! : slotsOf(p).find(loot);
+    const h = item && haul.find(e => e.id === item);
+    if (!item || !h) return;
     Object.assign(h,{owner:null,x:p.x,y:p.feetY ?? 0,z:p.z,place:placeOf(p)});
     this.release(p,item);
     return item;

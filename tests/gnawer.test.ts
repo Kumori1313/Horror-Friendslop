@@ -2,12 +2,12 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { anchor, connections, geometryFor } from '../src/layout.ts';
 import { catalog, healthOf, maxHealth, recoverAfter, recoverTo, revivedHealth, type Gnawer, type Mission } from '../src/mission.ts';
-import { obstaclesAt, roomTemplates, surfaceAt } from '../src/room-templates.ts';
+import { obstaclesAt, roomTemplates, surfaceAt, surfaceHeight } from '../src/room-templates.ts';
 import { clearAt, slotsOf, type Player } from '../src/room.ts';
 import { spawnSalvage } from '../src/salvage.ts';
 import { generateLayout } from '../src/server/generate-layout.ts';
 import { hurt } from '../src/server/mission.ts';
-import { biteReach, flareFear } from '../src/server/gnawers.ts';
+import { biteReach, flareFear, sendTo } from '../src/server/gnawers.ts';
 import { Simulation } from '../src/server/simulation.ts';
 import { goInside } from './travel.ts';
 
@@ -184,4 +184,38 @@ test('a Gnawer nips and runs: next to someone it can\'t rob, it bites once and b
   for (let i=0;i<90;i++) { if (i === 0) stand(sim,p,{x:g.x+0.6,y:g.y,z:g.z}); sim.tick(1/30); bites = g.bites ?? 0; }
   assert.equal(bites,1,'one bite in three seconds');
   assert.ok(healthOf(p) >= maxHealth-16);
+});
+
+test('a Gnawer walks on the floor the whole way down a stairwell, never sinking into a landing or the stairs', () => {
+  const {sim,mission,layout,player,gnawer} = crew();
+  stand(sim,player(1),{x:0,y:0,z:2}); stand(sim,player(2),{x:1,y:0,z:2});
+  const g = gnawer(), geometry = geometryFor(layout), stair = layout.rooms.find(r => r.kind === 'stairwell')!;
+  const own = geometry.surfaces.filter(s => s.room === stair.id && !s.rise), upper = own.find(s => s.y > stair.y+1)!, lower = own.find(s => s.y === stair.y)!;
+  // From the far side of the upper landing to the lower one.
+  Object.assign(g,{x:upper.x,y:upper.y,z:upper.z});
+  assert.ok(sendTo(layout,mission,g,{x:lower.x,y:lower.y,z:lower.z}),'a way down');
+  let sunk = 0;
+  for (let i=0;i<300 && Math.abs(g.y-lower.y) > 1e-6;i++) {
+    sim.tick(1/30);
+    const floor = surfaceAt(geometry,g.x,g.z,g.y);
+    if (!floor || Math.abs(surfaceHeight(floor,g.x,g.z)-g.y) > 0.02) sunk++;
+  }
+  assert.equal(sunk,0,'off the floor on some ticks');
+  assert.ok(Math.abs(g.y-lower.y) < 1e-6,'reached the lower landing');
+});
+
+test('a bite takes salvage from anywhere in the inventory, not only the hand', () => {
+  const {sim,mission,layout,player,gnawer} = crew();
+  const g = gnawer(), p = player(1);
+  stand(sim,player(2),{x:1,y:0,z:2});
+  const item = spawnSalvage(layout)[0];
+  pickUp(sim,p,item.id);
+  // The flashlight in hand, the salvage in the bag.
+  stand(sim,p,{x:0,y:0,z:2}); sim.act(1,'take'); sim.act(1,'select',{slot:slotsOf(p).indexOf('lamp')});
+  assert.equal(slotsOf(p)[p.hand!],'lamp');
+  stand(sim,p,{x:g.x+biteReach*0.6,y:g.y,z:g.z});
+  sim.tick(1/30);
+  assert.equal(slotsOf(p).includes(item.id),false,'torn from the bag');
+  assert.equal(g.carry,item.id);
+  assert.equal(mission.haul.find(e => e.id === item.id)!.gnawer,g.id);
 });

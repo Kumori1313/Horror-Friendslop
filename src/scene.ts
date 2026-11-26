@@ -346,23 +346,29 @@ export function createScene(canvas: HTMLCanvasElement, generated = false) {
   }
   let previousOwner: number | null | undefined, previousFlight = false;
   let portals: PortalGraph | undefined;
-  // Remote operators and a flashlight they carry move once per snapshot, up
-  // to 100 ms apart for a guest. Glide from where each was drawn to its new
-  // position over one snapshot interval instead of jumping.
-  interface Track { from: T.Vector3; to: T.Vector3; at: number; span: number; update: number }
+  // Remote operators, a flashlight they carry and the Gnawers move once per
+  // snapshot: up to 100 ms apart for a guest, every simulation tick for the
+  // host or solo. Each frame, close the gap from where it was drawn toward
+  // its latest position over about one snapshot interval, however often new
+  // positions arrive. (Restarting a glide at each new position stalls it
+  // when positions arrive as often as frames are drawn, until it snaps.)
+  interface Track { to: T.Vector3; at: number; gap: number; update: number; drawn: number }
   const tracks = new Map<string,Track>();
   function glide(key: string, update: number, x: number, y: number, z: number, now: number, shown?: T.Vector3) {
     let track = tracks.get(key);
     const target = new T.Vector3(x,y,z);
-    if (!track || track.to.distanceTo(target) > 3) {
-      track = {from:target.clone(),to:target,at:now,span:100,update};
-      tracks.set(key,track);
-    } else if (update !== track.update && !track.to.equals(target)) {
-      track.span = Math.max(16,Math.min(250,now-track.at));
-      track.from = shown ? shown.clone() : track.to.clone();
-      track.to = target; track.at = now; track.update = update;
-    } else track.update = update;
-    return track.from.clone().lerp(track.to,Math.min(1,(now-track.at)/track.span));
+    if (!track || !shown || track.to.distanceTo(target) > 3) {
+      tracks.set(key,{to:target,at:now,gap:100,update,drawn:now});
+      return target.clone();
+    }
+    if (update !== track.update && !track.to.equals(target)) {
+      track.gap = track.gap*0.7+Math.max(16,Math.min(250,now-track.at))*0.3;
+      track.to = target; track.at = now;
+    }
+    track.update = update;
+    const dt = Math.max(0,now-track.drawn);
+    track.drawn = now;
+    return shown.clone().lerp(track.to,1-Math.exp(-dt/(track.gap*0.5)));
   }
   const viewProjection = new T.Matrix4();
   const stats = {scale:1, drawn:0, rooms:0, calls:0};
@@ -750,5 +756,7 @@ export function createScene(canvas: HTMLCanvasElement, generated = false) {
     camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix();
   }
   resize(); window.addEventListener('resize',resize);
-  return Object.assign(render,{stats,previews,swing:() => { ownSwing = performance.now(); }});
+  // For testing builds: where each Gnawer's model is drawn, and whether it shows.
+  const gnawersDrawn = () => [...gnawerModels].map(([id,m]) => ({id,x:m.group.position.x,y:m.group.position.y,z:m.group.position.z,visible:m.group.visible,yaw:m.group.rotation.y}));
+  return Object.assign(render,{stats,previews,gnawersDrawn,swing:() => { ownSwing = performance.now(); }});
 }

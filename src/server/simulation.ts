@@ -55,6 +55,12 @@ export function moveOperator(p: Player, input: Input, dt: number, geometry: Geom
 // stops them. In water they sink slowly. Returns the speed of a landing.
 export function fall(p: Player, dt: number, g: Geometry | undefined) {
   if (p.vy === undefined || !g) return;
+  // Rolling ground is solid all the way down: never be under it.
+  const terrain = terrainAt(g,p.x,p.z);
+  if (terrain !== undefined && terrain > (p.feetY ?? 0)) {
+    p.feetY = terrain;
+    if (p.vy <= 0) { delete p.vy; return 0; }
+  }
   const feet = p.feetY ?? 0, floor = groundBelow(g,p.x,p.z,feet);
   let vy = p.vy-gravity*dt;
   const level = g.water ? waterLevel(g.water,p.x,p.z) : undefined;
@@ -113,6 +119,9 @@ function stepTo(p: Player, x: number, z: number, g: Geometry | undefined, opened
     // feet; otherwise drift on above whatever lies below, never into a wall
     // or rising ground.
     if (!standable(g,x,z,feet,opened) || groundAbove(g,x,z,feet)) return;
+    // Into rolling ground a little above the feet: onto it, never into it.
+    const terrain = terrainAt(g,x,z);
+    if (terrain !== undefined && terrain > feet) { Object.assign(p,{x,z,feetY:terrain}); if (p.vy <= 0) delete p.vy; return; }
     if (p.vy <= 0 && support && surfaceHeight(support,x,z) >= feet) { Object.assign(p,{x,z,feetY:surfaceHeight(support,x,z)}); delete p.vy; return; }
     p.x = x; p.z = z;
     return;
@@ -143,6 +152,12 @@ function stepTo(p: Player, x: number, z: number, g: Geometry | undefined, opened
   if (standable(g,x,z,feet,opened)) Object.assign(p,{x,z,vy:0});
 }
 
+// The height of rolling ground here, if any.
+function terrainAt(g: Geometry, x: number, z: number) {
+  let top: number | undefined;
+  for (const s of g.surfaces) if (s.field && Math.abs(x-s.x) <= s.w/2 && Math.abs(z-s.z) <= s.d/2) top = Math.max(top ?? -Infinity,surfaceHeight(s,x,z));
+  return top;
+}
 // Rolling ground rising more than a step above the feet here: a slope's
 // face, solid to a falling operator.
 function groundAbove(g: Geometry, x: number, z: number, feet: number) {

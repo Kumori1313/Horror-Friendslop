@@ -210,3 +210,31 @@ test('salvage thrown into a pit, or dropped while falling, is lost', () => {
   run(sim,4);
   assert.equal(items(layout,mission).some(i => i.id === b.id),false,'dropped down the pit');
 });
+
+test('jumping into a slope too steep to climb never puts an operator under the ground', async () => {
+  const { outdoors } = await import('../src/places.ts');
+  const { fieldGrade, fieldHeight, maxGrade } = await import('../src/room-templates.ts');
+  let tried = 0, under = 0;
+  for (const seed of [1,19,77]) {
+    const map = outdoors(seed), f = map.ground;
+    // Steep spots inside the boundary walls.
+    for (let i=0;i<f.n*f.n && tried < 40*(seed === 77 ? 3 : seed === 19 ? 2 : 1);i+=37) {
+      const x = f.x0+(i % f.n), z = f.z0+Math.floor(i/f.n);
+      if (Math.max(Math.abs(x),Math.abs(z)) > 60 || fieldGrade(f,x,z) < (maxGrade*1.3)**2) continue;
+      // Uphill: the way the ground rises fastest.
+      const gx = fieldHeight(f,x+0.5,z)-fieldHeight(f,x-0.5,z), gz = fieldHeight(f,x,z+0.5)-fieldHeight(f,x,z-0.5), len = Math.hypot(gx,gz);
+      const ux = gx/len, uz = gz/len;
+      for (const [fx,fz] of [[ux,uz],[uz,-ux]]) {
+        tried++;
+        const sx = x-ux*0.8, sz = z-uz*0.8;
+        const p: Player = {id:1,connected:true,x:sx,z:sz,feetY:fieldHeight(f,sx,sz),yaw:Math.atan2(-fx,-fz),pitch:0};
+        for (let k=0;k<120;k++) {
+          moveOperator(p,{forward:1,right:0,yaw:p.yaw,pitch:0,jump:true},dt,map.geometry);
+          if (p.feetY! < fieldHeight(f,p.x,p.z)-0.01) { under++; break; }
+        }
+      }
+    }
+  }
+  assert.ok(tried >= 60,'enough steep spots: '+tried);
+  assert.equal(under,0,'under the ground in '+under+' of '+tried+' tries');
+});

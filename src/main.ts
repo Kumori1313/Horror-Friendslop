@@ -60,6 +60,8 @@ function start(render: ReturnType<typeof createScene>, mode?: Crew | 'solo', sce
   const operator = (seat: number) => crew?.names[seat] ?? 'Operator '+seat;
   const hud = missionHud(preferences,operator);
   const testing = import.meta.env.DEV || import.meta.env.MODE === 'diagnostics';
+  // Testing builds: let browser tests compare what is drawn with the state.
+  if (testing) Object.assign(window,{relayDebug:{state:() => state,gnawersDrawn:render.gnawersDrawn}});
   const diagnostics = testing
     ? mountDiagnostics(sceneStarted,solo ? undefined : () => { if (state) network?.interrupt(2000); },render.stats,
       solo || crew?.host ? () => { const host = connection as {grant?: (amount: number) => void}; host.grant?.(200); } : undefined)

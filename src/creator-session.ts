@@ -5,6 +5,7 @@ import { generateLayout } from './server/generate-layout.ts';
 import { Simulation } from './server/simulation.ts';
 import { actions, command } from './room.ts';
 import type { Action, Command, Input, Snapshot } from './room.ts';
+import { Held, seenBy, Sent } from './wire.ts';
 
 export interface Crew {
   client: SupabaseClient;
@@ -20,11 +21,14 @@ export interface Crew {
 const grace = 20000;
 const idle = (): Input => ({forward:0,right:0,yaw:0,pitch:-0.12});
 type Control = {seq:number; action:Action} & Command;
-type GuestFrame = {type:'hello'|'control'; version:number; peer:string; round:string; input:Input; action?:Control; sent:number};
+// `have`: the snapshot the guest last applied, which the host may patch.
+type GuestFrame = {type:'hello'|'control'; version:number; peer:string; round:string; input:Input; action?:Control; sent:number; have?:{epoch:number; update:number}};
+// A snapshot goes whole (`state`) or as a patch (`patch`, against `base`)
+// within the host session `epoch` (see wire.ts).
 type HostFrame =
   | {type:'ready'}
-  | {type:'welcome'; layout:Layout; state:Snapshot; ack:number; peer:string}
-  | {type:'state'; state:Snapshot; ack:number; echo:number};
+  | {type:'welcome'; layout:Layout; state:Snapshot; ack:number; peer:string; epoch:number}
+  | {type:'state'; state?:Snapshot; base?:number; patch?:unknown; ack:number; echo:number; epoch:number};
 interface Checkpoint { seed:number; state:Snapshot; time:number; ack:number; peer:string }
 
 function validInput(v: Input) {
@@ -67,6 +71,10 @@ export class CreatorSession {
   private lastSample = performance.now();
   private bytesIn = 0;
   private bytesOut = 0;
+  // Snapshots sent (host) and held (guest), for patches.
+  private readonly sent = new Sent();
+  private readonly held = new Held();
+  private have?: {epoch:number; update:number};
   constructor(crew: Crew, events: Events) {
     this.crew = crew;
     this.events = events;
@@ -157,11 +165,13 @@ export class CreatorSession {
       if (!sim.inputs.has(2)) sim.join(2);
       sim.state.players.find(p=>p.id===2)!.connected=true;
       this.lastPeer=now;
-      this.send({type:'welcome',layout:sim.layout!,state:sim.state,ack:this.ack,peer:m.peer});
+      this.have=undefined;
+      this.send({type:'welcome',layout:sim.layout!,state:this.sent.frame(seenBy(sim.state,2)).state!,ack:this.ack,peer:m.peer,epoch:this.sent.epoch});
       return;
     }
     if (m.type!=='control' || m.round!==this.round || m.peer!==this.remotePeer || !validInput(m.input)) return;
     this.lastPeer=now; this.echo=m.sent;
+    if (m.have && Number.isSafeInteger(m.have.epoch) && Number.isSafeInteger(m.have.update)) this.have=m.have;
     sim.state.players.find(p=>p.id===2)!.connected=true;
     sim.inputs.set(2,m.input);
     if (m.action && Number.isSafeInteger(m.action.seq) && m.action.seq===this.ack+1 && actions.includes(m.action.action)) {
@@ -176,6 +186,7 @@ export class CreatorSession {
     if (m.type==='welcome') {
       if (m.peer!==this.peer || m.layout.version!==generatorVersion) return;
       if (this.round && m.state.round!==this.round) { this.end('Host session ended',true); return; }
+      this.held.whole(m.epoch,m.state);
       const first = !this.round || !!this.downSince;
       this.round=m.state.round;
       this.seq=Math.max(this.seq,m.ack);
@@ -183,14 +194,18 @@ export class CreatorSession {
       this.events.joined(2,{round:this.round,token:'guest'},m.layout);
       this.events.snapshot(m.state,first);
     } else {
-      if (!this.round || m.state.round!==this.round || m.state.update<=this.latest) return;
+      let state: Snapshot | undefined;
+      try { state = m.state ? this.held.whole(m.epoch,m.state) : this.held.patched(m.epoch,m.base!,m.patch); } catch { state = undefined; }
+      if (!state) return;
+      m = {...m,state};
+      if (!this.round || m.state!.round!==this.round || m.state!.update<=this.latest) return;
       // The host moved on to the next expedition: ask again for its facility.
-      const facility = m.state.mission?.contract.layout;
+      const facility = state.mission?.contract.layout;
       if (facility!==undefined && facility!==this.guestLayout && now-this.lastHello>1000) { this.lastHello=now; this.hello(); }
-      this.events.snapshot(m.state,!!this.downSince);
+      this.events.snapshot(state,!!this.downSince);
       if (m.echo>this.lastEcho) { this.metrics.rtt=now-m.echo; this.lastEcho=m.echo; }
     }
-    this.latest=m.state.update;
+    this.latest=m.state!.update;
     this.pending=this.pending.filter(a=>a.seq>m.ack);
     this.lastPeer=now;
     if (this.downSince) { this.metrics.recovery=now-this.downSince; this.downSince=0; }
@@ -233,7 +248,7 @@ export class CreatorSession {
         // Sleeping rooms send a one-second heartbeat. Active rooms send at most 10 snapshots/s.
         const signature=JSON.stringify([sim.state.players,sim.state.lamp,sim.state.opened,sim.state.mission,this.ack]);
         if (signature!==this.lastSignature || now-this.lastSend>=950) {
-          this.send({type:'state',state:sim.state,ack:this.ack,echo:this.echo});
+          this.send({type:'state',...this.sent.frame(seenBy(sim.state,2),this.have),ack:this.ack,echo:this.echo,epoch:this.sent.epoch});
           this.lastSend=now; this.lastSignature=signature;
         }
       }
@@ -247,7 +262,8 @@ export class CreatorSession {
         const signature=JSON.stringify(input);
         if (!this.pending.length && signature===this.lastSignature &&
             now-this.lastSend<(input.forward || input.right ? 240 : 850)) return;
-        this.send({type:'control',peer:this.peer,round:this.round,version:generatorVersion,input,action:this.pending[0],sent:now});
+        this.send({type:'control',peer:this.peer,round:this.round,version:generatorVersion,input,action:this.pending[0],sent:Math.round(now),
+          have:this.latest>=0 ? {epoch:this.held.epoch,update:this.latest} : undefined});
         this.lastSignature=signature;
       }
       this.lastSend=now;

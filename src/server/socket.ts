@@ -7,6 +7,7 @@ import type { Layout } from '../layout.ts';
 import { Simulation } from './simulation.ts';
 import { actions, command } from '../room.ts';
 import type { Input, ServerMessage } from '../room.ts';
+import { quantize, seenBy } from '../wire.ts';
 
 function validInput(value: Input | undefined) {
   return value && [value.forward, value.right, value.yaw, value.pitch].every(Number.isFinite)
@@ -101,7 +102,7 @@ export function createLiveRoom(graceMs: number, onEmpty?: () => void, layout?: L
         stopWalking(seat.id);
         room.state.players.find(p => p.id === seat!.id)!.connected = true;
         send(ws, { type: 'joined', id: seat.id, ticket: { round: room.state.round, token: seat.token }, lastAction: seat.lastAction, layout:room.layout });
-        send(ws, { type: 'state', state: room.state });
+        send(ws, { type: 'state', state: quantize(seenBy(room.state,seat.id)) });
         return;
       }
       if (seat.ws !== ws) return;
@@ -139,11 +140,12 @@ export function createLiveRoom(graceMs: number, onEmpty?: () => void, layout?: L
     }
     if (!seats.size) { room = new Simulation(layout); shown = room.layout; onEmpty?.(); return; }
     room.tick(1 / 30);
-    for (const {ws,lastPong} of seats.values()) {
+    // Each seat gets the creatures where it looks, rounded (see wire.ts).
+    for (const {ws,lastPong,id} of seats.values()) {
       if (ws?.readyState !== WebSocket.OPEN) continue;
       if (now - lastPong > 10000) { ws.terminate(); continue; }
       if (room.state.update % 60 === 0) ws.ping();
-      if (ws.bufferedAmount < 8192) send(ws, { type: 'state', state: room.state });
+      if (ws.bufferedAmount < 8192) send(ws, { type: 'state', state: quantize(seenBy(room.state,id)) });
     }
   }, 1000 / 30);
   timer.unref();

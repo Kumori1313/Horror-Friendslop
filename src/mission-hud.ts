@@ -129,6 +129,8 @@ export function missionHud(preferences: Preferences, operator = (id: number) => 
   // Gnawers: a skitter of claws while one moves nearby, a snap of teeth at a bite.
   function gnawerCues(state: Snapshot, self: Player) {
     const m = state.mission!, now = performance.now();
+    // Elsewhere, a guest isn't sent them: start afresh on coming back.
+    if (placeOf(self) !== 'inside') { lastSeen.clear(); seenBites.clear(); return; }
     for (const g of m.gnawers ?? []) {
       const d = Math.hypot(g.x-self.x,g.z-self.z), heard = placeOf(self) === 'inside' && d < 12 && Math.abs(g.y-(self.feetY ?? 0)) < 3;
       const last = lastSeen.get(g.id), moving = !!last && Math.hypot(last.x-g.x,last.z-g.z) > 0.01;
@@ -170,6 +172,8 @@ export function missionHud(preferences: Preferences, operator = (id: number) => 
   let stalkersKnown: number | undefined, nextStep = 0, stepHeard = 0;
   function stalkerCues(state: Snapshot, self: Player) {
     const m = state.mission!, now = performance.now(), out = placeOf(self) === 'outside', all = m.stalkers ?? [];
+    // Elsewhere, a guest isn't sent them: start afresh on coming out.
+    if (!out) { stalkersKnown = undefined; seenCharges.clear(); stalkerSeen.clear(); return; }
     if (stalkersKnown !== undefined && all.length > stalkersKnown && out) { noise(0.25,1.6,180); noise(0.12,1.4,420); subtitle('A long howl from the hills'); }
     stalkersKnown = all.length;
     for (const s of all) {

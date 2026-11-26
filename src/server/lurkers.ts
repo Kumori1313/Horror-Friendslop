@@ -25,7 +25,7 @@ export const linger = 4;
 // the water. Nobody within `fordSafe` of a ford's middle is grabbed.
 // Holding someone, it backs toward the middle of the channel at `retreat`,
 // so a victim has some seconds before the deep water closes over them.
-export const hearMoving = 16, hearStill = 6, grabReach = 6, grabHeight = 3.5, dragSpeed = 1.1, retreat = 0.8, sinkTime = 15, grabDamage = 10, flareFear = 4, edge = 10, shallowest = 0.6, ashore = 3, climb = 2, fordSafe = 9;
+export const hearMoving = 16, hearStill = 6, grabReach = 9, grabHeight = 5, dragSpeed = 1.1, retreat = 0.8, sinkTime = 15, grabDamage = 10, flareFear = 4, edge = 10, shallowest = 0.6, ashore = 3, climb = 2, fordSafe = 9;
 const enraged = 1.4, depthNeeded = 2;
 
 // `heard`: where it last heard someone, until it has been there and waited;

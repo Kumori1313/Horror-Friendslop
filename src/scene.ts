@@ -220,7 +220,7 @@ export function createScene(canvas: HTMLCanvasElement, generated = false) {
   // the water to its victim.
   const lurkerSkin = new T.MeshStandardMaterial({color:0x101615,roughness:0.35,metalness:0.2});
   const lurkerEye = new T.MeshBasicMaterial({color:0xd8dcc4});
-  const lurkerModels = new Map<number,{group: T.Group; arm: T.Group}>();
+  const lurkerModels = new Map<number,{group: T.Group; arm: T.Group; shaft: T.Object3D; hand: T.Object3D}>();
   function lurkerModel(id: number) {
     let model = lurkerModels.get(id);
     if (model) return model;
@@ -229,13 +229,16 @@ export function createScene(canvas: HTMLCanvasElement, generated = false) {
     box(0,0.05,-1.25,0.7,0.4,0.6,lurkerSkin,group);
     for (const z of [-0.6,-0.1,0.4,0.9]) box(0,0.28,z,0.08,0.18,0.3,lurkerSkin,group);
     for (const side of [-1,1]) box(side*0.18,0.27,-1.35,0.09,0.05,0.09,lurkerEye,group);
-    // The arm: from its head, pointing along its local -z, stretched to reach.
+    // The arm: from its head, pointing along its local -z; the shaft (a
+    // metre long, its far end at z -1) stretches to reach and the hand sits
+    // at its end.
     const arm = new T.Group(); arm.position.set(0,0.1,-1.4); group.add(arm);
-    box(0,0,-0.5,0.16,0.16,1,lurkerSkin,arm);
-    box(0,0,-1.05,0.32,0.08,0.22,lurkerSkin,arm);
+    const shaft = new T.Group(); arm.add(shaft);
+    box(0,0,-0.5,0.16,0.16,1,lurkerSkin,shaft);
+    const hand = box(0,0,-1.05,0.32,0.08,0.22,lurkerSkin,arm);
     arm.visible = false;
     scene.add(group);
-    model = {group,arm};
+    model = {group,arm,shaft,hand};
     lurkerModels.set(id,model);
     return model;
   }
@@ -597,7 +600,8 @@ export function createScene(canvas: HTMLCanvasElement, generated = false) {
           model.group.updateMatrixWorld();
           const from = model.arm.getWorldPosition(new T.Vector3()), to = new T.Vector3(victim.x,(victim.feetY ?? 0)+1.1,victim.z), d = from.distanceTo(to);
           model.arm.lookAt(to); model.arm.rotateY(Math.PI);
-          model.arm.scale.set(1,1,Math.max(0.3,d/1.1));
+          const reach = Math.max(0.3,d-0.15);
+          model.shaft.scale.set(1,1,reach); model.hand.position.z = -reach-0.05;
         }
       }
       for (const [id,model] of lurkerModels) if (!state.mission?.lurkers?.some(l => l.id === id)) { scene.remove(model.group); lurkerModels.delete(id); }

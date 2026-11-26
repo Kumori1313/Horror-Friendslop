@@ -5,7 +5,9 @@ export const cell = 4, storey = 4, doorWidth = 2.4, doorHeight = 2.5;
 export type Side = 'north' | 'east' | 'south' | 'west';
 export interface Point3 { x:number; y:number; z:number }
 export interface Patch { x:number; z:number; w:number; d:number }
-export interface Surface extends Patch { y:number; rise?:number; along?:'x'; stairs?:boolean; catwalk?:boolean; field?:Heightfield }
+// `solid`: in a room with a pit, built up from the pit's floor (a block of
+// wall fills beneath it) rather than standing over the drop.
+export interface Surface extends Patch { y:number; rise?:number; along?:'x'; stairs?:boolean; catwalk?:boolean; solid?:boolean; field?:Heightfield }
 // Ground shaped by a height map: `n` by `n` heights, `step` metres apart,
 // from the corner (x0, z0). A surface with a field covers the whole map; its
 // `y` is below the lowest height, so the ground is solid all the way down.
@@ -109,7 +111,7 @@ const templates = {
   // A casting pit 7 m deep beside a ground-floor working platform. Unrailed
   // stairs climb along the pit's edge to bare catwalks on the upper walls.
   foundry:{name:'Foundry gantry',height:7.6,depth:7,footprint:[patch(4,2,12,8)],pad:{x:0,y:0,z:2},surfaces:[
-    {...patch(0,2,4,8),y:0},{...patch(5.4,5.2,6.8,1.6),y:0,rise:4,along:'x',stairs:true},
+    {...patch(0,2,4,8),y:0,solid:true},{...patch(5.4,5.2,6.8,1.6),y:0,rise:4,along:'x',stairs:true,solid:true},
     {...patch(9.4,5.2,1.2,1.6),y:4},{...patch(9.2,1.2,1.6,6.4),y:4},{...patch(6.2,-1.2,4.4,1.6),y:4},
     {...patch(6,2,8,8),y:-7},
   ],props:[prop('machine',0.8,-1,1.2,1.2,1.8),prop('crate',-1.2,2,0.8,0.8,0.5),prop('tank',6,1,2.4,2.4,2.5,-7)],sockets:[
@@ -330,6 +332,16 @@ export function assembleTemplates(rooms:Placement[],links:(TemplateLink & {door?
   for (const room of rooms) {
     const t = orient(room.template,room.turn);
     for (const s of t.surfaces) g.surfaces.push({...s,x:room.x+s.x,z:room.z+s.z,y:room.y+s.y,room:room.id});
+    // Solid floors and flights in a pit room stand on blocks of wall from the
+    // pit's floor up to just under their slab, so nothing below is open. Each
+    // stops 10 cm inside the room, clear of its walls and their skirting.
+    for (const s of t.surfaces) if (t.depth && s.solid) {
+      const f = t.footprint.find(p => Math.abs(s.x-p.x) <= p.w/2 && Math.abs(s.z-p.z) <= p.d/2)!;
+      const x0 = Math.max(s.x-s.w/2,f.x-f.w/2+0.1), x1 = Math.min(s.x+s.w/2,f.x+f.w/2-0.1);
+      const z0 = Math.max(s.z-s.d/2,f.z-f.d/2+0.1), z1 = Math.min(s.z+s.d/2,f.z+f.d/2-0.1);
+      const top = Math.min(s.y,s.y+(s.rise ?? 0))-0.13;
+      g.walls.push({x:room.x+(x0+x1)/2,z:room.z+(z0+z1)/2,w:x1-x0,d:z1-z0,y:room.y-t.depth,h:top+t.depth,room:room.id,inward:1});
+    }
     for (const p of t.props ?? []) g.props.push({kind:p.kind,x:room.x+p.x,z:room.z+p.z,w:p.w,d:p.d,y:room.y+(p.y??0),h:p.h,room:room.id});
     const sockets = t.sockets.filter(s=>openAll || open.has(room.id+'/'+s.name));
     for (const f of t.footprint) {

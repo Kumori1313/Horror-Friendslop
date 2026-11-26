@@ -57,9 +57,10 @@ export function drawTemplates(g:TemplateGeometry, emit:RoomBox, accent:(room:str
     // The trim stands 1.25 cm proud of the room's face and runs 1.25 cm past
     // each end, so its ends never lie flush with the wall's. It stays on the
     // room's side of the boundary, clear of the neighbour's trim. Only walls
-    // that stand on a floor get one, not the wall above a doorway.
+    // that stand on a floor get one, not the wall above a doorway, and only
+    // thin walls: not the solid blocks under a pit room's floors.
     const standing = g.surfaces.some(s => s.room === w.room && !s.rise && Math.abs(s.y-w.y) < 1e-6 && Math.abs(s.x-w.x) < (s.w+w.w)/2+0.01 && Math.abs(s.z-w.z) < (s.d+w.d)/2+0.01);
-    if (w.h>1.2 && standing) {
+    if (w.h>1.2 && standing && Math.min(w.w,w.d) <= 0.1) {
       const alongX = w.w>w.d, depth = (alongX?w.d:w.w)+0.0125, shift = w.inward*0.00625;
       as('trim')(steel,alongX?w.x:w.x+shift,w.y+0.42,alongX?w.z+shift:w.z,alongX?w.w+0.025:depth,0.1,alongX?depth:w.d+0.025);
     }

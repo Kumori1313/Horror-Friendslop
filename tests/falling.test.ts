@@ -174,3 +174,15 @@ test('the settling pit and the foundry join all their doorways, turn up in facil
   }
   assert.ok(pits > 20 && foundries > 20,'pits '+pits+', foundries '+foundries+' in 60 facilities');
 });
+
+test('nothing in the foundry opens into the void: its whole footprint has a floor at the bottom or stands solid down to it', () => {
+  const {room,layout} = withRoom('foundry'), g = geometryFor(layout), t = roomTemplates.foundry, bottom = room.y-t.depth!;
+  const f = g.roofs.find(r => r.room === room.id)!;
+  const open: string[] = [];
+  for (let x=f.x-f.w/2+0.2;x<f.x+f.w/2-0.15;x+=0.25) for (let z=f.z-f.d/2+0.2;z<f.z+f.d/2-0.15;z+=0.25) {
+    const floor = g.surfaces.some(s => s.room === room.id && Math.abs(s.y-bottom) < 1e-6 && Math.abs(x-s.x) <= s.w/2 && Math.abs(z-s.z) <= s.d/2);
+    const block = g.walls.some(w => w.room === room.id && w.y <= bottom+1e-6 && Math.min(w.w,w.d) > 0.1 && Math.abs(x-w.x) <= w.w/2 && Math.abs(z-w.z) <= w.d/2);
+    if (!floor && !block) open.push(x.toFixed(2)+','+z.toFixed(2));
+  }
+  assert.deepEqual(open.slice(0,5),[]);
+});

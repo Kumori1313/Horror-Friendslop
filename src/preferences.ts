@@ -5,13 +5,16 @@ export interface Preferences {
   reducedMotion: boolean;
   // Go fullscreen when play starts on a touch screen.
   fullscreen: boolean;
+  // Creatures drawn with their Blender models; off, the simple shapes
+  // (cheaper to draw, and the models are never downloaded).
+  creatureModels: boolean;
 }
 
 export function bindPreferences(pause: () => void) {
   const key = 'relay-room-preferences';
   const preferences: Preferences = {
     sensitivity:1, volume:0.6, captions:true,
-    reducedMotion:matchMedia('(prefers-reduced-motion: reduce)').matches, fullscreen:true,
+    reducedMotion:matchMedia('(prefers-reduced-motion: reduce)').matches, fullscreen:true, creatureModels:true,
   };
   const dialog = document.querySelector<HTMLDialogElement>('#preferences')!;
   let saved: Partial<Preferences> = {};
@@ -31,7 +34,7 @@ export function bindPreferences(pause: () => void) {
     display();
     field.oninput = () => { preferences[name] = field.valueAsNumber; display(); save(); };
   }
-  for (const name of ['captions','reducedMotion','fullscreen'] as const) {
+  for (const name of ['captions','reducedMotion','fullscreen','creatureModels'] as const) {
     const field = dialog.querySelector<HTMLInputElement>('#'+name)!;
     if (typeof saved[name] === 'boolean') preferences[name] = saved[name];
     field.checked = preferences[name];

@@ -88,6 +88,7 @@ pre { margin-bottom: 0; line-height: 1.5 }
 #preferences label { display: block; margin: .85rem 0 .35rem }
 #preferences input[type="range"] { width: 100%; accent-color: #e7b667 }
 #preferences output { float: right; font-family: monospace }
+#preferences label small { display: block; margin: .2rem 0 0 1.6rem; color: #b9c4bd; font-size: .82rem }
 #preferences button { margin-top: .8rem }
 #sound-caption { color: #d0dace }
 @media (max-width: 520px) {

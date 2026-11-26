@@ -1,0 +1,16 @@
+# Model credits
+
+Relay Room's creature models were made for this game and are released with
+the rest of it under the MIT License (see `LICENSE` in the repository,
+Copyright (c) 2026 Cloudy). Each was built from scratch in Blender by Codex,
+an AI coding agent, at the project owner's request. They contain no textures,
+images, scans or third-party models: every shape, material and animation was
+made for Relay Room. The editable Blender sources live in the repository under
+`art/creatures/`.
+
+| Shipped file | Source | Contents | License |
+| --- | --- | --- | --- |
+| `lurker.glb` | `art/creatures/lurker/lurker.blend` | The river Lurker: a skinned hull with a swim rig, a reach shaft and a grapnel claw (shape keys `Splay`, `Clasp`); animations `Swim_Patrol`, `Swim_Pursuit` and `Grab`. Exported with the Khronos glTF Blender I/O add-on 5.3.43. | MIT |
+
+Players can switch to the simple placeholder shapes under **Settings →
+Detailed creature models**; the models are then never downloaded.

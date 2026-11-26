@@ -511,7 +511,7 @@ function start(render: ReturnType<typeof createScene>, mode?: Crew | 'solo', sce
       yaw += Math.atan2(Math.sin(partner.yaw-yaw),Math.cos(partner.yaw-yaw))*blend;
       pitch += (partner.pitch-pitch)*blend;
     }
-    render(prediction && shown ? prediction.view(shown,id,geometry) : shown,partner?.id ?? id,yaw,pitch,dt,layout,preferences.reducedMotion,!!partner);
+    render(prediction && shown ? prediction.view(shown,id,geometry) : shown,partner?.id ?? id,yaw,pitch,dt,layout,preferences.reducedMotion,!!partner,preferences.creatureModels);
     diagnostics?.frame(now,elapsed,!!state);
     requestAnimationFrame(frame);
   }

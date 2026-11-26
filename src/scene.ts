@@ -1,4 +1,6 @@
 import * as T from 'three';
+import { GLTFLoader, type GLTF } from 'three/addons/loaders/GLTFLoader.js';
+import { createLurkerModel, type LurkerModel } from './lurker-model.ts';
 import { catalog, flatOn, itemName, items, pace, stunTime, swingTime, type Diver, type Stalker } from './mission.ts';
 import { buildFacility } from './facility-scene.ts';
 import { environment, materialLibrary } from './materials.ts';
@@ -220,10 +222,27 @@ export function createScene(canvas: HTMLCanvasElement, generated = false) {
   // the water to its victim.
   const lurkerSkin = new T.MeshStandardMaterial({color:0x101615,roughness:0.35,metalness:0.2});
   const lurkerEye = new T.MeshBasicMaterial({color:0xd8dcc4});
-  const lurkerModels = new Map<number,{group: T.Group; arm: T.Group; shaft: T.Object3D; hand: T.Object3D}>();
-  function lurkerModel(id: number) {
-    let model = lurkerModels.get(id);
-    if (model) return model;
+  const lurkerModels = new Map<number,LurkerModel>();
+  const chest = new T.Vector3();
+  let lurkerAsset: GLTF | undefined, loadingLurker = false, retryLurkerAt = 0, lurkersDetailed = true;
+  function loadLurker() {
+    if (lurkerAsset || loadingLurker || performance.now() < retryLurkerAt) return;
+    loadingLurker = true;
+    new GLTFLoader().load(import.meta.env.BASE_URL+'models/lurker.glb',asset => {
+      lurkerAsset = asset;
+      loadingLurker = false;
+      // Swap the stand-ins for the model, if the setting still wants it.
+      if (!lurkersDetailed) return;
+      for (const model of lurkerModels.values()) model.dispose();
+      lurkerModels.clear();
+    },undefined,error => {
+      loadingLurker = false;
+      retryLurkerAt = performance.now()+30_000;
+      console.warn('Lurker model unavailable',error);
+    });
+  }
+  // Keep the original silhouette and grab visible while the model downloads.
+  function fallbackLurker(): LurkerModel {
     const group = new T.Group();
     box(0,0,0.2,0.9,0.45,2.6,lurkerSkin,group);
     box(0,0.05,-1.25,0.7,0.4,0.6,lurkerSkin,group);
@@ -237,10 +256,16 @@ export function createScene(canvas: HTMLCanvasElement, generated = false) {
     box(0,0,-0.5,0.16,0.16,1,lurkerSkin,shaft);
     const hand = box(0,0,-1.05,0.32,0.08,0.22,lurkerSkin,arm);
     arm.visible = false;
-    scene.add(group);
-    model = {group,arm,shaft,hand};
-    lurkerModels.set(id,model);
-    return model;
+    const from = new T.Vector3();
+    return {group,dispose:() => group.removeFromParent(),pose:(_l,target) => {
+      arm.visible = !!target;
+      if (!target) return;
+      const distance = arm.getWorldPosition(from).distanceTo(target);
+      arm.lookAt(target); arm.rotateY(Math.PI);
+      const reach = Math.max(0.01,distance-0.15);
+      shaft.scale.z = reach;
+      hand.position.z = -reach-0.05;
+    }};
   }
   // A stalker: a gaunt thing on four long, jointless legs, its back above
   // an operator's head, a long low skull and two pale eyes. Its legs cycle
@@ -578,7 +603,9 @@ export function createScene(canvas: HTMLCanvasElement, generated = false) {
   }
   // `self` is whose eyes the camera looks through: your own operator, or the
   // partner a dead operator is watching.
-  function render(state: Snapshot | undefined, self: number, yaw: number, pitch: number, dt: number, layout?: Layout, reducedMotion = false, watching = false) {
+  // `models`: creatures drawn with their Blender models (the setting); off,
+  // with the simple shapes, and no model is downloaded.
+  function render(state: Snapshot | undefined, self: number, yaw: number, pitch: number, dt: number, layout?: Layout, reducedMotion = false, watching = false, models = true) {
     const me = state?.players.find(p => p.id === self);
     // Without a contract everything is inside, as it always was.
     const here: Place | undefined = !state?.mission ? (layout ? 'inside' : undefined) : me ? placeOf(me) : undefined;
@@ -627,26 +654,6 @@ export function createScene(canvas: HTMLCanvasElement, generated = false) {
       const room = creature && creature.mode !== 'dormant' ? layout?.rooms.find(r => r.id === creature.bay) : undefined;
       diver.visible = here === 'inside' && !!room;
       for (const model of gnawerModels.values()) model.group.visible = false;
-      // The Lurker shows only outside, gliding along the river.
-      for (const l of state.mission?.lurkers ?? []) {
-        const model = lurkerModel(l.id);
-        model.group.visible = here === 'outside';
-        if (!model.group.visible) continue;
-        const at = glide('l'+l.id,state.update,l.x,l.y,l.z,performance.now(),model.group.position);
-        model.group.position.copy(at);
-        model.group.rotation.y += Math.atan2(Math.sin(l.yaw-model.group.rotation.y),Math.cos(l.yaw-model.group.rotation.y))*Math.min(1,dt*6);
-        const victim = l.mode === 'grab' ? state.players.find(p => p.id === l.grab) : undefined;
-        model.arm.visible = !!victim;
-        if (victim) {
-          // Reach from its head to the victim's chest.
-          model.group.updateMatrixWorld();
-          const from = model.arm.getWorldPosition(new T.Vector3()), to = new T.Vector3(victim.x,(victim.feetY ?? 0)+1.1,victim.z), d = from.distanceTo(to);
-          model.arm.lookAt(to); model.arm.rotateY(Math.PI);
-          const reach = Math.max(0.3,d-0.15);
-          model.shaft.scale.set(1,1,reach); model.hand.position.z = -reach-0.05;
-        }
-      }
-      for (const [id,model] of lurkerModels) if (!state.mission?.lurkers?.some(l => l.id === id)) { scene.remove(model.group); lurkerModels.delete(id); }
       // Stalkers show only outside.
       for (const s of state.mission?.stalkers ?? []) {
         const model = stalkerModel(s.id);
@@ -712,6 +719,35 @@ export function createScene(canvas: HTMLCanvasElement, generated = false) {
         }
       }
       for (const [id,g] of people) if (!state.players.some(p => p.id === id)) { scene.remove(g); people.delete(id); }
+      // Pose the claw after the camera and remote avatars have been interpolated.
+      // Both ends then track what this client sees between authoritative snapshots.
+      const lurkers = here === 'outside' ? state.mission?.lurkers : undefined;
+      // The setting changed: rebuild them the other way.
+      if (models !== lurkersDetailed) {
+        for (const model of lurkerModels.values()) model.dispose();
+        lurkerModels.clear(); lurkersDetailed = models;
+      }
+      if (lurkers?.length && models) loadLurker();
+      for (const l of lurkers ?? []) {
+        let model = lurkerModels.get(l.id);
+        if (!model) {
+          model = models && lurkerAsset ? createLurkerModel(lurkerAsset) : fallbackLurker();
+          model.group.position.set(l.x,l.y,l.z); model.group.rotation.y = l.yaw;
+          scene.add(model.group); lurkerModels.set(l.id,model);
+        }
+        model.group.position.copy(glide('l'+l.id,state.update,l.x,l.y,l.z,performance.now(),model.group.position));
+        model.group.rotation.y += Math.atan2(Math.sin(l.yaw-model.group.rotation.y),Math.cos(l.yaw-model.group.rotation.y))*Math.min(1,dt*6);
+        const victim = l.mode === 'grab' ? state.players.find(p => p.id === l.grab && sameHere(p)) : undefined;
+        if (victim?.id === self) {
+          chest.copy(camera.position); chest.y -= 0.49;
+        } else if (victim) {
+          chest.copy(people.get(victim.id)!.position); chest.y += 1.1;
+        }
+        model.pose(l,victim ? chest : undefined,dt,reducedMotion);
+      }
+      for (const [id,model] of lurkerModels) if (!lurkers?.some(l => l.id === id)) {
+        model.dispose(); lurkerModels.delete(id); tracks.delete('l'+id);
+      }
       const l = state.lamp;
       const t = previousOwner === l.owner ? blend : 1;
       const now = performance.now();

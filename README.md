@@ -104,7 +104,7 @@ A contract runs three expeditions, each in a new facility generated from the con
 
 The Phase 6 co-op playtest supports two operators in WebGL 2 browsers. The browser acceptance run uses Chromium with desktop and touch controls. A physical Android phone hosted a match over cellular and stayed connected through a mid-game network switch.
 
-Use **Settings** on either device (or press **O**) to adjust look sensitivity and game volume, toggle sound captions, or keep the camera level when downed. Preferences persist on that device. Rescue timers stay visible with sound muted. With captions on, the Diver's chains show as a caption for whoever hears them.
+Use **Settings** on either device (or press **O**) to adjust look sensitivity and game volume, toggle sound captions, keep the camera level when downed, or turn off **Detailed creature models** to draw creatures as simple shapes (cheaper on slow devices; the models are then never downloaded). Preferences persist on that device. Rescue timers stay visible with sound muted. With captions on, the Diver's chains show as a caption for whoever hears them.
 
 For repeatable runs, use `VITE_RELAY_TEST_SEED=19 npm run build`, which pins the contract seed and so all three facilities. With no seed override, create fresh rooms to draw new contracts. Try different hauling plans, and try leaving mid-contract and forming a new lobby. Record confusing signs, missed warnings, and the seed.
 

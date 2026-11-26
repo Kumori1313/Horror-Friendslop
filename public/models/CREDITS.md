@@ -11,6 +11,7 @@ made for Relay Room. The editable Blender sources live in the repository under
 | Shipped file | Source | Contents | License |
 | --- | --- | --- | --- |
 | `lurker.glb` | `art/creatures/lurker/lurker.blend` | The river Lurker: a skinned hull with a swim rig, a reach shaft and a grapnel claw (shape keys `Splay`, `Clasp`); animations `Swim_Patrol`, `Swim_Pursuit` and `Grab`. Exported with the Khronos glTF Blender I/O add-on 5.3.43. | MIT |
+| `stalker.glb` | `art/creatures/stalker/stalker.blend` | The Stalker with five hinged face plates and a skinned mantle. Includes `Walk`, `Track`, `Drop`, `Charge`, `Recover` and `Stagger`. | MIT |
 
 Players can switch to the simple placeholder shapes under **Settings →
 Detailed creature models**; the models are then never downloaded.

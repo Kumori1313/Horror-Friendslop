@@ -110,8 +110,10 @@ export interface Mission {
 // by sight (cover breaks it), and charges anyone it sees within range: a
 // wind-up (`windup`), a straight rush (`charge`) that knocks flat and hurts
 // whoever it hits, then a stumble round (`recover`) before it comes again.
-// `charges` counts its charges, so every client hears each wind-up once.
-export interface Stalker { id: number; x: number; y: number; z: number; yaw: number; mode: 'roam' | 'stalk' | 'search' | 'windup' | 'charge' | 'recover' | 'stunned' | 'flee'; charges?: number }
+// `charges` counts its charges, so every client hears each wind-up once;
+// `windupProgress` (0 to 1, during a wind-up only) lets the model hold the
+// right pose for anyone who sees it mid-wind-up.
+export interface Stalker { id: number; x: number; y: number; z: number; yaw: number; mode: 'roam' | 'stalk' | 'search' | 'windup' | 'charge' | 'recover' | 'stunned' | 'flee'; charges?: number; windupProgress?: number }
 // Whether this operator is lying knocked flat.
 export const flatOn = (mission: Mission | undefined, id: number) => !!mission?.flat?.some(f => f.id === id);
 // The Lurker: a long dark thing under the river's deep water. It patrols the

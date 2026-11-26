@@ -9,3 +9,6 @@ videos/
 claude_log
 screenshots/
 testing-commands.md
+
+# Blender backups
+*.blend1

@@ -1,5 +1,6 @@
 import * as T from 'three';
 import { GLTFLoader, type GLTF } from 'three/addons/loaders/GLTFLoader.js';
+import { createStalkerModel, type StalkerModel } from './stalker-model.ts';
 import { createLurkerModel, type LurkerModel } from './lurker-model.ts';
 import { catalog, flatOn, itemName, items, pace, stunTime, swingTime, type Diver, type Stalker } from './mission.ts';
 import { buildFacility } from './facility-scene.ts';
@@ -225,23 +226,23 @@ export function createScene(canvas: HTMLCanvasElement, generated = false) {
   const lurkerEye = new T.MeshBasicMaterial({color:0xd8dcc4});
   const lurkerModels = new Map<number,LurkerModel>();
   const chest = new T.Vector3();
-  let lurkerAsset: GLTF | undefined, loadingLurker = false, retryLurkerAt = 0, lurkersDetailed = true;
-  function loadLurker() {
-    if (lurkerAsset || loadingLurker || performance.now() < retryLurkerAt) return;
-    loadingLurker = true;
-    new GLTFLoader().load(import.meta.env.BASE_URL+'models/lurker.glb',asset => {
-      lurkerAsset = asset;
-      loadingLurker = false;
-      // Swap the stand-ins for the model, if the setting still wants it.
-      if (!lurkersDetailed) return;
-      for (const model of lurkerModels.values()) model.dispose();
-      lurkerModels.clear();
-    },undefined,error => {
-      loadingLurker = false;
-      retryLurkerAt = performance.now()+30_000;
-      console.warn('Lurker model unavailable',error);
-    });
+  function creatureAsset(file: string) {
+    let asset: GLTF | undefined, loading = false, retryAt = 0;
+    return () => {
+      if (!asset && !loading && performance.now() >= retryAt) {
+        loading = true;
+        new GLTFLoader().load(import.meta.env.BASE_URL+'models/'+file,result => {
+          asset = result; loading = false;
+        },undefined,error => {
+          loading = false; retryAt = performance.now()+30_000;
+          console.warn('Creature model unavailable: '+file,error);
+        });
+      }
+      return asset;
+    };
   }
+  const loadLurker = creatureAsset('lurker.glb'), loadStalker = creatureAsset('stalker.glb');
+  let showingLurker: GLTF | undefined;
   // Keep the original silhouette and grab visible while the model downloads.
   function fallbackLurker(): LurkerModel {
     const group = new T.Group();
@@ -268,16 +269,13 @@ export function createScene(canvas: HTMLCanvasElement, generated = false) {
       hand.position.z = -reach-0.05;
     }};
   }
-  // A stalker: a gaunt thing on four long, jointless legs, its back above
-  // an operator's head, a long low skull and two pale eyes. Its legs cycle
-  // with how far it moves; winding up it drops its head and hunches; stunned,
-  // it lists to one side.
+  // Lightweight stand-in while downloading, or when detailed models are off.
+  // Preserve the same visible charge warning at either detail level.
   const stalkerSkin = new T.MeshStandardMaterial({color:0x3b3731,roughness:0.75});
   const stalkerBone = new T.MeshStandardMaterial({color:0x8c8576,roughness:0.6});
-  const stalkerModels = new Map<number,{group: T.Group; pose: T.Group; head: T.Group; legs: T.Group[]; phase: number; last: T.Vector3}>();
-  function stalkerModel(id: number) {
-    let model = stalkerModels.get(id);
-    if (model) return model;
+  const stalkerModels = new Map<number,StalkerModel>();
+  let showingStalker: GLTF | undefined;
+  function fallbackStalker(): StalkerModel {
     const group = new T.Group(), pose = new T.Group(), head = new T.Group(), legs: T.Group[] = [];
     group.add(pose);
     // Forward is -z.
@@ -286,29 +284,27 @@ export function createScene(canvas: HTMLCanvasElement, generated = false) {
     head.position.set(0,2.15,-0.85); pose.add(head);
     box(0,-0.05,-0.35,0.3,0.3,0.75,stalkerBone,head);
     box(0,-0.22,-0.45,0.26,0.08,0.6,stalkerSkin,head);
-    for (const side of [-1,1]) box(side*0.1,0.05,-0.66,0.07,0.06,0.03,eye,head);
+    const lens = box(0,0.03,-0.74,0.16,0.15,0.03,eye,head);
     for (const [x,z] of [[-0.3,-0.6],[0.3,-0.6],[-0.3,0.75],[0.3,0.75]]) {
       const hip = new T.Group(); hip.position.set(x,2,z); pose.add(hip); legs.push(hip);
       box(0,-1,0,0.1,2,0.1,stalkerSkin,hip);
     }
-    scene.add(group);
-    model = {group,pose,head,legs,phase:0,last:new T.Vector3()};
-    stalkerModels.set(id,model);
-    return model;
-  }
-  function poseStalker(s: Stalker, update: number, now: number, dt: number, reducedMotion: boolean) {
-    const model = stalkerModel(s.id), at = glide('s'+s.id,update,s.x,s.y,s.z,now,model.group.position);
-    const moved = model.last.distanceTo(at);
-    model.last.copy(at); model.group.position.copy(at);
-    const turn = Math.atan2(Math.sin(s.yaw-model.group.rotation.y),Math.cos(s.yaw-model.group.rotation.y));
-    model.group.rotation.y += turn*Math.min(1,dt*(s.mode === 'charge' ? 20 : 6));
-    model.phase += Math.min(moved,1)*2.6;
-    const stride = reducedMotion ? 0.12 : s.mode === 'charge' ? 0.7 : 0.35;
-    model.legs.forEach((leg,i) => { leg.rotation.x = stride*Math.sin(model.phase+(i === 0 || i === 3 ? 0 : Math.PI)); });
-    const ease = Math.min(1,dt*8), hunch = s.mode === 'windup' ? 0.25 : s.mode === 'charge' ? 0.15 : 0;
-    model.pose.rotation.x += (hunch-model.pose.rotation.x)*ease;
-    model.pose.rotation.z += ((s.mode === 'stunned' ? 0.3 : 0)-model.pose.rotation.z)*ease;
-    model.head.rotation.x += ((s.mode === 'windup' ? -0.45 : s.mode === 'search' ? 0.2 : 0)-model.head.rotation.x)*ease;
+    let phase = 0;
+    return {group,dispose:() => group.removeFromParent(),pose(s,travel,dt,reducedMotion) {
+      phase += travel*2.6;
+      const stride = reducedMotion ? 0.12 : s.mode === 'charge' ? 0.7 : 0.35;
+      const calm = s.mode === 'roam' || s.mode === 'flee';
+      const ease = Math.min(1,dt*8), lowering = s.mode === 'windup' ? (s.windupProgress ?? 1) : +(s.mode === 'charge');
+      lens.scale.y += ((calm ? 0.006 : 0.15)-lens.scale.y)*ease;
+      legs.forEach((leg,i) => {
+        const swing = stride*Math.sin(phase+(i === 0 || i === 3 ? 0 : Math.PI));
+        leg.rotation.x += (swing+(i<2 ? 0.72*(1-lowering) : 0)-leg.rotation.x)*ease;
+      });
+      const hunch = lowering*0.25;
+      pose.rotation.x += (hunch-pose.rotation.x)*ease;
+      pose.rotation.z += ((s.mode === 'stunned' ? 0.3 : 0)-pose.rotation.z)*ease;
+      head.rotation.x += ((s.mode === 'windup' ? -0.45 : s.mode === 'search' ? 0.2 : 0)-head.rotation.x)*ease;
+    }};
   }
   // Tines hang 1.2 m below the rim, shortened under low ceilings so they
   // stay above head height.
@@ -657,13 +653,31 @@ export function createScene(canvas: HTMLCanvasElement, generated = false) {
       const room = creature && creature.mode !== 'dormant' ? layout?.rooms.find(r => r.id === creature.bay) : undefined;
       diver.visible = here === 'inside' && !!room;
       for (const model of gnawerModels.values()) model.group.visible = false;
-      // Stalkers show only outside.
-      for (const s of state.mission?.stalkers ?? []) {
-        const model = stalkerModel(s.id);
-        model.group.visible = here === 'outside';
-        if (model.group.visible) poseStalker(s,state.update,performance.now(),dt,reducedMotion);
+      const stalkers = here === 'outside' ? state.mission?.stalkers : undefined;
+      const stalkerAsset = models && stalkers?.length ? loadStalker() : undefined;
+      if (showingStalker !== stalkerAsset) {
+        for (const model of stalkerModels.values()) model.dispose();
+        stalkerModels.clear(); showingStalker = stalkerAsset;
       }
-      for (const [id,model] of stalkerModels) if (!state.mission?.stalkers?.some(s => s.id === id)) { scene.remove(model.group); stalkerModels.delete(id); }
+      for (const s of stalkers ?? []) {
+        let model = stalkerModels.get(s.id);
+        if (!model) {
+          model = stalkerAsset ? createStalkerModel(stalkerAsset) : fallbackStalker();
+          model.group.position.set(s.x,s.y,s.z); model.group.rotation.y = s.yaw;
+          scene.add(model.group); stalkerModels.set(s.id,model);
+        }
+        const group = model.group, at = glide('s'+s.id,state.update,s.x,s.y,s.z,performance.now(),group.position);
+        const dx = at.x-group.position.x, dz = at.z-group.position.z;
+        let travel = Math.min(1,Math.hypot(dx,dz));
+        if (s.mode === 'stalk' && dx*Math.sin(s.yaw)+dz*Math.cos(s.yaw)>0) travel *= -1;
+        group.position.copy(at);
+        const turn = Math.atan2(Math.sin(s.yaw-group.rotation.y),Math.cos(s.yaw-group.rotation.y));
+        group.rotation.y += turn*Math.min(1,dt*(s.mode === 'charge' ? 20 : 6));
+        model.pose(s,travel,dt,reducedMotion);
+      }
+      for (const [id,model] of stalkerModels) if (!stalkers?.some(s => s.id === id)) {
+        model.dispose(); stalkerModels.delete(id); tracks.delete('s'+id);
+      }
       const salvageKind = new Map(layout && state.mission ? catalog(layout,state.mission).map(s => [s.id,s.kind]) : []);
       const heldKind = (p: Snapshot['players'][number]) => {
         const item = selected(p);
@@ -726,11 +740,11 @@ export function createScene(canvas: HTMLCanvasElement, generated = false) {
       // Both ends then track what this client sees between authoritative snapshots.
       const lurkers = here === 'outside' ? state.mission?.lurkers : undefined;
       // The setting changed: rebuild them the other way.
-      if (models !== lurkersDetailed) {
+      const lurkerAsset = models && lurkers?.length ? loadLurker() : undefined;
+      if (showingLurker !== lurkerAsset) {
         for (const model of lurkerModels.values()) model.dispose();
-        lurkerModels.clear(); lurkersDetailed = models;
+        lurkerModels.clear(); showingLurker = lurkerAsset;
       }
-      if (lurkers?.length && models) loadLurker();
       for (const l of lurkers ?? []) {
         let model = lurkerModels.get(l.id);
         if (!model) {

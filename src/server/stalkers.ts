@@ -141,7 +141,7 @@ export function inSight(layout: Layout, from: Point3, to: Point3) {
   return true;
 }
 
-interface Plan { path: Point3[]; goal?: {x: number; z: number}; replan: number; timer: number; cooldown: number; target?: number; seen?: {x: number; z: number}; aim?: {x: number; z: number}; left: number; hit: Set<number>; away?: {x: number; z: number}; last: Map<number,{x: number; z: number}> }
+interface Plan { path: Point3[]; goal?: {x: number; z: number}; replan: number; timer: number; windupSpan?: number; cooldown: number; target?: number; seen?: {x: number; z: number}; aim?: {x: number; z: number}; left: number; hit: Set<number>; away?: {x: number; z: number}; last: Map<number,{x: number; z: number}> }
 const plans = new WeakMap<Mission,Map<number,Plan>>();
 function planOf(mission: Mission, id: number) {
   let all = plans.get(mission);
@@ -305,7 +305,7 @@ export function stepStalkers(layout: Layout, state: Snapshot, mission: Mission, 
           walk(map,nav,s,plan,speeds.search*fast,dt);
           s.yaw = yaw; toward(s,facing(s,seen),Math.PI*3*dt); plan.path = [];
         } else if (d <= chargeRange && ready && !guarded && straight(map,nav,s,seen)) {
-          s.mode = 'windup'; plan.timer = windup/fast; s.charges = (s.charges ?? 0)+1; plan.path = [];
+          s.mode = 'windup'; plan.windupSpan = plan.timer = windup/fast; s.charges = (s.charges ?? 0)+1; plan.path = [];
         } else if ((guarded && d < flareKeep+2) || (!ready && d < holdOff)) {
           // Held off by a flare, or not ready to charge again: it waits, watching.
           plan.path = []; toward(s,facing(s,seen),Math.PI*2*dt);
@@ -337,6 +337,8 @@ export function stepStalkers(layout: Layout, state: Snapshot, mission: Mission, 
         walk(map,nav,s,plan,speeds.roam*fast,dt);
       }
     }
+    if (s.mode === 'windup') s.windupProgress = round(Math.max(0,1-plan.timer/(plan.windupSpan ?? windup)));
+    else delete s.windupProgress;
     s.x = round(s.x); s.z = round(s.z); s.y = round(s.y);
   }
 }

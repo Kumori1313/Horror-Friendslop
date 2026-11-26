@@ -110,8 +110,18 @@ test('stepping aside as it sets off dodges the charge; it wheels round and comes
   // It aims as it sets off: stepping aside then (facing west, toward it,
   // right is north) takes them out of its path.
   const mode = (): Stalker['mode'] => s.mode;
-  for (let i=0;i<60 && mode() !== 'charge';i++) sim.tick(1/30);
+  let progress = s.windupProgress!;
+  assert.equal(progress,0);
+  for (let i=0;i<60 && mode() !== 'charge';i++) {
+    sim.tick(1/30);
+    if (mode() === 'windup') {
+      assert.ok(s.windupProgress! >= progress);
+      progress = s.windupProgress!;
+    }
+  }
+  assert.ok(progress>0.9);
   assert.equal(mode(),'charge');
+  assert.equal(s.windupProgress,undefined);
   sim.inputs.set(1,{forward:0,right:1,yaw:Math.PI/2,pitch:0});
   let recovered = false;
   run(3,() => { recovered ||= s.mode === 'recover'; });

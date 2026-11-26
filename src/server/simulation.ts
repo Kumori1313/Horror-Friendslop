@@ -276,6 +276,8 @@ export class Simulation {
   // Chance for creatures (the Diver's chain clips, the Gnawers' wandering),
   // seeded from the layout so a run repeats from its seed. Tests replace it.
   random: () => number = Math.random;
+  // False keeps stalkers out (`VITE_RELAY_NO_STALKERS` in a test build).
+  stalkers = true;
   // Battery drained since the flashlight's charge last dropped a whole
   // second. The charge itself moves in whole seconds so a lit flashlight
   // changes the snapshot only once a second.
@@ -398,7 +400,7 @@ export class Simulation {
       if (this.elapsed >= 1-1e-9) { const whole = Math.floor(this.elapsed+1e-9); this.elapsed -= whole; mission.clock = (mission.clock ?? 0)+whole; }
     }
     if (mission?.stage === 'explore' && this.layout) {
-      advanceMission(this.layout,this.state,mission,dt,p => this.roomOf(p),this.random,{threats:this.threats(),drop:p => this.knock(p)});
+      advanceMission(this.layout,this.state,mission,dt,p => this.roomOf(p),this.random,{threats:this.threats(),drop:p => this.knock(p),stalkers:this.stalkers});
       if (mission.stage !== 'explore') this.returnHome();
     }
   }

@@ -227,7 +227,7 @@ export function die(state: Snapshot, mission: Mission, id: number, sunk = false)
 // What the simulation tells the Gnawers each tick: lit flares and thrown
 // items in flight that drive them off, and how to knock an operator's
 // salvage loose (the item's id, if any).
-export interface Hooks { threats?: (Point3 & {reach: number; place: Place})[]; drop?: (p: Player) => string | undefined }
+export interface Hooks { threats?: (Point3 & {reach: number; place: Place})[]; drop?: (p: Player) => string | undefined; stalkers?: boolean }
 export function advanceMission(layout: Layout, state: Snapshot, mission: Mission, dt: number, locate: (p: Player) => string | undefined, random: () => number = Math.random, hooks: Hooks = {}) {
   for (const down of mission.down) down.seconds = Math.max(0,down.seconds-dt);
   for (const d of mission.down.filter(d => d.seconds === 0)) die(state,mission,d.id);
@@ -244,6 +244,6 @@ export function advanceMission(layout: Layout, state: Snapshot, mission: Mission
   const threats = hooks.threats ?? [], harm = (p: Player, damage: number) => hurt(state,mission,p,damage);
   stepGnawers(layout,state,mission,dt,random,threats.filter(t => t.place === 'inside'),harm,hooks.drop ?? (() => undefined));
   stepLurkers(layout,state,mission,dt,random,threats.filter(t => t.place === 'outside'),harm);
-  stepStalkers(layout,state,mission,dt,random,threats.filter(t => t.place === 'outside'),harm);
+  if (hooks.stalkers !== false) stepStalkers(layout,state,mission,dt,random,threats.filter(t => t.place === 'outside'),harm);
   hunt(layout,state,mission,dt,locate,random);
 }

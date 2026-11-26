@@ -202,3 +202,11 @@ test('outside a charge it keeps its distance, even from someone lying flat', () 
   assert.ok((s.charges ?? 0) >= 2,'it kept coming');
   void hits;
 });
+
+test('a simulation with stalkers switched off (a test build) has none, however long', () => {
+  const {sim,mission,run} = field();
+  sim.stalkers = false;
+  mission.clock = firstAfter+every*3; mission.enraged = true;
+  run(2);
+  assert.equal(mission.stalkers,undefined);
+});

@@ -27,6 +27,7 @@ Run one test by name: add `--test-name-pattern="walk from Intake"`.
 Useful URLs and overrides:
 - `?solo=1` runs a browser-local solo shift. `?solo=1&layout=stairwell` loads the fixed Phase 9 multi-floor walkthrough.
 - `?delay=<ms>` (≤ 500) adds artificial latency to the standalone WebSocket client.
+- `VITE_RELAY_NO_STALKERS=1 npm run build` keeps stalkers out (`Simulation.stalkers = false`, set by the solo and creator sessions; ignored in `pages` mode). Build this way before the Game Hub acceptance test, whose walkers can't survive them.
 - `VITE_RELAY_TEST_SEED=<n> npm run build` pins the contract seed, and with it all three expedition facilities (ignored in `pages` mode). `RELAY_LAYOUT_SEED` does the same for the Node hub runtime.
 
 Type-checking is the only static check. There is no linter or formatter.

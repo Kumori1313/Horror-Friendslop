@@ -77,7 +77,7 @@ Open **http://127.0.0.1:4175/game-hub/** in two independent browser profiles. Cr
 ssh -N -o ExitOnForwardFailure=yes -L 4175:127.0.0.1:4175 -L 54321:127.0.0.1:54321 YOUR_USER@PROJECT_HOST
 ```
 
-In the hub checkout, `npm run test:relay` runs the browser acceptance test on port 4175 and starts its own server. Stop the manual preview first. Set `RELAY_SITE_DIR` if the game checkout has another location.
+In the hub checkout, `npm run test:relay` runs the browser acceptance test on port 4175 and starts its own server. Stop the manual preview first. Set `RELAY_SITE_DIR` if the game checkout has another location. Build the game for it with `VITE_RELAY_NO_STALKERS=1 npm run build`: its keyboard-driven walkers are too slow to survive a stalker, so that test build keeps them out (release builds ignore the flag; the stalkers have their own tests). Rebuild without the flag afterwards to play.
 
 ### Explore a generated facility
 

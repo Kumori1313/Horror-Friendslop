@@ -101,6 +101,8 @@ export class CreatorSession {
     const override = import.meta.env.MODE !== 'pages' && import.meta.env.VITE_RELAY_TEST_SEED;
     const seed = saved?.seed ?? (override ? Number(override) : crypto.getRandomValues(new Uint32Array(1))[0]);
     const sim = new Simulation(generateLayout(seed)); this.sim = sim;
+    // A test build may keep stalkers out (never a release build).
+    sim.stalkers = !(import.meta.env.MODE !== 'pages' && import.meta.env.VITE_RELAY_NO_STALKERS);
     sim.join(1);
     if (saved) {
       if (saved.state.players.some(p=>p.id===2)) sim.join(2);

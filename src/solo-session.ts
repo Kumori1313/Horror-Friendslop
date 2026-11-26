@@ -36,6 +36,7 @@ export class SoloSession {
     const seed = override ? Number(override) : crypto.getRandomValues(new Uint32Array(1))[0];
     this.sim = resume(this.checkpointKey,stairwell) ?? new Simulation(stairwell ? stairwellLayout() : generateLayout(seed),'solo');
     if (!this.sim.state.players.length) this.sim.join(1);
+    this.sim.stalkers = !(import.meta.env.MODE !== 'pages' && import.meta.env.VITE_RELAY_NO_STALKERS);
     this.events = events;
   }
   private shownLayout?: Layout;

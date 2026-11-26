@@ -127,6 +127,61 @@ function scrub() {
   return groundTexture;
 }
 
+// Mud: dark brown, blotched with wetter puddles and drier crust, tiled every
+// 3 m.
+let mudTexture: T.CanvasTexture | undefined;
+function mud() {
+  if (mudTexture) return mudTexture;
+  const canvas = document.createElement('canvas'); canvas.width = canvas.height = 256;
+  const ctx = canvas.getContext('2d')!;
+  let n = 0x51ed270b;
+  const rnd = () => { n ^= n << 13; n ^= n >>> 17; n ^= n << 5; return ((n >>> 0)%1000)/1000; };
+  ctx.fillStyle = '#6b5a44'; ctx.fillRect(0,0,256,256);
+  // Blotches wrap around the edges so the tiling doesn't show.
+  const blot = (x: number, y: number, r: number, color: string) => {
+    for (const ox of [-256,0,256]) for (const oy of [-256,0,256]) {
+      const g = ctx.createRadialGradient(x+ox,y+oy,0,x+ox,y+oy,r);
+      g.addColorStop(0,color); g.addColorStop(1,'rgba(0,0,0,0)');
+      ctx.fillStyle = g; ctx.fillRect(x+ox-r,y+oy-r,r*2,r*2);
+    }
+  };
+  for (let i=0;i<40;i++) blot(rnd()*256,rnd()*256,12+rnd()*40,'rgba(40,30,20,0.55)');
+  for (let i=0;i<30;i++) blot(rnd()*256,rnd()*256,6+rnd()*18,'rgba(150,130,100,0.35)');
+  for (let i=0;i<1400;i++) { ctx.fillStyle = rnd() < 0.5 ? 'rgba(30,22,14,0.5)' : 'rgba(160,140,110,0.4)'; ctx.fillRect(rnd()*256,rnd()*256,1+rnd()*2,1+rnd()*2); }
+  mudTexture = new T.CanvasTexture(canvas);
+  mudTexture.wrapS = mudTexture.wrapT = T.RepeatWrapping; mudTexture.colorSpace = T.SRGBColorSpace;
+  return mudTexture;
+}
+// A marsh's mud over its banks and pool beds (marks 2 and 3), on the height
+// map's own grid and triangles a hair above the ground, fading out at its
+// edge, with a wet sheen.
+function mudBanks(map: Outdoors) {
+  const f = map.ground, n = f.n, muddy = (i: number, k: number) => { const m = map.marks[k*n+i]; return m === 2 || m === 3; };
+  const position: number[] = [], color: number[] = [], uv: number[] = [], index: number[] = [], vertex = new Map<number,number>();
+  const at = (i: number, k: number) => {
+    const key = k*n+i;
+    let v = vertex.get(key);
+    if (v === undefined) {
+      const x = f.x0+i*f.step, z = f.z0+k*f.step;
+      v = position.length/3; vertex.set(key,v);
+      position.push(x,f.h[key]+0.02,z); uv.push(x/3,z/3); color.push(1,1,1,muddy(i,k) ? 1 : 0);
+    }
+    return v;
+  };
+  for (let k=0;k<n-1;k++) for (let i=0;i<n-1;i++) {
+    if (!muddy(i,k) && !muddy(i+1,k) && !muddy(i,k+1) && !muddy(i+1,k+1)) continue;
+    const a = at(i,k), b = at(i+1,k), c = at(i,k+1), d = at(i+1,k+1);
+    index.push(a,c,b,b,c,d);
+  }
+  const g = new T.BufferGeometry();
+  g.setAttribute('position',new T.Float32BufferAttribute(position,3)); g.setAttribute('color',new T.Float32BufferAttribute(color,4)); g.setAttribute('uv',new T.Float32BufferAttribute(uv,2));
+  g.setIndex(index); g.computeVertexNormals();
+  const mesh = new T.Mesh(g,new T.MeshStandardMaterial({map:mud(),vertexColors:true,transparent:true,depthWrite:false,roughness:0.55,metalness:0.05,color:0x8a7a66,polygonOffset:true,polygonOffsetFactor:-1,polygonOffsetUnits:-1}));
+  // Under the water, which is drawn after.
+  mesh.renderOrder = -1;
+  return mesh;
+}
+
 // The ground: 32 m chunks, each drawn finely near the camera and coarsely
 // far off (4 m), with a short skirt hiding the seams between the two. Normals
 // come from the height map itself, so chunk edges shade alike. Dark scrub on
@@ -137,7 +192,12 @@ function terrain(map: Outdoors) {
   const h = (x: number, z: number) => fieldHeight(f,x,z);
   const marsh = map.kind === 'marsh';
   const scrubColor = new T.Color(marsh ? 0x34402a : 0x3a4530), dirtColor = new T.Color(0x6a5a44), gravel = new T.Color(0x6d6b62), c = new T.Color();
-  const trailColor = new T.Color(marsh ? 0x6a5f4a : 0x857a64), siltColor = new T.Color(marsh ? 0x3f3a2c : 0x6e6c63);
+  const trailColor = new T.Color(marsh ? 0x6a5f4a : 0x857a64), siltColor = new T.Color(marsh ? 0x2b251a : 0x6e6c63);
+  // A marsh's bank mud, mottled with wetter and drier patches.
+  const mudColor = new T.Color(0x3a3121), mottle = (x: number, z: number) => {
+    const s = Math.sin(x*1.7+Math.sin(z*0.9)*2)+Math.sin(z*1.3+Math.sin(x*0.7)*2.5);
+    return 0.8+0.2*s;
+  };
   const b = map.building;
   function mesh(x0: number, z0: number, step: number) {
     const cells = chunk/step, side = cells+1, position: number[] = [], normal: number[] = [], color: number[] = [], uv: number[] = [], index: number[] = [];
@@ -150,6 +210,7 @@ function terrain(map: Outdoors) {
       // Worn trails and the dry riverbed's silt, from the map's marks.
       const mark = map.marks[Math.round(z-f.z0)*f.n+Math.round(x-f.x0)] ?? 0;
       if (mark === 1) c.lerp(trailColor,0.75); else if (mark === 2) c.lerp(siltColor,0.8);
+      else if (mark === 3) c.lerp(mudColor,0.85).multiplyScalar(mottle(x,z));
       color.push(c.r,c.g,c.b);
       return position.length/3-1;
     };
@@ -189,6 +250,7 @@ export function buildOutdoors(map: Outdoors, library: Library) {
   let waterMaterial: T.MeshStandardMaterial | undefined;
   const wall = b.surface('panel'), rust = b.surface('rust');
   root.add(terrain(map));
+  if (map.kind === 'marsh') root.add(mudBanks(map));
   const f = map.building;
   b.box(wall,0x9aa39a,f.x,f.h/2,f.z,f.w,f.h,f.d);
   b.box(wall,0x7b847d,f.x,f.h+0.3,f.z,f.w+0.4,0.6,f.d+0.4);

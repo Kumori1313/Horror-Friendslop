@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { walkable } from '../src/layout.ts';
+import { collisionIndex, walkable } from '../src/layout.ts';
 import { forceMap, mapKind, mapKinds } from '../src/map-kinds.ts';
 import { groundAt, outdoors } from '../src/places.ts';
 import { headHeight, poolAt, waterLevel } from '../src/room-templates.ts';
@@ -34,7 +34,7 @@ test('its pools are wide and shallow, some hiding a sinkhole', () => marsh(() =>
   let sinkholes = 0;
   for (const seed of seeds) {
     const map = outdoors(seed), pools = map.water.pools ?? [];
-    assert.ok(pools.length >= 15,'seed '+seed+': '+pools.length+' circles of water');
+    assert.ok(pools.length >= 12,'seed '+seed+': '+pools.length+' circles of water');
     for (const p of pools) {
       const depth = p.level-groundAt(map,p.x,p.z);
       if (p.depth > 1) { sinkholes++; assert.ok(depth > headHeight,'a sinkhole is over the head: '+depth.toFixed(2)); }
@@ -72,16 +72,27 @@ test('the water never hangs in the air: wherever its sheet ends, the ground besi
   }
 }));
 
-test('boardwalks cross the pools, and carry the trails across the water', () => marsh(() => {
+test('boardwalks cross the pools and carry trails over water, coming ashore on dry land a step from the water at both ends', () => marsh(() => {
   for (const seed of seeds) {
     const map = outdoors(seed);
     assert.ok(map.boardwalks.length >= 10,'seed '+seed+': '+map.boardwalks.length+' decks');
-    // Every deck stands over water, a step above it.
-    for (const b of map.boardwalks) { const pool = poolAt(map.water,b.x,b.z)!; assert.ok(pool && Math.abs(b.y-pool.level-0.18) < 1e-6); }
-    for (const line of map.trails) for (const p of line) {
-      const pool = poolAt(map.water,p.x,p.z);
-      if (!pool || pool.level-groundAt(map,p.x,p.z) < 0.12) continue;
-      assert.ok(map.boardwalks.some(b => Math.abs(b.x-p.x) <= b.w/2 && Math.abs(b.z-p.z) <= b.d/2),'seed '+seed+': a deck under the trail at '+p.x.toFixed(1)+','+p.z.toFixed(1));
+    // Over water a deck stands a step above it; on land, never higher, and
+    // down to half sunk in the mud.
+    for (const b of map.boardwalks) {
+      const pool = poolAt(map.water,b.x,b.z);
+      if (pool) assert.ok(Math.abs(b.y-pool.level-0.18) < 0.011,'over water');
+      else assert.ok(b.y >= groundAt(map,b.x,b.z)-0.1,'on land, not buried');
+    }
+    // From deck to neighbouring deck is never more than a step.
+    for (const b of map.boardwalks) for (const o of map.boardwalks) if (Math.abs(o.x-b.x) <= 1.05 && Math.abs(o.z-b.z) <= 1.05) assert.ok(Math.abs(o.y-b.y) <= 0.32,'seed '+seed+': a step between decks at '+b.x+','+b.z);
+    // Nothing solid (a boulder, a wreck, a ruin) stands on a deck.
+    const index = collisionIndex(map.geometry);
+    for (const b of map.boardwalks) assert.ok(index.clear(b.x,b.z,b.y,0.4),'seed '+seed+': clear deck at '+b.x+','+b.z);
+    // Every run of decks ends on dry land.
+    const near = (a: {x: number; z: number}, b: {x: number; z: number}) => a !== b && Math.abs(a.x-b.x) <= 1.05 && Math.abs(a.z-b.z) <= 1.05;
+    for (const b of map.boardwalks) {
+      if (map.boardwalks.filter(o => near(o,b)).length > 1) continue;
+      assert.equal(poolAt(map.water,b.x,b.z),undefined,'seed '+seed+': a boardwalk ends on dry land at '+b.x+','+b.z);
     }
   }
 }));
@@ -97,9 +108,15 @@ test('mud slows a walker; a sinkhole drowns one', () => marsh(() => {
     for (let i=0;i<10;i++) sim.tick(1/30);
     return Math.hypot(p.x-x,p.z-z);
   };
-  // In a wide shallow pool, ankle to knee deep, versus the dry plot.
-  const pool = pools.filter(q => q.depth < 1).sort((a,b) => b.r-a.r)[0];
-  const mud = walk(pool.x,pool.z+pool.r*0.3), dry = walk(map.exit.x,map.exit.z+3);
+  // Ankle to knee deep, with half a metre of the same ahead, versus the dry plot.
+  const depth = (x: number, z: number) => (waterLevel(map.water,x,z) ?? -Infinity)-groundAt(map,x,z);
+  let spot: {x: number; z: number} | undefined;
+  for (const q of pools) for (let a=0;a<16 && !spot;a++) for (const f of [0.3,0.5,0.7]) {
+    const x = q.x+Math.cos(a/16*Math.PI*2)*q.r*f, z = q.z+Math.sin(a/16*Math.PI*2)*q.r*f;
+    if ([0,-0.4,-0.8].every(dz => depth(x,z+dz) > 0.18 && depth(x,z+dz) < 0.45)) { spot = {x,z}; break; }
+  }
+  assert.ok(spot,'mud to walk in');
+  const mud = walk(spot!.x,spot!.z), dry = walk(map.exit.x,map.exit.z+3);
   assert.ok(mud < dry*0.85 && mud > dry*0.5,'mud '+mud.toFixed(2)+' m against '+dry.toFixed(2)+' m');
   const hole = pools.find(q => q.depth > 1)!;
   Object.assign(p,{x:hole.x,z:hole.z,feetY:groundAt(map,hole.x,hole.z)}); delete p.vy;

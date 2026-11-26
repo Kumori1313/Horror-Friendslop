@@ -235,6 +235,73 @@ export function outdoors(seed: number): Outdoors {
     const claim = (x: number, z: number, r: number) => { taken.push({x,z,r}); };
     // Keep the bridges' landings open.
     for (const b of bridges) for (const e of [b.planks[0],b.planks.at(-1)!]) claim(e.x,e.z,3);
+    // The boardwalks across the pools, laid now so nothing is put in their way.
+    // Boardwalks: plank decks a little over the water, one 1.4 m square at
+    // a time: straight across each pool cluster from bank to bank, and
+    // wherever a trail wades through a pool.
+    // Each run of decks reaches out onto dry land at both ends, its last
+    // planks easing down until they lie half sunk in the bank's mud.
+    const boardwalks: Outdoors['boardwalks'] = [], laid = new Set<string>();
+    // Decks sit on a half-metre grid. A run is laid whole, and only if each
+    // of its decks sits level with any it overlaps already laid.
+    const lay = (run: {x: number; z: number; y: number}[]) => {
+      const decks = run.map(p => ({x:Math.round(p.x*2)/2,y:Math.round(p.y*100)/100,z:Math.round(p.z*2)/2,w:1.4,d:1.4}));
+      if (decks.some(d => boardwalks.some(b => Math.abs(b.x-d.x) < 1.4 && Math.abs(b.z-d.z) < 1.4 && Math.abs(b.y-d.y) > 0.05))) return false;
+      for (const d of decks) {
+        const key = d.x+','+d.z;
+        if (laid.has(key)) continue;
+        laid.add(key);
+        boardwalks.push(d);
+        g.surfaces.push({x:d.x,z:d.z,w:d.w,d:d.d,y:d.y,room});
+      }
+      return true;
+    };
+    // `out`: how far beyond the water's edge; `top`: the deck over the water.
+    // On land a plank (0.1 m thick) is never more than half sunk.
+    const sunk = (x: number, z: number, top: number, out: number) => {
+      const pool = poolAt(water,x,z);
+      if (pool) return pool.level+0.18;
+      return Math.max(height(x,z)-0.05,top+(height(x,z)+0.03-top)*smooth(Math.max(out,0.5)/landing));
+    };
+    const landing = 2.5;
+    // Out along a bank, deck by deck: each a step (0.3 m) at most from the
+    // last, easing down into the mud, until one would be more; empty if even
+    // the first can't be.
+    const grid = (v: number) => Math.round(v*2)/2;
+    const ashore = (side: {x: number; z: number; out: number}[], top: number) => {
+      const run: {x: number; z: number; y: number}[] = [];
+      let last = top;
+      for (const p of side) {
+        const x = grid(p.x), z = grid(p.z);
+        if (poolAt(water,x,z)) break;
+        const y = sunk(x,z,top,p.out);
+        if (Math.abs(y-last) > 0.3 || y < height(x,z)-0.06) break;
+        run.push({x,z,y}); last = y;
+      }
+      return run;
+    };
+    const crossed = new Set<number>();
+    for (const c of crossings) {
+      if (crossed.has(c.cluster)) continue;
+      const at = (t: number) => ({x:c.x+c.dx*t,z:c.z+c.dz*t}), wet = (t: number) => !!poolAt(water,at(t).x,at(t).z);
+      let first = -1, last = -1;
+      for (let t=0;t<=c.length;t+=0.5) if (wet(t)) { if (first < 0) first = t; last = t; }
+      if (first < 0) continue;
+      // On over any water beyond (a neighbouring pool), to the true bank.
+      while (first > -15 && wet(first-0.5)) first -= 0.5;
+      while (last < c.length+15 && wet(last+0.5)) last += 0.5;
+      const top = poolAt(water,at(first).x,at(first).z)!.level+0.18;
+      const ts: number[] = [];
+      for (let t=first-landing;t<=last+landing+1e-9;t+=1) ts.push(t);
+      const lo = ashore(ts.filter(t => t < first).reverse().map(t => ({...at(t),out:first-t})),top), hi = ashore(ts.filter(t => t > last).map(t => ({...at(t),out:t-last})),top);
+      if (!lo.length || !hi.length) continue;
+      // Bank, water, bank, as one run.
+      const span = ts.filter(t => t >= first && t <= last).map(t => ({...at(t),y:top}));
+      if (!lay([...lo.reverse(),...span,...hi])) continue;
+      crossed.add(c.cluster);
+      // Keep its landings clear of ruins, wrecks and boulders.
+      for (const t of [first-landing,last+landing]) claim(at(t).x,at(t).z,2.5);
+    }
     const ruins = placeRuins(pick,ground,half,clear,claim), wrecks = placeWrecks(pick,ground,half,clear,claim);
     for (const r of ruins) {
       for (const b of r.pieces) g.walls.push(wall(room,b.x-b.w/2,b.z-b.d/2,b.x+b.w/2,b.z+b.d/2,b.y,b.h));
@@ -273,26 +340,30 @@ export function outdoors(seed: number): Outdoors {
     const marks = new Uint8Array(n*n);
     // Silt where the water stands and along its edge.
     for (let j=0;j<n*n;j++) { const x = ground.x0+(j % n), z = ground.z0+Math.floor(j/n), l = waterLevel(water,x,z); if (l !== undefined && h[j] < l+0.4) marks[j] = 2; }
+    // A marsh's banks are mud for about 3 m around its pools (mark 3).
+    for (let j=0;j<n*n && pools.length;j++) {
+      if (marks[j]) continue;
+      const x = ground.x0+(j % n), z = ground.z0+Math.floor(j/n);
+      if (pools.some(p => p.depth < 1 && Math.hypot(x-p.x,z-p.z) < p.r+3 && h[j] < p.level+0.6)) marks[j] = 3;
+    }
     for (const line of trails) for (const p of line ?? []) for (let dz=-1;dz<=1;dz++) for (let dx=-1;dx<=1;dx++) {
       const i = Math.round(p.x-ground.x0)+dx, k = Math.round(p.z-ground.z0)+dz;
       if (i >= 0 && k >= 0 && i < n && k < n && Math.hypot(ground.x0+i-p.x,ground.z0+k-p.z) <= 1.3) marks[k*n+i] = 1;
     }
-    // Boardwalks: plank decks a little over the water, one 1.4 m square at
-    // a time: straight across each pool cluster from bank to bank, and
-    // wherever a trail wades through a pool.
-    const boardwalks: Outdoors['boardwalks'] = [], laid = new Set<string>();
-    const deck = (px: number, pz: number) => {
-      const pool = pools.length ? poolAt(water,px,pz) : undefined;
-      if (!pool || pool.level-height(px,pz) < 0.12) return;
-      const x = Math.round(px*2)/2, z = Math.round(pz*2)/2, key = x+','+z;
-      if (laid.has(key)) return;
-      laid.add(key);
-      const d = {x,y:pool.level+0.18,z,w:1.4,d:1.4};
-      boardwalks.push(d);
-      g.surfaces.push({x,z,w:d.w,d:d.d,y:d.y,room});
-    };
-    for (const c of crossings) for (let t=0;t<=c.length;t+=1) deck(c.x+c.dx*t,c.z+c.dz*t);
-    for (const line of trails) for (const p of line ?? []) deck(p.x,p.z);
+    // Trails: decks over each stretch of a trail through a pool, onto the
+    // banks either side, where both come ashore low; elsewhere it wades.
+    for (const line of trails) {
+      const pts = line ?? [], over = pts.map(p => poolAt(water,p.x,p.z));
+      for (let i=0;i<pts.length;i++) {
+        if (!over[i] || (i > 0 && over[i-1])) continue;
+        let j = i;
+        while (j+1 < pts.length && over[j+1]) j++;
+        const top = over[i]!.level+0.18, bank = (side: Point3[]) => ashore(side.map((p,n) => ({x:p.x,z:p.z,out:Math.min(landing,1+n)})),top);
+        const before = bank(pts.slice(Math.max(0,i-3),i).reverse()), after = bank(pts.slice(j+1,j+4));
+        if (!before.length || !after.length) continue;
+        lay([...before.reverse(),...pts.slice(i,j+1).map(p => ({x:p.x,z:p.z,y:top})),...after]);
+      }
+    }
     // Reeds around the pools' edges, clear of the boardwalks.
     const reeds: Outdoors['reeds'] = [], grow = random(featureSeed ^ 0x1b873593);
     for (const p of pools) {
@@ -319,14 +390,15 @@ export function outdoors(seed: number): Outdoors {
 // A marsh's pools: clusters of overlapping circles of still water, clear of
 // the building's plot, the arrival, the river and each other, each cluster at
 // the level of the lowest ground under it. About a third hold a sinkhole.
-// Each cluster without a sinkhole gets a straight crossing for a boardwalk,
-// along x or z through its middle, from a metre outside its water on one side
-// to a metre outside on the other.
-interface Crossing { x: number; z: number; dx: number; dz: number; length: number }
+// Each cluster without a sinkhole gets straight crossings for a boardwalk,
+// along x and along z through its middle (the preferred first), from a metre
+// outside its water on one side to a metre outside on the other.
+interface Crossing { cluster: number; x: number; z: number; dx: number; dz: number; length: number }
 function marshPools(next: () => number, ground: Heightfield, half: number, building: Outdoors['building'], arrival: {x: number; z: number}, river: River): {pools: Pool[]; crossings: Crossing[]} {
   const pools: Pool[] = [], centres: {x: number; z: number; r: number}[] = [], crossings: Crossing[] = [];
   for (let t=0;t<300 && centres.length<16;t++) {
-    const cx = (next()-0.5)*(half*2-44), cz = (next()-0.5)*(half*2-44);
+    // Well inside the map's walls, boardwalks and all.
+    const cx = (next()-0.5)*(half*2-60), cz = (next()-0.5)*(half*2-60);
     if (Math.abs(cx-building.x) < building.w/2+22 && Math.abs(cz-building.z-2) < building.d/2+23) continue;
     if (Math.hypot(cx-arrival.x,cz-arrival.z) < 26 || river.points.some(p => Math.hypot(p.x-cx,p.z-cz) < 22)) continue;
     if (centres.some(c => Math.hypot(c.x-cx,c.z-cz) < c.r+14)) continue;
@@ -338,11 +410,18 @@ function marshPools(next: () => number, ground: Heightfield, half: number, build
     for (const c of circles) pools.push({...c,level,depth});
     if (next() < 0.35) { const c = circles[0]; pools.push({x:c.x,z:c.z,r:1.3+next()*0.9,level,depth:2.6}); }
     else {
-      const alongX = next() < 0.5, wet = (t: number) => circles.some(c => Math.hypot((alongX ? cx+t : cx)-c.x,(alongX ? cz : cz+t)-c.z) < c.r);
-      let lo = 0, hi = 0;
-      while (lo > -20 && wet(lo-0.5)) lo -= 0.5;
-      while (hi < 20 && wet(hi+0.5)) hi += 0.5;
-      if (wet(0) && hi-lo >= 3) crossings.push({x:alongX ? cx+lo-1 : cx,z:alongX ? cz : cz+lo-1,dx:alongX ? 1 : 0,dz:alongX ? 0 : 1,length:hi-lo+2});
+      // Both ways across, the preferred first; the boardwalk takes the first
+      // that comes ashore on low banks at both ends.
+      const first = next() < 0.5;
+      for (const alongX of [first,!first]) {
+        const wet = (t: number) => circles.some(c => Math.hypot((alongX ? cx+t : cx)-c.x,(alongX ? cz : cz+t)-c.z) < c.r);
+        let lo = 0, hi = 0;
+        while (lo > -20 && wet(lo-0.5)) lo -= 0.5;
+        while (hi < 20 && wet(hi+0.5)) hi += 0.5;
+        // On the boardwalks' half-metre grid, so its water is where its decks are.
+        const grid = (v: number) => Math.round(v*2)/2;
+        if (wet(0) && hi-lo >= 3) crossings.push({cluster:centres.length,x:grid(alongX ? cx+lo-1 : cx),z:grid(alongX ? cz : cz+lo-1),dx:alongX ? 1 : 0,dz:alongX ? 0 : 1,length:hi-lo+2});
+      }
     }
     centres.push({x:cx,z:cz,r:12});
   }

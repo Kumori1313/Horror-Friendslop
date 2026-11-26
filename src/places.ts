@@ -1,6 +1,7 @@
 import { collisionIndex, connections, geometryFor, walkable, type Geometry, type Layout } from './layout.ts';
 import { landings, placeBridges, placeFords, placeRuins, placeWrecks, poolFords, riverCourse, riverFloor, riverSurface, riverWater, trail, type Bridge, type River, type Ruin, type Wreck } from './outdoor-features.ts';
-import { channel, wadeDepth, waterLevel, type Water } from './room-templates.ts';
+import { channel, poolAt, wadeDepth, waterLevel, type Pool, type Water } from './room-templates.ts';
+import { mapKind, weather, type MapKind } from './map-kinds.ts';
 import { climbable, fieldGrade, fieldHeight, maxGrade, obstaclesAt, orient, outward, planningGrade, socketAt, surfaceAt } from './room-templates.ts';
 import { clearAt } from './room.ts';
 import type { Heightfield, Point3, RoomWall } from './room-templates.ts';
@@ -72,9 +73,12 @@ export interface Outdoors {
   river: River; fords: Point3[]; ruins: Ruin[]; wrecks: Wreck[]; trails: Point3[][]; marks: Uint8Array;
   // Water in the riverbed (also on the geometry), and the bridges over it.
   water: Water; bridges: Bridge[];
+  // The map's kind (see map-kinds.ts). A marsh has pools in `water.pools`,
+  // plank boardwalks where its trails cross them, and reeds.
+  kind: MapKind; boardwalks: {x: number; y: number; z: number; w: number; d: number}[]; reeds: {x: number; y: number; z: number; h: number}[];
 }
 export const outdoorSize = 160;
-const outdoorCache = new Map<number,Outdoors>();
+const outdoorCache = new Map<string,Outdoors>();
 
 // Smooth value noise in [-1, 1], from the seed, in plain arithmetic.
 function noise(seed: number) {
@@ -93,8 +97,10 @@ function noise(seed: number) {
 const smooth = (t: number) => { const c = Math.max(0,Math.min(1,t)); return c*c*(3-2*c); };
 
 export function outdoors(seed: number): Outdoors {
-  const found = outdoorCache.get(seed);
+  const kind = mapKind(seed), cacheKey = kind+'/'+seed, found = outdoorCache.get(cacheKey);
   if (found) return found;
+  // A marsh is low and flat: gentle swells, no ditches.
+  const relief = kind === 'marsh' ? 0.3 : 1, ditching = kind === 'marsh' ? 0 : 1;
   const next = random(seed ^ 0x0d7e1a), half = outdoorSize/2, room = 'outside';
   const building = {x:0,z:0,w:24,d:18,h:9};
   // Doors: the main door in the south face; one or two fire exits in others.
@@ -126,11 +132,11 @@ export function outdoors(seed: number): Outdoors {
   for (let attempt=0;;attempt++) {
     const scale = attempt < 4 ? 1 : attempt < 9 ? 1-(attempt-3)*0.16 : 0, shift = attempt*97.3;
     const hills = noise(seed ^ 0x9e3779b9), creases = noise(seed ^ 0x7f4a7c15), fade = noise(seed ^ 0x51a3c2e9);
-    const base = (x: number, z: number) => scale*(6*hills(x/46+offsets[0],z/46+offsets[1])+2.2*hills(x/19+offsets[2],z/19+offsets[3])+0.7*hills(x/8,z/8+offsets[0]))
+    const base = (x: number, z: number) => scale*relief*(6*hills(x/46+offsets[0],z/46+offsets[1])+2.2*hills(x/19+offsets[2],z/19+offsets[3])+0.7*hills(x/8,z/8+offsets[0]))
       // Ditches: troughs along the zero lines of a second noise, with a level
       // floor about 3 m wide between steep walls, so an operator who drops in
       // can walk along the floor to where the ditch fades out into a crossing.
-      -scale*2.8*smooth((1-Math.abs(creases(x/34+offsets[1]+shift,z/34+offsets[2]))/0.16)/0.55)*smooth((fade(x/23+shift,z/23+offsets[3])+0.15)/0.5);
+      -scale*ditching*2.8*smooth((1-Math.abs(creases(x/34+offsets[1]+shift,z/34+offsets[2]))/0.16)/0.55)*smooth((fade(x/23+shift,z/23+offsets[3])+0.15)/0.5);
     // The fords go where the river would cut least deep into these hills.
     if (river.points.length) river.fords = placeFords(river,riverSurface(river,base,half),base,half,fordCount,[{x:building.x,z:building.z,r:42},{x:ax,z:az,r:28}]);
     const arrivalLevel = base(ax,az);
@@ -162,11 +168,17 @@ export function outdoors(seed: number): Outdoors {
     g.props.push({x:bell.x,z:bell.z,w:1.3,d:1.3,y:0,h:2.7,kind:'bell',room});
     // Nowhere to get stuck: fill any ground that has no way back out.
     for (let pass=0;pass<6 && unstrand(g,ground,{x:ax,y:arrivalLevel,z:az});pass++);
+    // A marsh's pools, carved after too: wide and shallow (muddy to wade),
+    // a few with a sinkhole far over the head that the fog hides.
+    const {pools,crossings} = kind === 'marsh' ? marshPools(random(featureSeed ^ 0x3c6ef372),ground,half,building,{x:ax,z:az},river) : {pools:[],crossings:[]};
+    if (pools.length) carvePools(ground,pools);
     // Then the river, carved after: falling into it away from a ford is a
     // hazard by design. Its surface follows the ground downstream without
     // ever rising; the bed is cut under it, and a low levee holds the water
     // in wherever the bank would be lower.
     const water = riverWater(river,river.points.length ? poolFords(river,riverSurface(river,height,half)) : []);
+    if (pools.length) water.pools = pools;
+    if (weather[kind].mud) water.mud = true;
     // The building's plot and the arrival area stay as they are, the cut
     // easing in over 8 m around them.
     for (let j=0;j<n*n && river.points.length;j++) {
@@ -218,6 +230,7 @@ export function outdoors(seed: number): Outdoors {
     const clear = (x: number, z: number, r: number) =>
       !(Math.abs(x-building.x) < building.w/2+14+r && Math.abs(z-building.z-2) < building.d/2+15+r) && Math.hypot(x-ax,z-az) > 16+r &&
       Math.max(Math.abs(x),Math.abs(z))+r < half-16 && river.points.every(p => Math.hypot(p.x-x,p.z-z) > r+riverFloor+9) &&
+      pools.every(p => Math.hypot(p.x-x,p.z-z) > p.r+r+2) &&
       taken.every(t => Math.hypot(t.x-x,t.z-z) > t.r+r+1.5);
     const claim = (x: number, z: number, r: number) => { taken.push({x,z,r}); };
     // Keep the bridges' landings open.
@@ -238,6 +251,7 @@ export function outdoors(seed: number): Outdoors {
       if (taken.some(t => Math.hypot(t.x-x,t.z-z) < t.r+Math.max(w,dd))) continue;
       // Out of the riverbed, its fords and its banks.
       if (river.points.some(p => Math.hypot(p.x-x,p.z-z) < riverFloor+15+Math.max(w,dd)/2)) continue;
+      if (pools.some(p => Math.hypot(p.x-x,p.z-z) < p.r+2+Math.max(w,dd)/2)) continue;
       // Only on gentle ground, a metre clear of anything steep: a boulder
       // half buried in a ditch wall could pen someone in against it.
       let gentle = true;
@@ -263,17 +277,92 @@ export function outdoors(seed: number): Outdoors {
       const i = Math.round(p.x-ground.x0)+dx, k = Math.round(p.z-ground.z0)+dz;
       if (i >= 0 && k >= 0 && i < n && k < n && Math.hypot(ground.x0+i-p.x,ground.z0+k-p.z) <= 1.3) marks[k*n+i] = 1;
     }
+    // Boardwalks: plank decks a little over the water, one 1.4 m square at
+    // a time: straight across each pool cluster from bank to bank, and
+    // wherever a trail wades through a pool.
+    const boardwalks: Outdoors['boardwalks'] = [], laid = new Set<string>();
+    const deck = (px: number, pz: number) => {
+      const pool = pools.length ? poolAt(water,px,pz) : undefined;
+      if (!pool || pool.level-height(px,pz) < 0.12) return;
+      const x = Math.round(px*2)/2, z = Math.round(pz*2)/2, key = x+','+z;
+      if (laid.has(key)) return;
+      laid.add(key);
+      const d = {x,y:pool.level+0.18,z,w:1.4,d:1.4};
+      boardwalks.push(d);
+      g.surfaces.push({x,z,w:d.w,d:d.d,y:d.y,room});
+    };
+    for (const c of crossings) for (let t=0;t<=c.length;t+=1) deck(c.x+c.dx*t,c.z+c.dz*t);
+    for (const line of trails) for (const p of line ?? []) deck(p.x,p.z);
+    // Reeds around the pools' edges, clear of the boardwalks.
+    const reeds: Outdoors['reeds'] = [], grow = random(featureSeed ^ 0x1b873593);
+    for (const p of pools) {
+      if (p.depth > 1) continue;
+      for (let i=0;i<p.r*4;i++) {
+        const a = grow()*Math.PI*2, d = p.r+(grow()-0.65)*1.6, x = p.x+Math.cos(a)*d, z = p.z+Math.sin(a)*d;
+        if (boardwalks.some(b => Math.abs(b.x-x) < 1.2 && Math.abs(b.z-z) < 1.2) || pools.some(q => q.depth > 1 && Math.hypot(q.x-x,q.z-z) < q.r+0.5)) continue;
+        reeds.push({x,y:height(x,z),z,h:0.8+grow()*0.9});
+      }
+    }
     const world: Outdoors = {
-      seed,geometry:g,size:outdoorSize,ground,arrival:{x:ax,y:arrivalLevel,z:az},spawns,building,doors,door,exit:doors[0].exit,rocks,bell,
+      kind,boardwalks,reeds,seed,geometry:g,size:outdoorSize,ground,arrival:{x:ax,y:arrivalLevel,z:az},spawns,building,doors,door,exit:doors[0].exit,rocks,bell,
       ringing:{x:bell.x,y:0,z:bell.z+1.5,yaw:0},
       river,fords:river.fords.map(f => ({x:f.x,y:height(f.x,f.z),z:f.z})),ruins,wrecks,trails:trails.map(t => t ?? []),marks,water,bridges,
     };
     const reached = walkable(g,spawns[0],[],0.5);
     if (scale === 0 || (trails.every(Boolean) && [...doors.map(d => d.exit),world.ringing,spawns[1]].every(p => reached(p)))) {
       if (outdoorCache.size > 4) outdoorCache.clear();
-      outdoorCache.set(seed,world);
+      outdoorCache.set(cacheKey,world);
       return world;
     }
+  }
+}
+// A marsh's pools: clusters of overlapping circles of still water, clear of
+// the building's plot, the arrival, the river and each other, each cluster at
+// the level of the lowest ground under it. About a third hold a sinkhole.
+// Each cluster without a sinkhole gets a straight crossing for a boardwalk,
+// along x or z through its middle, from a metre outside its water on one side
+// to a metre outside on the other.
+interface Crossing { x: number; z: number; dx: number; dz: number; length: number }
+function marshPools(next: () => number, ground: Heightfield, half: number, building: Outdoors['building'], arrival: {x: number; z: number}, river: River): {pools: Pool[]; crossings: Crossing[]} {
+  const pools: Pool[] = [], centres: {x: number; z: number; r: number}[] = [], crossings: Crossing[] = [];
+  for (let t=0;t<300 && centres.length<16;t++) {
+    const cx = (next()-0.5)*(half*2-44), cz = (next()-0.5)*(half*2-44);
+    if (Math.abs(cx-building.x) < building.w/2+22 && Math.abs(cz-building.z-2) < building.d/2+23) continue;
+    if (Math.hypot(cx-arrival.x,cz-arrival.z) < 26 || river.points.some(p => Math.hypot(p.x-cx,p.z-cz) < 22)) continue;
+    if (centres.some(c => Math.hypot(c.x-cx,c.z-cz) < c.r+14)) continue;
+    const circles: {x: number; z: number; r: number}[] = [];
+    for (let i=0,n=2+Math.floor(next()*4);i<n;i++) circles.push({x:cx+(next()-0.5)*9,z:cz+(next()-0.5)*9,r:2.5+next()*3.5});
+    let low = Infinity;
+    for (const c of circles) for (let a=0;a<8;a++) low = Math.min(low,fieldHeight(ground,c.x+Math.cos(a)*c.r*0.7,c.z+Math.sin(a)*c.r*0.7),fieldHeight(ground,c.x,c.z));
+    const level = Math.round((low-0.05)*100)/100, depth = 0.3+next()*0.35;
+    for (const c of circles) pools.push({...c,level,depth});
+    if (next() < 0.35) { const c = circles[0]; pools.push({x:c.x,z:c.z,r:1.3+next()*0.9,level,depth:2.6}); }
+    else {
+      const alongX = next() < 0.5, wet = (t: number) => circles.some(c => Math.hypot((alongX ? cx+t : cx)-c.x,(alongX ? cz : cz+t)-c.z) < c.r);
+      let lo = 0, hi = 0;
+      while (lo > -20 && wet(lo-0.5)) lo -= 0.5;
+      while (hi < 20 && wet(hi+0.5)) hi += 0.5;
+      if (wet(0) && hi-lo >= 3) crossings.push({x:alongX ? cx+lo-1 : cx,z:alongX ? cz : cz+lo-1,dx:alongX ? 1 : 0,dz:alongX ? 0 : 1,length:hi-lo+2});
+    }
+    centres.push({x:cx,z:cz,r:12});
+  }
+  return {pools,crossings};
+}
+// Carve the pools into the ground: each bed eases down from its edge, a
+// sinkhole's steeply; just outside, the ground is kept a little over the
+// water, so it never spills.
+function carvePools(ground: Heightfield, pools: Pool[]) {
+  const {n,h} = ground;
+  for (let j=0;j<n*n;j++) {
+    const x = ground.x0+(j % n), z = ground.z0+Math.floor(j/n);
+    let bed = Infinity, rim = -Infinity, inside = false;
+    for (const p of pools) {
+      const d = Math.hypot(x-p.x,z-p.z);
+      if (d < p.r) { inside = true; bed = Math.min(bed,p.level-p.depth*smooth((p.r-d)/(p.depth > 1 ? 0.7 : 1.6))-0.04); }
+      else if (d < p.r+1.5) rim = Math.max(rim,p.level+0.04);
+    }
+    if (inside) h[j] = Math.round(Math.min(h[j],bed)*100)/100;
+    else if (rim > h[j]) h[j] = Math.round(rim*100)/100;
   }
 }
 // Where the doors of a facility come out inside. The main door is Intake's

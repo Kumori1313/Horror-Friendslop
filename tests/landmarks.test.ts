@@ -10,7 +10,8 @@ test('every map has its riverbed and fords, plenty of ruins and wrecks of severa
     const map = outdoors(seed), b = map.building;
     assert.ok(map.fords.length >= 2 && map.fords.length <= 3,'seed '+seed+': '+map.fords.length+' fords');
     assert.ok(map.ruins.length >= 3 && map.ruins.length <= 6,'seed '+seed+': '+map.ruins.length+' ruins');
-    assert.ok(map.wrecks.length >= 6 && map.wrecks.length <= 10,'seed '+seed+': '+map.wrecks.length+' wrecks');
+    // A marsh's pools leave a little less room for wrecks.
+    assert.ok(map.wrecks.length >= (map.kind === 'marsh' ? 4 : 6) && map.wrecks.length <= 10,'seed '+seed+': '+map.wrecks.length+' wrecks');
     assert.ok(new Set(map.wrecks.map(w => w.kind)).size >= 4,'seed '+seed+': several kinds of wreck');
     assert.equal(map.trails.length,map.doors.length,'a trail to every door');
     for (const t of map.trails) assert.ok(t.length > 20,'seed '+seed+': a trail');

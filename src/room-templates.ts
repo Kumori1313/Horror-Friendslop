@@ -225,7 +225,15 @@ export interface TemplateGeometry {
 // lower than the water, a low levee holds it in. The map carves its ground
 // from `channel`; movement, planning, drowning and the water's mesh read
 // `waterLevel`.
-export interface Water { points:{x:number; z:number; level:number}[]; fords:{x:number; z:number}[] }
+// `pools`: still water in circles (a marsh's pools are clusters of them),
+// each at its own level over a bed `depth` below it; `mud`: shallow water
+// slows whoever walks in it (see `moveOperator`).
+export interface Pool { x:number; z:number; r:number; level:number; depth:number }
+export interface Water { points:{x:number; z:number; level:number}[]; fords:{x:number; z:number}[]; pools?:Pool[]; mud?:boolean }
+// The pool over (x, z), if any.
+export function poolAt(w:Water,x:number,z:number) {
+  for (const p of w.pools ?? []) if ((x-p.x)*(x-p.x)+(z-p.z)*(z-p.z) < p.r*p.r) return p;
+}
 export const deepWater = 2.6, fordWater = 0.7, riverFloor = 3.2, steepBank = 1.8, gentleBank = 0.3;
 const easing = (t:number) => { const c = Math.max(0,Math.min(1,t)); return c*c*(3-2*c); };
 // How much of a ford there is at (x, z): 1 within 30 m of its middle, so its
@@ -289,6 +297,8 @@ export function channel(w:Water,x:number,z:number) {
 }
 // The water's surface over (x, z), or undefined away from the water.
 export function waterLevel(w:Water,x:number,z:number) {
+  const pool = w.pools && poolAt(w,x,z);
+  if (pool) return pool.level;
   // Water reaches at most riverFloor+deepWater/gentleBank+1 (about 13 m)
   // from the centre line, or a little further where the bed lies under it;
   // skip the riverbed's full shape well beyond that.
@@ -298,7 +308,9 @@ export function waterLevel(w:Water,x:number,z:number) {
 }
 // Wading slows an operator once the water is over their knees; over their
 // head, they are under.
-export const wadeDepth = 0.5, headHeight = 1.6;
+// Mud (shallow water where the map has `mud`) slows an operator from
+// `mudDepth`, less than wading does.
+export const wadeDepth = 0.5, headHeight = 1.6, mudDepth = 0.12;
 
 type Interval = [number,number];
 // Remaining spans after removing holes in a wall or shared tile boundary.

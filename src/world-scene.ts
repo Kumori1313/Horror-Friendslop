@@ -135,8 +135,9 @@ function terrain(map: Outdoors) {
   const f = map.ground, half = map.size/2, chunk = 32, group = new T.Group();
   const material = new T.MeshStandardMaterial({vertexColors:true,map:scrub(),roughness:1,metalness:0});
   const h = (x: number, z: number) => fieldHeight(f,x,z);
-  const scrubColor = new T.Color(0x3a4530), dirtColor = new T.Color(0x6a5a44), gravel = new T.Color(0x6d6b62), c = new T.Color();
-  const trailColor = new T.Color(0x857a64), siltColor = new T.Color(0x6e6c63);
+  const marsh = map.kind === 'marsh';
+  const scrubColor = new T.Color(marsh ? 0x34402a : 0x3a4530), dirtColor = new T.Color(0x6a5a44), gravel = new T.Color(0x6d6b62), c = new T.Color();
+  const trailColor = new T.Color(marsh ? 0x6a5f4a : 0x857a64), siltColor = new T.Color(marsh ? 0x3f3a2c : 0x6e6c63);
   const b = map.building;
   function mesh(x0: number, z0: number, step: number) {
     const cells = chunk/step, side = cells+1, position: number[] = [], normal: number[] = [], color: number[] = [], uv: number[] = [], index: number[] = [];
@@ -273,13 +274,20 @@ export function buildOutdoors(map: Outdoors, library: Library) {
     for (const r of br.rails) b.box(wood,0x5a4a38,r.x,r.y+r.h/2,r.z,Math.min(r.w,0.1),r.h,Math.min(r.d,0.1));
     for (const p of br.posts) b.box(wood,0x4a3d30,p.x,p.y+p.h/2,p.z,p.w,p.h,p.d);
   }
+  // A marsh's boardwalks: weathered planks on short posts.
+  for (const d of map.boardwalks) {
+    b.box(wood,0x5f5240,d.x,d.y-0.05,d.z,d.w,0.1,d.d);
+    for (const [ox,oz] of [[-0.55,-0.55],[0.55,0.55]]) b.box(wood,0x41372b,d.x+ox,d.y-0.5,d.z+oz,0.12,0.9,0.12);
+  }
   b.build(root);
   // The water: a sheet at its surface over every height-map cell where the
   // ground dips under it, so it meets the banks wherever they are and never
   // hangs in the air. Dark, with a faint sheen, slowly moving.
-  const field = map.ground, n = field.n, river = map.water.points;
-  if (river.length > 1) {
-    const lo = {x:Math.min(...river.map(p => p.x))-16,z:Math.min(...river.map(p => p.z))-16}, hi = {x:Math.max(...river.map(p => p.x))+16,z:Math.max(...river.map(p => p.z))+16};
+  // A marsh's pools too: the search covers the river and every pool.
+  const field = map.ground, n = field.n, river = map.water.points, pools = map.water.pools ?? [];
+  if (river.length > 1 || pools.length) {
+    const xs = [...river.map(p => p.x),...pools.flatMap(p => [p.x-p.r,p.x+p.r])], zs = [...river.map(p => p.z),...pools.flatMap(p => [p.z-p.r,p.z+p.r])];
+    const lo = {x:Math.min(...xs)-16,z:Math.min(...zs)-16}, hi = {x:Math.max(...xs)+16,z:Math.max(...zs)+16};
     const levels = new Map<number,number | undefined>();
     const levelAt = (i: number, k: number) => {
       const key = k*n+i;
@@ -304,6 +312,22 @@ export function buildOutdoors(map: Outdoors, library: Library) {
     // A faint sheen of its own, so the water reads as a surface even at night.
     waterMaterial = new T.MeshStandardMaterial({color:0x1d3a3a,emissive:0x163234,emissiveIntensity:0.9,emissiveMap:ripples,roughness:0.15,metalness:0.3,transparent:true,opacity:0.85,map:ripples,side:T.DoubleSide,depthWrite:false});
     root.add(new T.Mesh(g,waterMaterial));
+  }
+  // Reeds: a few thin blades to a clump, one instanced mesh, each tilted a
+  // little its own way.
+  if (map.reeds.length) {
+    const blade = new T.BoxGeometry(0.03,1,0.03); blade.translate(0,0.5,0);
+    const reeds = new T.InstancedMesh(blade,new T.MeshStandardMaterial({color:0x5c6440,roughness:1}),map.reeds.length*5);
+    const m = new T.Matrix4(), q = new T.Quaternion(), e = new T.Euler(), s = new T.Vector3(), at = new T.Vector3();
+    let k = 0, r = 1;
+    const next = () => (r = (Math.imul(r,1103515245)+12345) >>> 0)/2**32;
+    for (const reed of map.reeds) for (let i=0;i<5;i++) {
+      e.set((next()-0.5)*0.5,next()*Math.PI,(next()-0.5)*0.5); q.setFromEuler(e);
+      at.set(reed.x+(next()-0.5)*0.4,reed.y-0.1,reed.z+(next()-0.5)*0.4); s.set(1,reed.h*(0.6+next()*0.5),1);
+      reeds.setMatrixAt(k++,m.compose(at,q,s));
+    }
+    reeds.instanceMatrix.needsUpdate = true;
+    root.add(reeds);
   }
   const arrival = rift(0x9b7bff);
   arrival.group.position.set(map.arrival.x,map.arrival.y+1.2,map.arrival.z);

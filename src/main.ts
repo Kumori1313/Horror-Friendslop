@@ -1,3 +1,4 @@
+import { forceMap, isMapKind } from './map-kinds.ts';
 import { bindPreferences } from './preferences.ts';
 import { assignment, finished, flatOn, gone, heldBy, itemName, nearestPickup, prices, swingTime, wallet, wareInfo } from './mission.ts';
 import { spawnSalvage, type ItemKind } from './salvage.ts';
@@ -521,6 +522,12 @@ function start(render: ReturnType<typeof createScene>, mode?: Crew | 'solo', sce
 
 try {
   const query = new URLSearchParams(location.search);
+  // Testing: one outdoor map kind everywhere, from a test build
+  // (`VITE_RELAY_TEST_MAP`, for both seats alike) or, solo in a testing
+  // build, `?map=`. Never in a release build.
+  const testMap = import.meta.env.MODE !== 'pages' ? (import.meta.env.VITE_RELAY_TEST_MAP as string | undefined) : undefined;
+  const soloMap = query.get('solo') === '1' && (import.meta.env.DEV || import.meta.env.MODE === 'diagnostics') ? query.get('map') : null;
+  for (const kind of [testMap,soloMap]) if (isMapKind(kind)) forceMap(kind);
   if (query.get('solo') === '1' && !query.has('room') && !query.has('lobby')) {
     start(createScene(canvas,true),'solo');
   } else if (location.pathname.startsWith('/relay-room/')) {

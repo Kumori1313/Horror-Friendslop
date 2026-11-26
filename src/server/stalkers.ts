@@ -9,6 +9,7 @@ import { groundAt, outdoors, placeOf, type Outdoors } from '../places.ts';
 import type { Player, Snapshot } from '../room.ts';
 import { climbable, planningGrade, type Point3, type Surface } from '../room-templates.ts';
 import { flareFear } from './gnawers.ts';
+import { mapKind, weather } from '../map-kinds.ts';
 
 // The build-up, by the expedition's clock (time inside counts too): the
 // first after `firstAfter` seconds, one more every `every` seconds, up to
@@ -283,10 +284,12 @@ export function stepStalkers(layout: Layout, state: Snapshot, mission: Mission, 
       if (plan.timer <= 0) { s.mode = target ? 'stalk' : 'search'; plan.timer = 5; }
     } else {
       // Roaming, stalking or searching: looking and listening.
-      const range = (p: Player) => (lit(p) ? lampSight : sight)*(mission.enraged ? 1.25 : 1);
+      // The weather: fog shortens its sight, still air carries sound further.
+      const air = weather[mapKind(layout.seed)];
+      const range = (p: Player) => (lit(p) ? lampSight : sight)*(mission.enraged ? 1.25 : 1)*air.sight;
       const noticed = watched.filter(p => {
         const d = Math.hypot(p.x-s.x,p.z-s.z);
-        return (d <= hearing*fast && moved.get(p.id)) || (d <= range(p) && inSight(layout,s,feet(p)));
+        return (d <= hearing*fast*air.carry && moved.get(p.id)) || (d <= range(p) && inSight(layout,s,feet(p)));
       }).sort((a,b) => Math.hypot(a.x-s.x,a.z-s.z)-Math.hypot(b.x-s.x,b.z-s.z));
       const seen = noticed.find(p => p.id === plan.target) ?? noticed[0];
       if (flare) { s.mode = 'flee'; plan.timer = 3; plan.away = flare; plan.path = []; }

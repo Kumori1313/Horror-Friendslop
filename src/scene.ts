@@ -6,6 +6,7 @@ import { buildFacility } from './facility-scene.ts';
 import { environment, materialLibrary } from './materials.ts';
 import { anchor, geometryFor, type Geometry, type Layout } from './layout.ts';
 import { home, outdoors, placeOf, type Place } from './places.ts';
+import { mapKind, weather } from './map-kinds.ts';
 import { buildHome, buildOutdoors } from './world-scene.ts';
 import { obstaclesAt, roomTemplates, socketAt, surfaceAt, waterLevel } from './room-templates.ts';
 import { portalGraph, visibleRooms, type PortalGraph } from './visibility.ts';
@@ -503,11 +504,13 @@ export function createScene(canvas: HTMLCanvasElement, generated = false) {
   const night = {background:0x070a0e,fog:0x0a0e13,skyLevel:0.5,moonLevel:0.4};
   let looked = '';
   const mix = (a: number, b: number, t: number) => new T.Color(a).lerp(new T.Color(b),t);
-  function look(place: Place, clock = 0, under = false) {
-    const dusk = place === 'outside' ? Math.min(1,clock/nightfall) : 0, key = place+'/'+dusk.toFixed(3)+'/'+under;
+  // Outdoors, the map's weather sets the look (see map-kinds.ts).
+  function look(place: Place, clock = 0, under = false, seed?: number) {
+    const kind = place === 'outside' && seed !== undefined ? mapKind(seed) : undefined;
+    const dusk = place === 'outside' ? Math.min(1,clock/nightfall) : 0, key = place+'/'+kind+'/'+dusk.toFixed(3)+'/'+under;
     if (key === looked) return;
     looked = key;
-    const l = looks[place];
+    const l = kind ? weather[kind].look : looks[place];
     (scene.background as T.Color).copy(mix(l.background,night.background,dusk));
     (scene.fog as T.FogExp2).color.copy(mix(l.fog,night.fog,dusk)); (scene.fog as T.FogExp2).density = l.density;
     // Under water: murky, green, and close.
@@ -610,7 +613,7 @@ export function createScene(canvas: HTMLCanvasElement, generated = false) {
     // Without a contract everything is inside, as it always was.
     const here: Place | undefined = !state?.mission ? (layout ? 'inside' : undefined) : me ? placeOf(me) : undefined;
     const water = here === 'outside' && layout ? outdoors(layout.seed).geometry.water : undefined, surface = water ? waterLevel(water,camera.position.x,camera.position.z) : undefined;
-    if (generated && here) look(here,state?.mission?.clock,surface !== undefined && camera.position.y < surface);
+    if (generated && here) look(here,state?.mission?.clock,surface !== undefined && camera.position.y < surface,layout?.seed);
     // Build only the place this camera is in. Home drops the expedition.
     if (here === 'home') {
       facility?.dispose(); facility = undefined; loaded = undefined; portals = undefined;

@@ -5,6 +5,7 @@ import type { Player, Snapshot } from './room.ts';
 import type { Preferences } from './preferences.ts';
 import { finished, flatOn, healthOf, heldBy, hears, itemName, listen, lossPercent, maxHealth } from './mission.ts';
 import { placeOf } from './places.ts';
+import { mapKind, weather } from './map-kinds.ts';
 
 const el = (id: string) => document.getElementById(id)!;
 
@@ -146,13 +147,16 @@ export function missionHud(preferences: Preferences, operator = (id: number) => 
       }
     }
   }
+  // How far sound carries outside in this map's weather (see map-kinds.ts):
+  // creatures' sounds reach as much further as the crew's reach them.
+  let carry = 1;
   // The Lurker: a heavy splash at a grab, a slow slosh while it moves near.
   const seenGrabs = new Map<number,number>(), lurkerSeen = new Map<number,{x: number; z: number}>();
   let nextSlosh = 0, sloshHeard = 0;
   function lurkerCues(state: Snapshot, self: Player) {
     const m = state.mission!, now = performance.now();
     for (const l of m.lurkers ?? []) {
-      const d = Math.hypot(l.x-self.x,l.z-self.z), heard = placeOf(self) === 'outside' && d < 18;
+      const d = Math.hypot(l.x-self.x,l.z-self.z)/carry, heard = placeOf(self) === 'outside' && d < 18;
       const last = lurkerSeen.get(l.id), moving = !!last && Math.hypot(last.x-l.x,last.z-l.z) > 0.01;
       lurkerSeen.set(l.id,{x:l.x,z:l.z});
       const grabs = l.grabs ?? 0, seen = seenGrabs.get(l.id);
@@ -177,7 +181,7 @@ export function missionHud(preferences: Preferences, operator = (id: number) => 
     if (stalkersKnown !== undefined && all.length > stalkersKnown && out) { noise(0.25,1.6,180); noise(0.12,1.4,420); subtitle('A long howl from the hills'); }
     stalkersKnown = all.length;
     for (const s of all) {
-      const d = Math.hypot(s.x-self.x,s.z-self.z), last = stalkerSeen.get(s.id), moving = !!last && Math.hypot(last.x-s.x,last.z-s.z) > 0.01;
+      const d = Math.hypot(s.x-self.x,s.z-self.z)/carry, last = stalkerSeen.get(s.id), moving = !!last && Math.hypot(last.x-s.x,last.z-s.z) > 0.01;
       stalkerSeen.set(s.id,{x:s.x,z:s.z});
       const charges = s.charges ?? 0, seen = seenCharges.get(s.id);
       if (seen !== undefined && charges > seen && out && d < 45) { noise(0.6*(1-d/45),0.7,2600); noise(0.4*(1-d/45),0.5,1400); subtitle('A shriek: something is charging!'); }
@@ -192,6 +196,7 @@ export function missionHud(preferences: Preferences, operator = (id: number) => 
   }
   function update(layout: Layout, state: Snapshot, self: Player, room: string | undefined, briefing: boolean) {
     const m = state.mission!;
+    carry = weather[mapKind(layout.seed)].carry;
     vitals(state,!briefing && m.stage === 'explore' && placeOf(self) !== 'home');
     if (m.stage === 'explore') { hurtCue(self); gnawerCues(state,self); lurkerCues(state,self); stalkerCues(state,self); }
     const c = m.contract;

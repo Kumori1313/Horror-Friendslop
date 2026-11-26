@@ -7,6 +7,7 @@ import { batonReach, gone, type Lurker, type Mission } from '../mission.ts';
 import { groundAt, outdoors, placeOf, type Outdoors } from '../places.ts';
 import type { Player, Snapshot } from '../room.ts';
 import type { Point3 } from '../room-templates.ts';
+import { mapKind, weather } from '../map-kinds.ts';
 
 // Metres per second along the river: patrolling, coming for a sound it hears
 // now, and going to where it last heard one; faster once the bell has rung.
@@ -163,7 +164,7 @@ export function stepLurkers(layout: Layout, state: Snapshot, mission: Mission, d
       // A lit flare at the water's edge drives it down.
       l.mode = 'sunk'; plan.until = sinkTime/2; plan.target = plan.s; delete plan.heard;
     } else {
-      const heard = prey.filter(p => Math.hypot(p.x-l.x,p.z-l.z) <= (moved.get(p.id) ? hearMoving : hearStill)*(mission.enraged ? 1.5 : 1))
+      const heard = prey.filter(p => Math.hypot(p.x-l.x,p.z-l.z) <= (moved.get(p.id) ? hearMoving : hearStill)*(mission.enraged ? 1.5 : 1)*weather[mapKind(layout.seed)].carry)
         .sort((a,b) => Math.hypot(a.x-l.x,a.z-l.z)-Math.hypot(b.x-l.x,b.z-l.z))[0];
       const level = at(map,plan.s).level;
       const caught = heard && Math.hypot(heard.x-l.x,heard.z-l.z) <= grabReach && (heard.feetY ?? 0)-level <= grabHeight

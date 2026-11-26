@@ -8,8 +8,12 @@ import { groundAt, outdoors, placeOf, type Outdoors } from '../places.ts';
 import type { Player, Snapshot } from '../room.ts';
 import type { Point3 } from '../room-templates.ts';
 
-// Metres per second along the river; faster once the bell has rung.
-const speeds = {lurk:0.9,hunt:3.0};
+// Metres per second along the river: patrolling, coming for a sound it hears
+// now, and going to where it last heard one; faster once the bell has rung.
+const speeds = {lurk:0.9,hunt:3.0,search:2.2};
+// At the spot it last heard something, it waits `linger` seconds facing the
+// sound before patrolling on.
+export const linger = 4;
 // It hears someone moving within `hearMoving` m, someone still within
 // `hearStill`; it grabs within `grabReach` m (from under the water, so up to
 // `grabHeight` above it: a low bridge is not safe); it drags its victim at
@@ -22,7 +26,10 @@ const speeds = {lurk:0.9,hunt:3.0};
 export const hearMoving = 16, hearStill = 6, grabReach = 4.2, grabHeight = 3.5, dragSpeed = 0.9, retreat = 0.5, sinkTime = 15, grabDamage = 10, flareFear = 4, edge = 2.6;
 const enraged = 1.4, depthNeeded = 2;
 
-interface Plan { s: number; target: number; offset: number; side: number; until: number; struggle: number; grabbedAt?: Point3; last: Map<number,{x: number; z: number}> }
+// `heard`: where it last heard someone, until it has been there and waited;
+// `dir`: the way along the river it patrols (+1 or -1); `paused`: waiting
+// at the end of a patrol leg.
+interface Plan { s: number; target: number; offset: number; side: number; until: number; struggle: number; dir: number; paused: boolean; heard?: {x: number; z: number; wait: number; now: boolean}; at?: {x: number; z: number}; grabbedAt?: Point3; last: Map<number,{x: number; z: number}> }
 const plans = new WeakMap<Mission,Map<number,Plan>>();
 // Its stretch of river: the indices of the longest run of deep water inside
 // the map.
@@ -43,12 +50,16 @@ function stretch(map: Outdoors) {
   return found;
 }
 // The point `s` (a fractional index) along the centre line, just under the
-// surface, and the way across the river there (`nx`, `nz`).
+// surface, and the way across the river there (`nx`, `nz`), blended between
+// points so a Lurker off the centre line moves smoothly round bends.
 function at(map: Outdoors, s: number) {
   const p = map.water.points, i = Math.max(0,Math.min(p.length-2,Math.floor(s))), f = Math.max(0,Math.min(1,s-i)), a = p[i], b = p[i+1];
-  const len = Math.hypot(b.x-a.x,b.z-a.z) || 1;
-  return {x:a.x+(b.x-a.x)*f,z:a.z+(b.z-a.z)*f,level:a.level+(b.level-a.level)*f,yaw:Math.atan2(-(b.x-a.x),-(b.z-a.z)),nx:-(b.z-a.z)/len,nz:(b.x-a.x)/len};
+  const along = (k: number) => { const u = p[Math.max(0,k-1)], v = p[Math.min(p.length-1,k+1)], len = Math.hypot(v.x-u.x,v.z-u.z) || 1; return {x:(v.x-u.x)/len,z:(v.z-u.z)/len}; };
+  const ta = along(i), tb = along(i+1), tx = ta.x+(tb.x-ta.x)*f, tz = ta.z+(tb.z-ta.z)*f, len = Math.hypot(tx,tz) || 1;
+  return {x:a.x+(b.x-a.x)*f,z:a.z+(b.z-a.z)*f,level:a.level+(b.level-a.level)*f,nx:-tz/len,nz:tx/len};
 }
+// The yaw that faces from (x, z) toward (tx, tz).
+const facing = (x: number, z: number, tx: number, tz: number) => Math.atan2(-(tx-x),-(tz-z));
 // The point of its stretch nearest (x, z).
 function nearest(map: Outdoors, {lo,hi}: {lo: number; hi: number}, x: number, z: number) {
   let best = lo, d = Infinity;
@@ -59,7 +70,7 @@ function planOf(mission: Mission, id: number, s: number) {
   let all = plans.get(mission);
   if (!all) plans.set(mission,all = new Map());
   let plan = all.get(id);
-  if (!plan) all.set(id,plan = {s,target:s,offset:0,side:0,until:0,struggle:0,last:new Map()});
+  if (!plan) all.set(id,plan = {s,target:s,offset:0,side:0,until:0,struggle:0,dir:1,paused:false,last:new Map()});
   return plan;
 }
 
@@ -71,8 +82,8 @@ export const lurkerStretch = (seed: number) => stretch(outdoors(seed));
 export function spawnLurkers(layout: Layout): Lurker[] {
   const map = outdoors(layout.seed), range = stretch(map);
   if (range.hi-range.lo < 6) return [];
-  const s = (range.lo+range.hi)/2, q = at(map,s);
-  return [{id:1,x:q.x,y:q.level-0.7,z:q.z,yaw:q.yaw,mode:'lurk'}];
+  const s = (range.lo+range.hi)/2, q = at(map,s), r = at(map,s+1);
+  return [{id:1,x:q.x,y:q.level-0.7,z:q.z,yaw:Math.round(facing(q.x,q.z,r.x,r.z)*100)/100,mode:'lurk'}];
 }
 
 // It lets go: the victim scrambles back to where they were grabbed, and it
@@ -82,7 +93,7 @@ function release(mission: Mission, state: Snapshot, l: Lurker) {
   if (victim && plan?.grabbedAt && !gone(mission,victim.id)) { Object.assign(victim,{x:plan.grabbedAt.x,z:plan.grabbedAt.z,feetY:plan.grabbedAt.y,vy:0}); mission.drowning = mission.drowning?.filter(d => d.id !== victim.id); }
   delete l.grab;
   l.mode = 'sunk';
-  if (plan) { plan.until = sinkTime; delete plan.grabbedAt; }
+  if (plan) { plan.until = sinkTime; plan.target = plan.s; delete plan.grabbedAt; delete plan.heard; }
 }
 
 // The victim mashes the jump key: the drag slows for a moment.
@@ -133,10 +144,10 @@ export function stepLurkers(layout: Layout, state: Snapshot, mission: Mission, d
     }
     if (l.mode === 'grab') { /* holding: only backing away, below */ }
     else if (l.mode === 'sunk') {
-      if (plan.until <= 0) l.mode = 'lurk';
+      if (plan.until <= 0) { l.mode = 'lurk'; plan.paused = false; }
     } else if (threats.some(t => t.reach >= flareFear && near(l,t))) {
       // A lit flare at the water's edge drives it down.
-      l.mode = 'sunk'; plan.until = sinkTime/2;
+      l.mode = 'sunk'; plan.until = sinkTime/2; plan.target = plan.s; delete plan.heard;
     } else {
       const heard = prey.filter(p => Math.hypot(p.x-l.x,p.z-l.z) <= (moved.get(p.id) ? hearMoving : hearStill)*(mission.enraged ? 1.5 : 1))
         .sort((a,b) => Math.hypot(a.x-l.x,a.z-l.z)-Math.hypot(b.x-l.x,b.z-l.z))[0];
@@ -145,26 +156,42 @@ export function stepLurkers(layout: Layout, state: Snapshot, mission: Mission, d
       if (caught) {
         l.mode = 'grab'; l.grab = heard.id; l.grabs = (l.grabs ?? 0)+1;
         plan.grabbedAt = {x:heard.x,y:heard.feetY ?? 0,z:heard.z};
+        plan.target = plan.s; delete plan.heard;
         delete heard.vy;
         bite(heard,grabDamage);
         continue;
       }
       if (heard) {
-        l.mode = 'hunt'; plan.target = nearest(map,range,heard.x,heard.z);
+        // Off toward the sound, and on toward where it was heard last once it
+        // stops; the way it goes becomes the way it patrols on afterwards.
+        l.mode = 'hunt';
+        plan.heard = {x:heard.x,z:heard.z,wait:linger,now:true};
+        plan.target = nearest(map,range,heard.x,heard.z);
+        if (Math.abs(plan.target-plan.s) > 0.05) plan.dir = Math.sign(plan.target-plan.s);
         const c = at(map,plan.target);
         plan.side = Math.sign((heard.x-c.x)*c.nx+(heard.z-c.z)*c.nz);
-      }
-      else {
-        if (l.mode === 'hunt' || plan.until <= 0 || Math.abs(plan.target-plan.s) < 0.05) {
-          l.mode = 'lurk';
-          plan.target = Math.max(range.lo,Math.min(range.hi,plan.s+(random()-0.5)*16));
-          plan.until = 4+random()*6;
+      } else if (plan.heard) {
+        l.mode = 'hunt'; plan.heard.now = false;
+        if (Math.abs(plan.target-plan.s) < 0.05 && (plan.heard.wait -= dt) <= 0) { delete plan.heard; l.mode = 'lurk'; plan.paused = true; plan.until = 0; }
+      } else {
+        // Patrolling: legs of about 6-14 m along the river, the same way as
+        // before, a short pause between, turning back at the ends.
+        l.mode = 'lurk';
+        if (Math.abs(plan.target-plan.s) < 0.05) {
+          if (!plan.paused) { plan.paused = true; plan.until = 1+random()*3; }
+          else if (plan.until <= 0) {
+            plan.paused = false;
+            let next = plan.s+plan.dir*(3+random()*4);
+            if (next > range.hi || next < range.lo) { plan.dir = -plan.dir; next = plan.s+plan.dir*(3+random()*4); }
+            plan.target = Math.max(range.lo,Math.min(range.hi,next));
+          }
         }
       }
     }
     // Along the river toward its target, sunk ones deeper and slower.
-    const speed = (l.mode === 'hunt' ? speeds.hunt : speeds.lurk)*fast*(l.mode === 'sunk' ? 0.5 : 1), metres = Math.hypot(at(map,Math.floor(plan.s)+1).x-at(map,Math.floor(plan.s)).x,at(map,Math.floor(plan.s)+1).z-at(map,Math.floor(plan.s)).z) || 2;
-    const ds = Math.max(-1,Math.min(1,plan.target-plan.s))*Math.min(Math.abs(plan.target-plan.s),speed*dt/metres);
+    const speed = (l.mode === 'hunt' ? (plan.heard?.now ? speeds.hunt : speeds.search) : speeds.lurk)*fast*(l.mode === 'sunk' ? 0.5 : 1);
+    const here = at(map,plan.s), ahead = at(map,plan.s+(plan.target >= plan.s ? 0.5 : -0.5)), metres = Math.hypot(ahead.x-here.x,ahead.z-here.z)*2 || 2;
+    const ds = Math.sign(plan.target-plan.s)*Math.min(Math.abs(plan.target-plan.s),speed*dt/metres);
     plan.s = Math.max(range.lo,Math.min(range.hi,plan.s+ds));
     const q = at(map,plan.s);
     // Toward the bank it heard while hunting, back to the middle otherwise;
@@ -177,8 +204,17 @@ export function stepLurkers(layout: Layout, state: Snapshot, mission: Mission, d
       if (q.level-groundAt(map,x,z) >= depthNeeded) break;
       plan.offset *= 0.8;
     }
-    l.x = Math.round((q.x+q.nx*plan.offset)*100)/100; l.z = Math.round((q.z+q.nz*plan.offset)*100)/100;
+    const x = q.x+q.nx*plan.offset, z = q.z+q.nz*plan.offset;
+    // It faces the way it moves; still, it faces whoever it holds or the
+    // sound it came for, and otherwise keeps its heading.
+    const victim = l.mode === 'grab' ? state.players.find(p => p.id === l.grab) : undefined;
+    const was = plan.at ?? {x:l.x,z:l.z};
+    plan.at = {x,z};
+    if (victim) l.yaw = facing(x,z,victim.x,victim.z);
+    else if (Math.hypot(x-was.x,z-was.z) > 0.004) l.yaw = facing(was.x,was.z,x,z);
+    else if (plan.heard) l.yaw = facing(x,z,plan.heard.x,plan.heard.z);
+    l.yaw = Math.round(l.yaw*100)/100;
+    l.x = Math.round(x*100)/100; l.z = Math.round(z*100)/100;
     l.y = Math.round((q.level-(l.mode === 'sunk' ? 1.6 : l.mode === 'hunt' || l.mode === 'grab' ? 0.45 : 0.7))*100)/100;
-    l.yaw = Math.round((ds < 0 ? q.yaw+Math.PI : q.yaw)*100)/100;
   }
 }

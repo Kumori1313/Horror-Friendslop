@@ -5,7 +5,7 @@ import { groundAt, outdoors } from '../src/places.ts';
 import { waterLevel } from '../src/room-templates.ts';
 import type { Player } from '../src/room.ts';
 import { generateLayout } from '../src/server/generate-layout.ts';
-import { grabDamage, lurkerStretch, sinkTime } from '../src/server/lurkers.ts';
+import { grabDamage, linger, lurkerStretch, sinkTime } from '../src/server/lurkers.ts';
 import { Simulation } from '../src/server/simulation.ts';
 
 // Operators outdoors on seed 19, with the Lurker in its river.
@@ -34,24 +34,34 @@ function bank(seed = 19) {
         const x = p[k].x+nx*d*side, z = p[k].z+nz*d*side, wet = waterLevel(map.water,x,z);
         if (wet !== undefined && groundAt(map,x,z) <= wet+0.2) continue;
         mission.lurkers = [{id:2,x:p[k].x,y:p[k].level-0.7,z:p[k].z,yaw:0,mode:'lurk'}];
-        return {x,z,nx:nx*side,nz:nz*side};
+        return {x,z,nx:nx*side,nz:nz*side,k};
       }
     }
     return undefined;
   };
   return {sim,mission,map,player,put,run,lurker,beside};
 }
+// How closely its heading points from it toward (x, z): 1 dead ahead.
+const facingToward = (l: {x: number; z: number; yaw: number}, x: number, z: number) => {
+  const d = Math.hypot(x-l.x,z-l.z) || 1;
+  return (-Math.sin(l.yaw)*(x-l.x)-Math.cos(l.yaw)*(z-l.z))/d;
+};
 
 test('the Lurker starts in the river\'s deep water and patrols it without ever leaving', () => {
   for (const seed of [19,77,101]) {
     const {map,run,lurker} = bank(seed);
     const l = lurker();
     assert.ok(l,'seed '+seed+': a Lurker');
-    for (let t=0;t<60;t+=1) {
-      run(1);
+    let moves = 0;
+    for (let t=0;t<60;t+=1/6) {
+      const from = {x:l.x,z:l.z};
+      run(1/6);
       const level = waterLevel(map.water,l.x,l.z);
       assert.ok(level !== undefined && level-groundAt(map,l.x,l.z) >= 1.5,'seed '+seed+': in deep water at '+t+' s');
+      // Facing the way it goes.
+      if (Math.hypot(l.x-from.x,l.z-from.z) > 0.1) { moves++; assert.ok(facingToward(l,l.x+(l.x-from.x),l.z+(l.z-from.z)) > 0.8,'seed '+seed+': facing its way at '+t+' s'); }
     }
+    assert.ok(moves > 60,'seed '+seed+': it patrols');
   }
 });
 
@@ -66,6 +76,42 @@ test('it ignores someone standing still out of hearing, and comes along the rive
   // Pace up and down the bank.
   for (let i=0;i<60;i++) { sim.inputs.set(1,{forward:i % 30 < 15 ? 1 : -1,right:0,yaw:Math.atan2(spot.nz,spot.nx),pitch:0}); sim.tick(1/30); }
   assert.ok(['hunt','grab'].includes(lurker().mode),'heard: '+lurker().mode);
+});
+
+test('it goes to where it last heard someone after the sound stops, faces them while it waits, then patrols on', () => {
+  const {sim,map,player,put,run,lurker,beside} = bank();
+  const edge = beside(3)!, p = map.water.points, me = player(1);
+  // Standing 4 m back from the water.
+  const spot = {x:edge.x+edge.nx*4,z:edge.z+edge.nz*4};
+  // It starts some 7 m along the river, within its stretch.
+  const {lo,hi} = lurkerStretch(19), along = (step: number) => {
+    let j = edge.k;
+    while (j > lo && j < hi && Math.hypot(p[j].x-p[edge.k].x,p[j].z-p[edge.k].z) < 7) j += step;
+    return Math.hypot(p[j].x-p[edge.k].x,p[j].z-p[edge.k].z) >= 7 ? j : undefined;
+  };
+  const j = along(1) ?? along(-1)!;
+  Object.assign(lurker(),{x:p[j].x,z:p[j].z,y:p[j].level-0.7});
+  put(me,spot.x,spot.z);
+  run(1);
+  assert.equal(lurker().mode,'lurk','unheard while still');
+  // A few steps along the bank, then still again.
+  for (let i=0;i<12;i++) { sim.inputs.set(1,{forward:0,right:i < 6 ? 1 : -1,yaw:0,pitch:0}); sim.tick(1/30); }
+  assert.equal(lurker().mode,'hunt','heard');
+  // Then gone, out of its hearing: all it has is where it heard them.
+  const heardAt = {x:me.x,z:me.z};
+  put(me,map.exit.x+1,map.exit.z);
+  const start = Math.hypot(lurker().x-p[edge.k].x,lurker().z-p[edge.k].z);
+  assert.ok(start > 5,'starts '+start.toFixed(1)+' m off');
+  run(5);
+  const l = lurker();
+  assert.equal(l.mode,'hunt','still searching');
+  assert.ok(Math.hypot(l.x-p[edge.k].x,l.z-p[edge.k].z) < 3.5,'came to the spot: '+Math.hypot(l.x-p[edge.k].x,l.z-p[edge.k].z).toFixed(1)+' m from it');
+  assert.ok(facingToward(l,heardAt.x,heardAt.z) > 0.8,'facing the sound');
+  // It waits a while, then moves on.
+  const there = {x:l.x,z:l.z};
+  run(linger+5);
+  assert.equal(lurker().mode,'lurk','patrolling again');
+  assert.ok(Math.hypot(lurker().x-there.x,lurker().z-there.z) > 1,'moved on');
 });
 
 test('a grab hurts and holds: the victim can\'t walk away, is dragged in, and drowns if nobody helps', () => {

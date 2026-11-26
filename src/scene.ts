@@ -215,6 +215,30 @@ export function createScene(canvas: HTMLCanvasElement, generated = false) {
     gnawerModels.set(id,model);
     return model;
   }
+  // The Lurker: a long, dark, ridged shape lying just under the river's
+  // surface, two pale eyes on top; when it grabs, a long arm reaches out of
+  // the water to its victim.
+  const lurkerSkin = new T.MeshStandardMaterial({color:0x101615,roughness:0.35,metalness:0.2});
+  const lurkerEye = new T.MeshBasicMaterial({color:0xd8dcc4});
+  const lurkerModels = new Map<number,{group: T.Group; arm: T.Group}>();
+  function lurkerModel(id: number) {
+    let model = lurkerModels.get(id);
+    if (model) return model;
+    const group = new T.Group();
+    box(0,0,0.2,0.9,0.45,2.6,lurkerSkin,group);
+    box(0,0.05,-1.25,0.7,0.4,0.6,lurkerSkin,group);
+    for (const z of [-0.6,-0.1,0.4,0.9]) box(0,0.28,z,0.08,0.18,0.3,lurkerSkin,group);
+    for (const side of [-1,1]) box(side*0.18,0.27,-1.35,0.09,0.05,0.09,lurkerEye,group);
+    // The arm: from its head, pointing along its local -z, stretched to reach.
+    const arm = new T.Group(); arm.position.set(0,0.1,-1.4); group.add(arm);
+    box(0,0,-0.5,0.16,0.16,1,lurkerSkin,arm);
+    box(0,0,-1.05,0.32,0.08,0.22,lurkerSkin,arm);
+    arm.visible = false;
+    scene.add(group);
+    model = {group,arm};
+    lurkerModels.set(id,model);
+    return model;
+  }
   // Tines hang 1.2 m below the rim, shortened under low ceilings so they
   // stay above head height.
   const rim = 0.62, tineLength = 1.2;
@@ -558,6 +582,25 @@ export function createScene(canvas: HTMLCanvasElement, generated = false) {
       const room = creature && creature.mode !== 'dormant' ? layout?.rooms.find(r => r.id === creature.bay) : undefined;
       diver.visible = here === 'inside' && !!room;
       for (const model of gnawerModels.values()) model.group.visible = false;
+      // The Lurker shows only outside, gliding along the river.
+      for (const l of state.mission?.lurkers ?? []) {
+        const model = lurkerModel(l.id);
+        model.group.visible = here === 'outside';
+        if (!model.group.visible) continue;
+        const at = glide('l'+l.id,state.update,l.x,l.y,l.z,performance.now(),model.group.position);
+        model.group.position.copy(at);
+        model.group.rotation.y += Math.atan2(Math.sin(l.yaw-model.group.rotation.y),Math.cos(l.yaw-model.group.rotation.y))*Math.min(1,dt*6);
+        const victim = l.mode === 'grab' ? state.players.find(p => p.id === l.grab) : undefined;
+        model.arm.visible = !!victim;
+        if (victim) {
+          // Reach from its head to the victim's chest.
+          model.group.updateMatrixWorld();
+          const from = model.arm.getWorldPosition(new T.Vector3()), to = new T.Vector3(victim.x,(victim.feetY ?? 0)+1.1,victim.z), d = from.distanceTo(to);
+          model.arm.lookAt(to); model.arm.rotateY(Math.PI);
+          model.arm.scale.set(1,1,Math.max(0.3,d/1.1));
+        }
+      }
+      for (const [id,model] of lurkerModels) if (!state.mission?.lurkers?.some(l => l.id === id)) { scene.remove(model.group); lurkerModels.delete(id); }
       const salvageKind = new Map(layout && state.mission ? catalog(layout,state.mission).map(s => [s.id,s.kind]) : []);
       const heldKind = (p: Snapshot['players'][number]) => {
         const item = selected(p);

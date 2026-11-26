@@ -1,5 +1,5 @@
 import { bindPreferences } from './preferences.ts';
-import { assignment, finished, gone, itemName, nearestPickup, prices, swingTime, wallet, wareInfo } from './mission.ts';
+import { assignment, finished, gone, heldBy, itemName, nearestPickup, prices, swingTime, wallet, wareInfo } from './mission.ts';
 import { spawnSalvage, type ItemKind } from './salvage.ts';
 import { missionHud } from './mission-hud.ts';
 import { mountDiagnostics } from './diagnostics.ts';
@@ -44,7 +44,7 @@ function start(render: ReturnType<typeof createScene>, mode?: Crew | 'solo', sce
   let state: Snapshot | undefined;
   // Clients without the simulation on hand predict their own operator.
   let prediction: Prediction | undefined;
-  const frozen = (s: Snapshot) => !!s.mission && (finished(s.mission.stage) || s.mission.stage === 'settled' || s.mission.down.some(d => d.id === id) || !!s.mission.dead?.includes(id));
+  const frozen = (s: Snapshot) => !!s.mission && (finished(s.mission.stage) || s.mission.stage === 'settled' || s.mission.down.some(d => d.id === id) || !!s.mission.dead?.includes(id) || !!heldBy(s.mission,id));
   // A dead operator watches a partner still in the expedition.
   const watched = (s: Snapshot) => s.mission?.dead?.includes(id) ? s.players.find(p => p.id !== id && !gone(s.mission!,p.id)) : undefined;
   let layout: Layout | undefined, geometry: Geometry | undefined;

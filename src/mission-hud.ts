@@ -3,7 +3,7 @@ import chainTwo from './audio/chain-2.wav?url';
 import type { Layout } from './layout.ts';
 import type { Player, Snapshot } from './room.ts';
 import type { Preferences } from './preferences.ts';
-import { finished, healthOf, hears, itemName, listen, lossPercent, maxHealth } from './mission.ts';
+import { finished, healthOf, heldBy, hears, itemName, listen, lossPercent, maxHealth } from './mission.ts';
 import { placeOf } from './places.ts';
 
 const el = (id: string) => document.getElementById(id)!;
@@ -144,10 +144,30 @@ export function missionHud(preferences: Preferences, operator = (id: number) => 
       }
     }
   }
+  // The Lurker: a heavy splash at a grab, a slow slosh while it moves near.
+  const seenGrabs = new Map<number,number>(), lurkerSeen = new Map<number,{x: number; z: number}>();
+  let nextSlosh = 0, sloshHeard = 0;
+  function lurkerCues(state: Snapshot, self: Player) {
+    const m = state.mission!, now = performance.now();
+    for (const l of m.lurkers ?? []) {
+      const d = Math.hypot(l.x-self.x,l.z-self.z), heard = placeOf(self) === 'outside' && d < 18;
+      const last = lurkerSeen.get(l.id), moving = !!last && Math.hypot(last.x-l.x,last.z-l.z) > 0.01;
+      lurkerSeen.set(l.id,{x:l.x,z:l.z});
+      const grabs = l.grabs ?? 0, seen = seenGrabs.get(l.id);
+      if (seen !== undefined && grabs > seen && heard) { noise(0.7*(1-d/18),0.5,500); noise(0.5*(1-d/18),0.35,260); subtitle('A heavy splash'); }
+      seenGrabs.set(l.id,grabs);
+      if (heard && moving && l.mode !== 'sunk' && now >= nextSlosh) {
+        nextSlosh = now+400+Math.random()*500;
+        noise(0.16*(1-d/18),0.4,300+Math.random()*200);
+        if (now-sloshHeard > 10000) subtitle('Something moves in the water');
+        sloshHeard = now;
+      }
+    }
+  }
   function update(layout: Layout, state: Snapshot, self: Player, room: string | undefined, briefing: boolean) {
     const m = state.mission!;
     vitals(state,!briefing && m.stage === 'explore' && placeOf(self) !== 'home');
-    if (m.stage === 'explore') { hurtCue(self); gnawerCues(state,self); }
+    if (m.stage === 'explore') { hurtCue(self); gnawerCues(state,self); lurkerCues(state,self); }
     const c = m.contract;
     const end = finished(m.stage), report = end || m.stage === 'settled';
     el('result').hidden = !report;
@@ -214,6 +234,8 @@ export function missionHud(preferences: Preferences, operator = (id: number) => 
     if (m.dead?.includes(self.id)) alerts.push('You died. Your crew can still make it out');
     // Under water: the breath left, and partners going under.
     for (const d of m.drowning ?? []) alerts.push(d.id === self.id ? 'Under water! Get your head up · '+Math.max(0,Math.ceil(d.seconds))+'s' : operator(d.id)+' is under water');
+    // Held by the Lurker.
+    for (const p of state.players) if (heldBy(m,p.id)) alerts.push(p.id === self.id ? 'Something has you! Mash Space to struggle' : operator(p.id)+' is being dragged into the river! Hit it to free them');
     for (const id of m.dead ?? []) if (id !== self.id) alerts.push(operator(id)+' died');
     for (const id of m.escaped ?? []) if (id !== self.id) alerts.push(operator(id)+' made it out');
     for (const d of m.down) alerts.push((d.id === self.id ? 'You are down. Your partner can revive you' :

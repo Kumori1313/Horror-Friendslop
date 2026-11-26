@@ -98,7 +98,18 @@ export interface Mission {
   down: { id: number; seconds: number }[];
   // Scavengers in the facility, spawned when the expedition starts.
   gnawers?: Gnawer[];
+  // The river's Lurker, outside from the start.
+  lurkers?: Lurker[];
 }
+// The Lurker: a long dark thing under the river's deep water. It patrols the
+// channel, comes along the river toward anyone it hears moving nearby, and
+// grabs anyone within reach (`grab`: the operator it holds), dragging them
+// toward the deep water to drown. A hit (baton, thrown item, lit flare) near
+// it or its victim makes it let go and sink away for a while (`sunk`).
+// `grabs` counts its grabs, so every client hears each once.
+export interface Lurker { id: number; x: number; y: number; z: number; yaw: number; mode: 'lurk' | 'hunt' | 'grab' | 'sunk'; grab?: number; grabs?: number }
+// The Lurker holding this operator, if any.
+export const heldBy = (mission: Mission | undefined, id: number) => mission?.lurkers?.find(l => l.mode === 'grab' && l.grab === id);
 // Health: 100, recovering slowly once unhurt for a while, but only back to
 // `recoverTo`. At none, an operator goes down; a revive brings them back with
 // `revivedHealth`. Home restores everyone.

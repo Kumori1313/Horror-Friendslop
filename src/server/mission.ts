@@ -2,11 +2,12 @@ import { anchor, connections, nextWiredBay, neighbours, zoneAt, type Layout } fr
 import { storey, type Point3 } from '../room-templates.ts';
 import { gone, healthOf, items, kept, maxHealth, pace, recoverAfter, recoverRate, recoverTo, sameStorey, sprawl, stunTime } from '../mission.ts';
 import { spawnGnawers, stepGnawers } from './gnawers.ts';
+import { spawnLurkers, stepLurkers } from './lurkers.ts';
 import type { Contract, Diver, Mission, Receipt } from '../mission.ts';
 import type { Player, Snapshot } from '../room.ts';
 import { expeditionSeed, facilityValue } from '../salvage.ts';
 import { generateLayout } from './generate-layout.ts';
-import { placeOf } from '../places.ts';
+import { placeOf, type Place } from '../places.ts';
 
 export const expeditionsPerContract = 3;
 // The quota asks for a little under half of everything the three facilities hold.
@@ -225,7 +226,7 @@ export function die(state: Snapshot, mission: Mission, id: number, sunk = false)
 // What the simulation tells the Gnawers each tick: lit flares and thrown
 // items in flight that drive them off, and how to knock an operator's
 // salvage loose (the item's id, if any).
-export interface Hooks { threats?: (Point3 & {reach: number})[]; drop?: (p: Player) => string | undefined }
+export interface Hooks { threats?: (Point3 & {reach: number; place: Place})[]; drop?: (p: Player) => string | undefined }
 export function advanceMission(layout: Layout, state: Snapshot, mission: Mission, dt: number, locate: (p: Player) => string | undefined, random: () => number = Math.random, hooks: Hooks = {}) {
   for (const down of mission.down) down.seconds = Math.max(0,down.seconds-dt);
   for (const d of mission.down.filter(d => d.seconds === 0)) die(state,mission,d.id);
@@ -238,6 +239,9 @@ export function advanceMission(layout: Layout, state: Snapshot, mission: Mission
   if (!active.length) { endExpedition(layout,state,mission); return; }
   recover(state,mission,dt);
   mission.gnawers ??= spawnGnawers(layout,mission,random);
-  stepGnawers(layout,state,mission,dt,random,hooks.threats ?? [],(p,damage) => hurt(state,mission,p,damage),hooks.drop ?? (() => undefined));
+  mission.lurkers ??= spawnLurkers(layout);
+  const threats = hooks.threats ?? [], harm = (p: Player, damage: number) => hurt(state,mission,p,damage);
+  stepGnawers(layout,state,mission,dt,random,threats.filter(t => t.place === 'inside'),harm,hooks.drop ?? (() => undefined));
+  stepLurkers(layout,state,mission,dt,random,threats.filter(t => t.place === 'outside'),harm);
   hunt(layout,state,mission,dt,locate,random);
 }

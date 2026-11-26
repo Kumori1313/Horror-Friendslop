@@ -3,12 +3,13 @@ import type { Action, Aim, Command, Input, Lamp, Player, Snapshot } from '../roo
 import { flightStep, gravity, launchFrom, positionAt, trajectory } from '../flight.ts';
 import type { Body, Flight, Path } from '../flight.ts';
 import { flareFear, swat } from './gnawers.ts';
+import { struggle, swatLurker } from './lurkers.ts';
 
 import { geometryFor, inPit, nearbyDoor, playerRadius, spawnPoints } from '../layout.ts';
 import type { Layout, Geometry, Rect } from '../layout.ts';
 
 import { climbable, headHeight, obstaclesAt, pitKill, surfaceAt, surfaceHeight, wadeDepth, waterLevel, type Point3, type Solid } from '../room-templates.ts';
-import { assignment, batonReach, bellSpan, breathTime, recoverAfter, revivedHealth, swingTime, catalog, deliverySpot, distance, diverBody, finished, flareTime, gone, nearestPickup, prices, wallet } from '../mission.ts';
+import { assignment, batonReach, bellSpan, breathTime, heldBy, recoverAfter, revivedHealth, swingTime, catalog, deliverySpot, distance, diverBody, finished, flareTime, gone, nearestPickup, prices, wallet } from '../mission.ts';
 import { doorReach, home, insideDoors, outdoors, placeOf, riftOpen, riftReach, riftSpot } from '../places.ts';
 import type { Place, Stand } from '../places.ts';
 import { bodyOf, expeditionSeed, itemKinds, spawnSalvage } from '../salvage.ts';
@@ -286,6 +287,9 @@ export class Simulation {
   // The arc of each thrown thing still in flight, by id (host only), so the
   // Gnawers can tell when one comes close.
   private arcs = new Map<string,Path>();
+  // Whether each operator's jump key was down last tick, so a held victim's
+  // struggle counts each fresh press.
+  private jumping = new Map<number,boolean>();
 
   join(assignedSeat?: number) {
     const seats = this.state.mission?.solo || this.layout?.tour ? [1] : [1,2];
@@ -325,6 +329,16 @@ export class Simulation {
         continue;
       }
       const place = placeOf(p);
+      // Held by the Lurker: no walking, only looking about and struggling
+      // (each fresh press of the jump key), while it drags them.
+      if (mission && heldBy(mission,p.id)) {
+        p.yaw = input.yaw; p.pitch = input.pitch;
+        if (input.jump && !this.jumping.get(p.id)) struggle(mission,p.id);
+        this.jumping.set(p.id,!!input.jump);
+        fall(p,dt,this.geometryAt(place));
+        if (this.state.lamp.owner === p.id) this.hold(p);
+        continue;
+      }
       moveOperator(p,input,dt,this.geometryAt(place),this.openedAt(place));
       // Fallen into a pit during an expedition: dead, and what they carried
       // is gone with them.
@@ -391,17 +405,18 @@ export class Simulation {
   // What drives a Gnawer off: a lit flare within `flareFear`, wherever it is,
   // and a thrown thing in flight passing close.
   private threats() {
-    const mission = this.state.mission, out: (Point3 & {reach: number})[] = [];
+    const mission = this.state.mission, out: (Point3 & {reach: number; place: Place})[] = [];
     if (!mission) return out;
     const lamp = this.state.lamp;
     for (const e of [...mission.haul,{...lamp,id:lampSlot}]) {
-      if (placeOf(e) !== 'inside') continue;
+      const place = placeOf(e);
+      if (place === 'home') continue;
       const path = e.flight && this.arcs.get(e.id);
-      if (e.flight && path) out.push({...positionAt(path,e.flight.t),reach:0.8});
+      if (e.flight && path) out.push({...positionAt(path,e.flight.t),reach:0.8,place});
       else if (!e.flight) this.arcs.delete(e.id);
       if ('burn' in e && e.burn !== undefined && e.burn > 0 && !('used' in e && e.used)) {
         const holder = e.owner !== null ? this.state.players.find(q => q.id === e.owner) : undefined;
-        out.push(holder ? {x:holder.x,y:holder.feetY ?? 0,z:holder.z,reach:flareFear} : {x:e.x,y:e.y,z:e.z,reach:flareFear});
+        out.push(holder ? {x:holder.x,y:holder.feetY ?? 0,z:holder.z,reach:flareFear,place} : {x:e.x,y:e.y,z:e.z,reach:flareFear,place});
       }
     }
     return out;
@@ -720,8 +735,9 @@ export class Simulation {
     if (this.time-(this.swungAt.get(p.id) ?? -Infinity) < swingTime*0.8) return;
     this.swungAt.set(p.id,this.time);
     p.swings = (p.swings ?? 0)+1;
-    // A Gnawer within reach ahead takes the hit first.
+    // A Gnawer within reach ahead takes the hit first; outside, the Lurker.
     if (placeOf(p) === 'inside' && swat(layout,this.state,mission,p)) return;
+    if (placeOf(p) === 'outside') { swatLurker(mission,this.state,p); return; }
     const bell = bellSpan(layout,mission.diver,mission), feet = p.feetY ?? 0;
     if (!bell || placeOf(p) !== 'inside' || this.roomOf(p) !== mission.diver.bay) return;
     const dx = bell.x-p.x, dz = bell.z-p.z, d = Math.hypot(dx,dz);
@@ -751,7 +767,7 @@ export class Simulation {
     this.state.opened = [];
     // Bought gear that came home stays; everything else went with the facility.
     Object.assign(mission,{stage:'home',haul:wipe ? [] : mission.haul.filter(h => h.kind),down:[],awake:false,diver:{mode:'dormant',bay:'',seconds:0}});
-    for (const key of ['arrival','bell','rift','enraged','escaped','dead','clock','drowning','gnawers'] as const) delete mission[key];
+    for (const key of ['arrival','bell','rift','enraged','escaped','dead','clock','drowning','gnawers','lurkers'] as const) delete mission[key];
     this.fillSlots();
   }
 }

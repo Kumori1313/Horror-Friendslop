@@ -768,7 +768,7 @@ export class Simulation {
     this.state.opened = [];
     // Bought gear that came home stays; everything else went with the facility.
     Object.assign(mission,{stage:'home',haul:wipe ? [] : mission.haul.filter(h => h.kind),down:[],awake:false,diver:{mode:'dormant',bay:'',seconds:0}});
-    for (const key of ['arrival','bell','rift','enraged','escaped','dead','clock','drowning','gnawers','lurkers','stalkers','prowl','flat'] as const) delete mission[key];
+    for (const key of ['arrival','bell','rift','enraged','escaped','dead','clock','drowning','gnawers','lurkers','stalkers','flat'] as const) delete mission[key];
     this.fillSlots();
   }
 }

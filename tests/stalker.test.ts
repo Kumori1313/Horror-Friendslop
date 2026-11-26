@@ -45,7 +45,7 @@ function setup(seed: number) {
   return {layout,sim,mission,map,player,put,run,place,arena:arena!};
 }
 
-test('none come at first; the first after three minutes outside, one more every two, up to three; the bell sends one more', () => {
+test('none come at first; the first after three minutes, inside or out, one more every two, up to three; the bell sends one more', () => {
   const {sim,mission,map,player,run} = field();
   const keepUp = () => { mission.down = []; delete mission.flat; for (const p of sim.state.players) p.hp = maxHealth; };
   const spawned: {x: number; z: number}[] = [];
@@ -53,19 +53,19 @@ test('none come at first; the first after three minutes outside, one more every 
     keepUp();
     for (const s of mission.stalkers ?? []) if (!spawned[s.id-1]) {
       spawned[s.id-1] = {x:s.x,z:s.z};
-      for (const p of sim.state.players) assert.ok(Math.hypot(p.x-s.x,p.z-s.z) >= 45,'stalker '+s.id+' arrives far off');
+      const far = sim.state.players.filter(p => p.place === 'outside').map(p => ({x:p.x,z:p.z}));
+      for (const p of far.length ? far : [map.exit]) assert.ok(Math.hypot(p.x-s.x,p.z-s.z) >= 45,'stalker '+s.id+' arrives far off');
       assert.ok(!deep(map.geometry,s.x,s.z,s.y),'not in the river');
     }
   };
-  // Time spent inside doesn't count.
+  // Time inside counts: the first arrives while the crew is in the
+  // facility, far from the main door.
   for (const p of sim.state.players) p.place = 'inside';
-  run(30,watch);
-  assert.equal(mission.prowl ?? 0,0);
-  for (const p of sim.state.players) p.place = 'outside';
   run(firstAfter-2,watch);
   assert.equal(mission.stalkers?.length ?? 0,0,'none yet');
   run(3,watch);
-  assert.equal(mission.stalkers?.length,1,'the first');
+  assert.equal(mission.stalkers?.length,1,'the first, while inside');
+  for (const p of sim.state.players) p.place = 'outside';
   run(every,watch);
   assert.equal(mission.stalkers?.length,2,'the second');
   run(every,watch);

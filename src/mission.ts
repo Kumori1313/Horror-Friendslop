@@ -100,10 +100,9 @@ export interface Mission {
   gnawers?: Gnawer[];
   // The river's Lurker, outside from the start.
   lurkers?: Lurker[];
-  // Stalkers roaming outside: none at first, more the longer the crew spends
-  // outside (`prowl`, whole seconds with anyone outside), one more at the bell.
+  // Stalkers roaming outside: none at first, more as the expedition goes on
+  // (by `clock`, inside or out), one more at the bell.
   stalkers?: Stalker[];
-  prowl?: number;
   // Operators knocked flat by a stalker's charge, and for how much longer.
   flat?: {id: number; seconds: number}[];
 }

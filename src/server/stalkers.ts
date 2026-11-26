@@ -10,8 +10,9 @@ import type { Player, Snapshot } from '../room.ts';
 import { climbable, planningGrade, type Point3, type Surface } from '../room-templates.ts';
 import { flareFear } from './gnawers.ts';
 
-// The build-up: the first after `firstAfter` seconds with anyone outside,
-// one more every `every` seconds, up to `most`; the bell sends one more.
+// The build-up, by the expedition's clock (time inside counts too): the
+// first after `firstAfter` seconds, one more every `every` seconds, up to
+// `most`; the bell sends one more.
 export const firstAfter = 180, every = 120, most = 3;
 // It sees an operator within `sight` m (`lampSight` with a flashlight lit in
 // hand) along a clear line, and hears anyone moving within `hearing` m. Seen
@@ -140,7 +141,7 @@ export function inSight(layout: Layout, from: Point3, to: Point3) {
 }
 
 interface Plan { path: Point3[]; goal?: {x: number; z: number}; replan: number; timer: number; cooldown: number; target?: number; seen?: {x: number; z: number}; aim?: {x: number; z: number}; left: number; hit: Set<number>; away?: {x: number; z: number}; last: Map<number,{x: number; z: number}> }
-const plans = new WeakMap<Mission,Map<number,Plan>>(), clocks = new WeakMap<Mission,{acc: number}>();
+const plans = new WeakMap<Mission,Map<number,Plan>>();
 function planOf(mission: Mission, id: number) {
   let all = plans.get(mission);
   if (!all) plans.set(mission,all = new Map());
@@ -209,10 +210,7 @@ export function stepStalkers(layout: Layout, state: Snapshot, mission: Mission, 
   }
   const outside = state.players.filter(p => p.connected && placeOf(p) === 'outside' && !gone(mission,p.id));
   // The build-up.
-  let clock = clocks.get(mission);
-  if (!clock) clocks.set(mission,clock = {acc:0});
-  if (outside.length) { clock.acc += dt; while (clock.acc >= 1) { clock.acc -= 1; mission.prowl = (mission.prowl ?? 0)+1; } }
-  const prowl = mission.prowl ?? 0, wanted = Math.min(most,prowl >= firstAfter ? 1+Math.floor((prowl-firstAfter)/every) : 0)+(mission.enraged ? 1 : 0);
+  const clock = mission.clock ?? 0, wanted = Math.min(most,clock >= firstAfter ? 1+Math.floor((clock-firstAfter)/every) : 0)+(mission.enraged ? 1 : 0);
   const map = outdoors(layout.seed);
   if ((mission.stalkers?.length ?? 0) < wanted) {
     const nav = grid(map);

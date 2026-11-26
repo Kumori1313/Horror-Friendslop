@@ -1,13 +1,14 @@
 import { batteryLife, chargeOf, clearAt, command, freeSlot, hotbarSize, lampSlot, selected, slotsOf, sprintSpeed, walls } from '../room.ts';
 import type { Action, Aim, Command, Input, Lamp, Player, Snapshot } from '../room.ts';
-import { flightStep, gravity, launchFrom, trajectory } from '../flight.ts';
-import type { Body, Flight } from '../flight.ts';
+import { flightStep, gravity, launchFrom, positionAt, trajectory } from '../flight.ts';
+import type { Body, Flight, Path } from '../flight.ts';
+import { flareFear, swat } from './gnawers.ts';
 
 import { geometryFor, inPit, nearbyDoor, playerRadius, spawnPoints } from '../layout.ts';
 import type { Layout, Geometry, Rect } from '../layout.ts';
 
-import { climbable, headHeight, obstaclesAt, pitKill, surfaceAt, surfaceHeight, wadeDepth, waterLevel, type Solid } from '../room-templates.ts';
-import { assignment, batonReach, bellSpan, breathTime, swingTime, catalog, deliverySpot, distance, diverBody, finished, flareTime, gone, nearestPickup, prices, wallet } from '../mission.ts';
+import { climbable, headHeight, obstaclesAt, pitKill, surfaceAt, surfaceHeight, wadeDepth, waterLevel, type Point3, type Solid } from '../room-templates.ts';
+import { assignment, batonReach, bellSpan, breathTime, recoverAfter, revivedHealth, swingTime, catalog, deliverySpot, distance, diverBody, finished, flareTime, gone, nearestPickup, prices, wallet } from '../mission.ts';
 import { doorReach, home, insideDoors, outdoors, placeOf, riftOpen, riftReach, riftSpot } from '../places.ts';
 import type { Place, Stand } from '../places.ts';
 import { bodyOf, expeditionSeed, itemKinds, spawnSalvage } from '../salvage.ts';
@@ -261,6 +262,9 @@ export class Simulation {
   // Simulated seconds, and when each operator last swung a baton.
   private time = 0;
   private swungAt = new Map<number,number>();
+  // The arc of each thrown thing still in flight, by id (host only), so the
+  // Gnawers can tell when one comes close.
+  private arcs = new Map<string,Path>();
 
   join(assignedSeat?: number) {
     const seats = this.state.mission?.solo || this.layout?.tour ? [1] : [1,2];
@@ -358,9 +362,38 @@ export class Simulation {
       if (this.elapsed >= 1-1e-9) { const whole = Math.floor(this.elapsed+1e-9); this.elapsed -= whole; mission.clock = (mission.clock ?? 0)+whole; }
     }
     if (mission?.stage === 'explore' && this.layout) {
-      advanceMission(this.layout,this.state,mission,dt,p => this.roomOf(p),this.random);
+      advanceMission(this.layout,this.state,mission,dt,p => this.roomOf(p),this.random,{threats:this.threats(),drop:p => this.knock(p)});
       if (mission.stage !== 'explore') this.returnHome();
     }
+  }
+
+  // What drives a Gnawer off: a lit flare within `flareFear`, wherever it is,
+  // and a thrown thing in flight passing close.
+  private threats() {
+    const mission = this.state.mission, out: (Point3 & {reach: number})[] = [];
+    if (!mission) return out;
+    const lamp = this.state.lamp;
+    for (const e of [...mission.haul,{...lamp,id:lampSlot}]) {
+      if (placeOf(e) !== 'inside') continue;
+      const path = e.flight && this.arcs.get(e.id);
+      if (e.flight && path) out.push({...positionAt(path,e.flight.t),reach:0.8});
+      else if (!e.flight) this.arcs.delete(e.id);
+      if ('burn' in e && e.burn !== undefined && e.burn > 0 && !('used' in e && e.used)) {
+        const holder = e.owner !== null ? this.state.players.find(q => q.id === e.owner) : undefined;
+        out.push(holder ? {x:holder.x,y:holder.feetY ?? 0,z:holder.z,reach:flareFear} : {x:e.x,y:e.y,z:e.z,reach:flareFear});
+      }
+    }
+    return out;
+  }
+
+  // A Gnawer's bite knocks salvage (not the flashlight, not bought gear) out
+  // of the victim's hand, to their feet.
+  private knock(p: Player) {
+    const item = selected(p), h = item && item !== lampSlot ? this.state.mission?.haul.find(e => e.id === item && e.owner === p.id) : undefined;
+    if (!item || !h || h.kind) return;
+    Object.assign(h,{owner:null,x:p.x,y:p.feetY ?? 0,z:p.z,place:placeOf(p)});
+    this.release(p,item);
+    return item;
   }
 
   // The facility room an operator stands in; nothing outside the facility.
@@ -430,7 +463,8 @@ export class Simulation {
 
   // After a sale everyone is back home, with the flashlight in its place.
   private returnHome() {
-    for (const q of this.state.players) this.moveTo(q,'home',home().spawns[q.id-1] ?? home().spawns[0]);
+    // Home restores everyone's health.
+    for (const q of this.state.players) { this.moveTo(q,'home',home().spawns[q.id-1] ?? home().spawns[0]); delete q.hp; delete q.calm; }
     // A flashlight left behind stays lost until the crew buys another.
     if (!this.state.lamp.lost) Object.assign(this.state.lamp,{...home().lamp,y:0.14,yaw:0,pitch:0,owner:null,on:chargeOf(this.state.lamp) > 0,stowed:false,place:'home'});
     else Object.assign(this.state.lamp,{owner:null,on:false,stowed:false});
@@ -479,6 +513,7 @@ export class Simulation {
       const speed = dropped ? 0 : throwSpeed(aim.power,kind !== 'lamp' && !!itemKinds[kind].heavy);
       const start = launchFrom(g,opened,p,{fx:-Math.sin(aim.yaw),fz:-Math.cos(aim.yaw),up:Math.sin(aim.pitch),speed},body);
       const path = trajectory(g,opened,start,body,feet);
+      this.arcs.set(item,path);
       rest = path.rest;
       if (path.duration > 0) flight = {...start,t:0,d:path.duration};
       // A throw whose arc passes through the exit rift ends there, banked.
@@ -555,7 +590,12 @@ export class Simulation {
     const layout = this.layout;
     if (layout && mission && action === 'operate') {
       const task = assignment(layout,this.state,p,this.solids(p));
-      if (task?.kind === 'revive') mission.down = mission.down.filter(d => !this.state.players.some(q => q.id === d.id && q.id !== id && distance(q,p) <= 1.7));
+      if (task?.kind === 'revive') {
+        // Back on their feet, with a little health.
+        const revived = this.state.players.filter(q => q.id !== id && distance(q,p) <= 1.7 && mission.down.some(d => d.id === q.id));
+        mission.down = mission.down.filter(d => !revived.some(q => q.id === d.id));
+        for (const q of revived) Object.assign(q,{hp:revivedHealth,calm:recoverAfter});
+      }
       else if (task?.kind === 'ring') this.ring(p);
       return;
     }
@@ -655,6 +695,8 @@ export class Simulation {
     if (this.time-(this.swungAt.get(p.id) ?? -Infinity) < swingTime*0.8) return;
     this.swungAt.set(p.id,this.time);
     p.swings = (p.swings ?? 0)+1;
+    // A Gnawer within reach ahead takes the hit first.
+    if (placeOf(p) === 'inside' && swat(layout,this.state,mission,p)) return;
     const bell = bellSpan(layout,mission.diver,mission), feet = p.feetY ?? 0;
     if (!bell || placeOf(p) !== 'inside' || this.roomOf(p) !== mission.diver.bay) return;
     const dx = bell.x-p.x, dz = bell.z-p.z, d = Math.hypot(dx,dz);
@@ -684,7 +726,7 @@ export class Simulation {
     this.state.opened = [];
     // Bought gear that came home stays; everything else went with the facility.
     Object.assign(mission,{stage:'home',haul:wipe ? [] : mission.haul.filter(h => h.kind),down:[],awake:false,diver:{mode:'dormant',bay:'',seconds:0}});
-    for (const key of ['arrival','bell','rift','enraged','escaped','dead','clock','drowning'] as const) delete mission[key];
+    for (const key of ['arrival','bell','rift','enraged','escaped','dead','clock','drowning','gnawers'] as const) delete mission[key];
     this.fillSlots();
   }
 }

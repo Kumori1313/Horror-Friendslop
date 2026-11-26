@@ -20,7 +20,10 @@ export const sprintSpeed = 2.5;
 // turn its own view.
 // `swings` counts baton swings, so partners can play each one.
 // `vy`: vertical speed in metres per second while airborne (absent on the ground).
-export interface Player extends Point { feetY?: number; vy?: number; connected: boolean; id: number; yaw: number; pitch: number; slots?: (string | null)[]; hand?: number; place?: Place; transit?: {n: number; yaw: number}; swings?: number }
+// `hp`: health out of `maxHealth` (absent means full); `calm`: seconds until
+// it starts to recover; `hits`: how many times they have been hurt, so every
+// client can show each hit once.
+export interface Player extends Point { feetY?: number; vy?: number; hp?: number; calm?: number; hits?: number; connected: boolean; id: number; yaw: number; pitch: number; slots?: (string | null)[]; hand?: number; place?: Place; transit?: {n: number; yaw: number}; swings?: number }
 // A carried flashlight is `stowed` (clipped to the chest, dimmer) when its
 // holder has another slot selected. `flight` is set while it is thrown.
 // `homeward` marks a flashlight thrown into the exit rift: it goes home once its flight ends.

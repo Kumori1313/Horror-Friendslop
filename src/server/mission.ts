@@ -1,6 +1,7 @@
 import { anchor, connections, nextWiredBay, neighbours, zoneAt, type Layout } from '../layout.ts';
-import { storey } from '../room-templates.ts';
-import { gone, items, kept, pace, sameStorey, sprawl, stunTime } from '../mission.ts';
+import { storey, type Point3 } from '../room-templates.ts';
+import { gone, healthOf, items, kept, maxHealth, pace, recoverAfter, recoverRate, recoverTo, sameStorey, sprawl, stunTime } from '../mission.ts';
+import { spawnGnawers, stepGnawers } from './gnawers.ts';
 import type { Contract, Diver, Mission, Receipt } from '../mission.ts';
 import type { Player, Snapshot } from '../room.ts';
 import { expeditionSeed, facilityValue } from '../salvage.ts';
@@ -55,10 +56,27 @@ function enter(layout: Layout, diver: Diver, room: string, over: Player | undefi
   diver.clip = random() < 0.5 ? 0 : 1;
 }
 
-// A struck operator goes down and drops the flashlight; they keep their salvage.
-function strike(state: Snapshot, mission: Mission, p: Player) {
+// Damage to an operator. Recovery waits `recoverAfter` seconds from the last
+// hit. At none, they go down and drop the flashlight; they keep their salvage.
+export function hurt(state: Snapshot, mission: Mission, p: Player, damage: number) {
+  if (damage <= 0 || mission.down.some(d => d.id === p.id) || gone(mission,p.id)) return;
+  p.hp = Math.max(0,Math.round((healthOf(p)-damage)*10)/10);
+  p.calm = recoverAfter;
+  p.hits = (p.hits ?? 0)+1;
+  if (p.hp > 0) return;
   mission.down.push({id:p.id,seconds:75});
   if (state.lamp.owner === p.id) Object.assign(state.lamp,{x:p.x,z:p.z,y:(p.feetY ?? 0)+0.14,owner:null,pitch:0,stowed:false});
+}
+// The Bell Diver's strike downs outright.
+function strike(state: Snapshot, mission: Mission, p: Player) { hurt(state,mission,p,maxHealth); }
+
+// Unhurt for a while, health creeps back, but only to `recoverTo`.
+function recover(state: Snapshot, mission: Mission, dt: number) {
+  for (const p of state.players) {
+    if (mission.down.some(d => d.id === p.id) || gone(mission,p.id)) continue;
+    if (p.calm !== undefined) { p.calm = Math.round(Math.max(0,p.calm-dt)*100)/100; if (p.calm > 0) continue; delete p.calm; }
+    if (p.hp !== undefined && p.hp < recoverTo) p.hp = Math.min(recoverTo,Math.round((p.hp+recoverRate*dt)*100)/100);
+  }
 }
 
 // A thrown item reached it: no drops or moves for `stunTime` seconds, and a
@@ -204,7 +222,11 @@ export function die(state: Snapshot, mission: Mission, id: number, sunk = false)
 }
 
 // `locate` names the room whose floor an operator stands on.
-export function advanceMission(layout: Layout, state: Snapshot, mission: Mission, dt: number, locate: (p: Player) => string | undefined, random: () => number = Math.random) {
+// What the simulation tells the Gnawers each tick: lit flares and thrown
+// items in flight that drive them off, and how to knock an operator's
+// salvage loose (the item's id, if any).
+export interface Hooks { threats?: (Point3 & {reach: number})[]; drop?: (p: Player) => string | undefined }
+export function advanceMission(layout: Layout, state: Snapshot, mission: Mission, dt: number, locate: (p: Player) => string | undefined, random: () => number = Math.random, hooks: Hooks = {}) {
   for (const down of mission.down) down.seconds = Math.max(0,down.seconds-dt);
   for (const d of mission.down.filter(d => d.seconds === 0)) die(state,mission,d.id);
   if (mission.rift) {
@@ -214,5 +236,8 @@ export function advanceMission(layout: Layout, state: Snapshot, mission: Mission
   // Once nobody is left who could still act, the expedition ends at once.
   const active = state.players.filter(p => !gone(mission,p.id) && !mission.down.some(d => d.id === p.id));
   if (!active.length) { endExpedition(layout,state,mission); return; }
+  recover(state,mission,dt);
+  mission.gnawers ??= spawnGnawers(layout,mission,random);
+  stepGnawers(layout,state,mission,dt,random,hooks.threats ?? [],(p,damage) => hurt(state,mission,p,damage),hooks.drop ?? (() => undefined));
   hunt(layout,state,mission,dt,locate,random);
 }

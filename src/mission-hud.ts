@@ -3,7 +3,7 @@ import chainTwo from './audio/chain-2.wav?url';
 import type { Layout } from './layout.ts';
 import type { Player, Snapshot } from './room.ts';
 import type { Preferences } from './preferences.ts';
-import { finished, hears, itemName, listen, lossPercent } from './mission.ts';
+import { finished, healthOf, hears, itemName, listen, lossPercent, maxHealth } from './mission.ts';
 import { placeOf } from './places.ts';
 
 const el = (id: string) => document.getElementById(id)!;
@@ -77,8 +77,77 @@ export function missionHud(preferences: Preferences, operator = (id: number) => 
   // the first snapshot, so joining or refreshing replays nothing.
   let heardMoves: number | undefined;
   let wasStunned = false;
+  // Hits taken and Gnawer bites already shown; undefined until the first
+  // snapshot, so joining or refreshing replays nothing.
+  let seenHits: number | undefined;
+  const seenBites = new Map<number,number>(), lastSeen = new Map<number,{x: number; z: number}>();
+  let nextSkitter = 0, skitterHeard = 0;
+  function noise(level: number, duration: number, hz: number) {
+    if (audio?.state !== 'running' || preferences.volume === 0 || document.hidden) return;
+    const now = audio.currentTime, length = Math.ceil(audio.sampleRate*duration), buffer = audio.createBuffer(1,length,audio.sampleRate);
+    const data = buffer.getChannelData(0);
+    for (let i=0;i<length;i++) data[i] = (Math.random()*2-1)*(1-i/length)**3;
+    const source = audio.createBufferSource(), filter = audio.createBiquadFilter(), gain = audio.createGain();
+    source.buffer = buffer; filter.type = 'bandpass'; filter.frequency.value = hz; filter.Q.value = 3;
+    gain.gain.value = level*preferences.volume;
+    source.connect(filter).connect(gain).connect(audio.destination);
+    source.start(now);
+  }
+  // Each operator's health, bottom left.
+  function vitals(state: Snapshot, show: boolean) {
+    const box = el('vitals'), m = state.mission!;
+    box.hidden = !show;
+    if (!show) return;
+    const rows = state.players.filter(p => p.connected || m.down.some(d => d.id === p.id)).map(p => {
+      const hp = healthOf(p), down = m.down.some(d => d.id === p.id), dead = m.dead?.includes(p.id);
+      const kind = dead || down ? 'down' : hp <= 25 ? 'critical' : hp <= 50 ? 'low' : '';
+      return {key:p.id+'/'+Math.round(hp)+'/'+kind,name:operator(p.id),hp:dead ? 0 : hp,kind,label:dead ? 'dead' : down ? 'down' : String(Math.round(hp))};
+    });
+    const key = rows.map(r => r.key+r.name).join('|');
+    if (box.dataset.key === key) return;
+    box.dataset.key = key;
+    box.replaceChildren(...rows.map(r => {
+      const row = Object.assign(document.createElement('div'),{className:'vital '+r.kind});
+      const fill = Object.assign(document.createElement('span'),{className:'fill'});
+      fill.style.width = (100*r.hp/maxHealth)+'%';
+      const bar = Object.assign(document.createElement('span'),{className:'bar'});
+      bar.append(fill);
+      row.append(Object.assign(document.createElement('span'),{className:'name',textContent:r.name}),bar,Object.assign(document.createElement('span'),{textContent:r.label}));
+      return row;
+    }));
+  }
+  // A hit: a red flash at the edges and a dull thud.
+  function hurtCue(self: Player) {
+    const hits = self.hits ?? 0;
+    if (seenHits !== undefined && hits > seenHits) {
+      const flash = el('hurt');
+      flash.classList.remove('hit'); void flash.offsetWidth; flash.classList.add('hit');
+      tone(120,55,0.35,0.35);
+    }
+    seenHits = hits;
+  }
+  // Gnawers: a skitter of claws while one moves nearby, a snap of teeth at a bite.
+  function gnawerCues(state: Snapshot, self: Player) {
+    const m = state.mission!, now = performance.now();
+    for (const g of m.gnawers ?? []) {
+      const d = Math.hypot(g.x-self.x,g.z-self.z), heard = placeOf(self) === 'inside' && d < 12 && Math.abs(g.y-(self.feetY ?? 0)) < 3;
+      const last = lastSeen.get(g.id), moving = !!last && Math.hypot(last.x-g.x,last.z-g.z) > 0.01;
+      lastSeen.set(g.id,{x:g.x,z:g.z});
+      const bites = g.bites ?? 0, seen = seenBites.get(g.id);
+      if (seen !== undefined && bites > seen && heard) { noise(0.5*(1-d/12),0.07,2600); noise(0.4*(1-d/12),0.05,1800); subtitle('Teeth snap shut'); }
+      seenBites.set(g.id,bites);
+      if (heard && moving && now >= nextSkitter) {
+        nextSkitter = now+70+Math.random()*90;
+        noise(0.12*(1-d/12),0.025,3200+Math.random()*1500);
+        if (now-skitterHeard > 8000) subtitle('Something skitters nearby');
+        skitterHeard = now;
+      }
+    }
+  }
   function update(layout: Layout, state: Snapshot, self: Player, room: string | undefined, briefing: boolean) {
     const m = state.mission!;
+    vitals(state,!briefing && m.stage === 'explore' && placeOf(self) !== 'home');
+    if (m.stage === 'explore') { hurtCue(self); gnawerCues(state,self); }
     const c = m.contract;
     const end = finished(m.stage), report = end || m.stage === 'settled';
     el('result').hidden = !report;

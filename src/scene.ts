@@ -185,6 +185,36 @@ export function createScene(canvas: HTMLCanvasElement, generated = false) {
     tines.push(tine);
   }
   for (const x of [-0.13,0.13]) box(x,-0.6,0.05,0.06,0.03,0.06,glintMat,body);
+  // A Gnawer: a dog-sized, flat-shelled scavenger low to the floor, with a
+  // pale plated back, a blunt head with mandibles, six splayed legs and two
+  // dull white eyes. Each one is built when first seen; its legs cycle with
+  // how fast it moves.
+  const shell = new T.MeshStandardMaterial({color:0x9a8f7a,roughness:0.55,metalness:0.1});
+  const claw = new T.MeshStandardMaterial({color:0x3e382e,roughness:0.7});
+  const eye = new T.MeshBasicMaterial({color:0xcfc8b0});
+  const gnawerModels = new Map<number,{group: T.Group; legs: T.Group[]; phase: number; last: T.Vector3}>();
+  function gnawerModel(id: number) {
+    let model = gnawerModels.get(id);
+    if (model) return model;
+    const group = new T.Group(), legs: T.Group[] = [];
+    // Forward is -z, as for operators.
+    box(0,0.24,0.05,0.5,0.16,0.62,shell,group);
+    box(0,0.33,0.05,0.38,0.06,0.5,shell,group);
+    box(0,0.22,0.48,0.36,0.13,0.3,shell,group);
+    box(0,0.22,-0.36,0.3,0.14,0.22,shell,group);
+    for (const side of [-1,1]) {
+      box(side*0.07,0.17,-0.52,0.05,0.04,0.16,claw,group).rotation.y = side*0.4;
+      box(side*0.08,0.27,-0.47,0.04,0.04,0.02,eye,group);
+      for (const z of [-0.18,0.05,0.28]) {
+        const hip = new T.Group(); hip.position.set(side*0.24,0.22,z); group.add(hip); legs.push(hip);
+        const leg = box(side*0.17,-0.06,0,0.32,0.035,0.035,claw,hip); leg.rotation.z = -side*0.55;
+      }
+    }
+    scene.add(group);
+    model = {group,legs,phase:0,last:new T.Vector3()};
+    gnawerModels.set(id,model);
+    return model;
+  }
   // Tines hang 1.2 m below the rim, shortened under low ceilings so they
   // stay above head height.
   const rim = 0.62, tineLength = 1.2;
@@ -521,6 +551,7 @@ export function createScene(canvas: HTMLCanvasElement, generated = false) {
       const creature = state.mission?.diver;
       const room = creature && creature.mode !== 'dormant' ? layout?.rooms.find(r => r.id === creature.bay) : undefined;
       diver.visible = here === 'inside' && !!room;
+      for (const model of gnawerModels.values()) model.group.visible = false;
       const salvageKind = new Map(layout && state.mission ? catalog(layout,state.mission).map(s => [s.id,s.kind]) : []);
       const heldKind = (p: Snapshot['players'][number]) => {
         const item = selected(p);
@@ -645,6 +676,21 @@ export function createScene(canvas: HTMLCanvasElement, generated = false) {
           const g2 = people.get(p.id);
           if (g2) g2.visible = p.id !== self && sameHere(p) && shown(p.x,p.z,p.feetY ?? 0);
         }
+        // Gnawers glide between snapshots, scuttling as they go.
+        const jaws = new Map<number,{x: number; y: number; z: number}>();
+        for (const n of state.mission?.gnawers ?? []) {
+          const model = gnawerModel(n.id), at = glide('g'+n.id,state.update,n.x,n.y,n.z,now,model.group.position);
+          const moved = model.last.distanceTo(at);
+          model.last.copy(at); model.group.position.copy(at);
+          const turn = Math.atan2(Math.sin(n.yaw-model.group.rotation.y),Math.cos(n.yaw-model.group.rotation.y));
+          model.group.rotation.y += turn*Math.min(1,dt*12);
+          model.phase += Math.min(moved,0.5)*18;
+          model.legs.forEach((leg,i) => { leg.rotation.y = (reducedMotion ? 0.15 : 0.45)*Math.sin(model.phase+(i%3)*2.1+(i<3 ? 0 : Math.PI)); });
+          model.group.visible = shown(at.x,at.z,at.y);
+          const yaw = model.group.rotation.y;
+          jaws.set(n.id,{x:at.x-Math.sin(yaw)*0.62,y:at.y+0.08,z:at.z-Math.cos(yaw)*0.62});
+        }
+        for (const [id,model] of gnawerModels) if (!state.mission?.gnawers?.some(n => n.id === id)) { scene.remove(model.group); gnawerModels.delete(id); }
         // While it drags itself out of a room, it shows from that room too.
         if (diver.visible && drawn && room) diver.visible = drawn.has(room.id) || (!!creature?.from && drawn.has(creature.from.bay));
         // Pose the Diver only while it is drawn.
@@ -663,6 +709,9 @@ export function createScene(canvas: HTMLCanvasElement, generated = false) {
               }
               return {...i,x:at.x,y:at.y-h/2,z:at.z,room:under ?? i.room};
             }
+            // In a Gnawer's jaws, drawn where its jaws are drawn.
+            const held = i.gnawer !== undefined ? jaws.get(i.gnawer) : undefined;
+            if (held) return {...i,...held,room:surfaceAt(g,held.x,held.z,held.y+0.3)?.room ?? i.room};
             const moved = mission.haul.some(h => h.id === i.id);
             return {...i,room:moved ? surfaceAt(g,i.x,i.z,i.y)?.room ?? i.room : i.room};
           }));

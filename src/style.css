@@ -45,6 +45,19 @@ pre { margin-bottom: 0; line-height: 1.5 }
 #live-leave { pointer-events: auto; padding: .45rem }
 
 #sector { display: block; color: #edc47d; letter-spacing: .03em; font-weight: normal }
+/* Health: one bar per operator, bottom left; a red flash when hurt. */
+#vitals { position: absolute; left: clamp(1rem,3vw,3rem); bottom: 4.6rem; display: grid; gap: .3rem; pointer-events: none; font: .78rem monospace; color: #f2efe3 }
+#vitals .vital { display: grid; grid-template-columns: 7.5rem 8rem 2rem; align-items: center; gap: .4rem; text-shadow: 0 1px 2px #000 }
+#vitals .name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap }
+#vitals .bar { height: .5rem; background: #0e1514cc; border: 1px solid #6f7d75 }
+#vitals .fill { display: block; height: 100%; background: #8fbf7a; transition: width .25s }
+#vitals .low .fill { background: #d9a441 }
+#vitals .critical .fill { background: #d2543f }
+#vitals .down .fill { background: #5b2a24 }
+#hurt { position: fixed; inset: 0; pointer-events: none; opacity: 0; background: radial-gradient(ellipse at center, transparent 45%, #a0140fb0 100%) }
+#hurt.hit { animation: hurt .6s ease-out }
+@keyframes hurt { from { opacity: 1 } to { opacity: 0 } }
+@media (pointer: coarse) and (max-width: 640px) { #vitals { bottom: calc(4.8rem + 170px) } }
 #hotbar { position: absolute; left: 50%; bottom: 4.6rem; transform: translateX(-50%); display: flex; gap: .4rem; pointer-events: auto; user-select: none }
 #hotbar button { position: relative; width: 3.6rem; height: 3.6rem; padding: 0; background: #101917c4; border: 2px solid #69756b99; border-radius: 6px }
 #hotbar button[aria-pressed="true"] { border-color: #e7b667; background: #2a2c20d9; box-shadow: 0 0 0 1px #e7b66766 }

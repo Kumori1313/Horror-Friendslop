@@ -41,7 +41,8 @@ export const wareInfo: Record<Ware,{name: string; about: string}> = {
 // `burn`: a lit flare's seconds left. `homeward`: bought gear thrown into the
 // exit rift, which turns up at home when its flight ends.
 // `sinks`: thrown or dropped into deep water, it is lost once it lands.
-export interface Haul extends Point3 { id: string; owner: number | null; banked?: boolean; flight?: Flight; place?: Place; used?: boolean; kind?: ItemKind; burn?: number; homeward?: boolean; sinks?: boolean }
+// `gnawer`: being dragged off by that Gnawer.
+export interface Haul extends Point3 { gnawer?: number; id: string; owner: number | null; banked?: boolean; flight?: Flight; place?: Place; used?: boolean; kind?: ItemKind; burn?: number; homeward?: boolean; sinks?: boolean }
 export const flareTime = 60;
 // Seconds of breath with the head under water.
 export const breathTime = 4;
@@ -95,6 +96,23 @@ export interface Mission {
   awake?: boolean;
   diver: Diver;
   down: { id: number; seconds: number }[];
+  // Scavengers in the facility, spawned when the expedition starts.
+  gnawers?: Gnawer[];
+}
+// Health: 100, recovering slowly once unhurt for a while, but only back to
+// `recoverTo`. At none, an operator goes down; a revive brings them back with
+// `revivedHealth`. Home restores everyone.
+export const maxHealth = 100, recoverTo = 50, recoverAfter = 8, recoverRate = 4, revivedHealth = 35;
+export const healthOf = (p: {hp?: number}) => p.hp ?? maxHealth;
+// The Gnawer: a dog-sized scavenger that skitters along the facility's
+// floors. It drags loose salvage off to its nest (`carry`), and bites anyone
+// who comes close, knocking salvage out of their hands to take it. A baton
+// hit, a thrown item or a lit flare drives it off (`flee`) and makes it drop
+// what it carries. `bites` counts its bites, so every client hears each once.
+export interface Gnawer {
+  id: number; x: number; y: number; z: number; yaw: number;
+  mode: 'roam' | 'seek' | 'chase' | 'carry' | 'flee';
+  carry?: string; bites?: number; nest: Point3;
 }
 // The Bell Diver clings to the ceiling of one room (`bay`), above x, z, over
 // the storey whose floor is at y. It drags itself one room connection at a
@@ -160,7 +178,7 @@ export const sameStorey = (p: {feetY?: number}, at: {y: number}) => Math.abs((p.
 export function onPad(p: Point & {feetY?: number; place?: Place}, pad: Point3) { return placeOf(p) === 'inside' && distance(p,pad) <= 1.5 && sameStorey(p,pad); }
 
 // Every item with its current place and holder.
-export interface Item extends Salvage { owner: number | null; banked: boolean; flight?: Flight; place: Place }
+export interface Item extends Salvage { owner: number | null; banked: boolean; flight?: Flight; place: Place; gnawer?: number }
 // Every item the crew can handle: the facility's salvage plus anything bought.
 export function catalog(layout: Layout, mission: Mission | undefined): Salvage[] {
   const bought = mission?.haul.filter(h => h.kind).map(h => ({id:h.id,kind:h.kind!,value:0,x:h.x,y:h.y,z:h.z,room:''})) ?? [];
@@ -170,7 +188,7 @@ export function items(layout: Layout, mission: Mission | undefined): Item[] {
   const moved = new Map(mission?.haul.map(h => [h.id,h]));
   return catalog(layout,mission).filter(s => !moved.get(s.id)?.used).map(s => {
     const h = moved.get(s.id);
-    return h ? {...s,x:h.x,y:h.y,z:h.z,owner:h.owner,banked:!!h.banked,flight:h.flight,place:placeOf(h)} : {...s,owner:null,banked:false,place:'inside' as Place};
+    return h ? {...s,x:h.x,y:h.y,z:h.z,owner:h.owner,banked:!!h.banked,flight:h.flight,place:placeOf(h),...(h.gnawer !== undefined ? {gnawer:h.gnawer} : {})} : {...s,owner:null,banked:false,place:'inside' as Place};
   });
 }
 // The salvage an operator carries, in the order it was collected.
@@ -190,7 +208,7 @@ export function canCollect(p: Player, item: Point3 & {place?: Place}, obstacles:
 }
 export function collectable(layout: Layout, mission: Mission, p: Player, obstacles: readonly Rect[]) {
   if (freeSlot(p) < 0) return;
-  return items(layout,mission).filter(i => i.owner === null && !i.banked && !i.flight && canCollect(p,i,obstacles))
+  return items(layout,mission).filter(i => i.owner === null && !i.banked && !i.flight && i.gnawer === undefined && canCollect(p,i,obstacles))
     .sort((a,b) => Math.hypot(a.x-p.x,a.z-p.z)-Math.hypot(b.x-p.x,b.z-p.z))[0];
 }
 

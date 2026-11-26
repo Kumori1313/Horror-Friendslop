@@ -5,7 +5,7 @@ import { groundAt, outdoors } from '../src/places.ts';
 import { waterLevel } from '../src/room-templates.ts';
 import type { Player } from '../src/room.ts';
 import { generateLayout } from '../src/server/generate-layout.ts';
-import { grabDamage, linger, lurkerStretch, sinkTime } from '../src/server/lurkers.ts';
+import { grabDamage, grabReach, linger, lurkerStretch, sinkTime } from '../src/server/lurkers.ts';
 import { Simulation } from '../src/server/simulation.ts';
 
 // Operators outdoors on seed 19, with the Lurker in its river.
@@ -24,22 +24,28 @@ function bank(seed = 19) {
   const lurker = () => mission.lurkers![0];
   const run = (seconds: number) => { for (let i=0;i<Math.round(seconds*30);i++) sim.tick(1/30); };
   // A steep stretch of its river, with dry bank within 5.5 m of the centre
-  // line: a fresh Lurker is put there, and the dry spot nearest it returned
+  // line (and, given `dryBack`, dry that far back from it and 2 m either
+  // side, and low: no more than 2 m above the water): a fresh Lurker is put there, and the dry spot nearest it returned
   // with the way across the river there.
-  const beside = (out: number) => {
+  const dryAt = (x: number, z: number) => { const wet = waterLevel(map.water,x,z); return wet === undefined || groundAt(map,x,z) > wet+0.2; };
+  const beside = (out: number, dryBack = 0) => {
     const {lo,hi} = lurkerStretch(seed), p = map.water.points;
     for (let k=lo+1;k<hi;k++) {
       const a = p[k-1], c = p[k+1], len = Math.hypot(c.x-a.x,c.z-a.z), nx = -(c.z-a.z)/len, nz = (c.x-a.x)/len;
       for (const side of [1,-1]) for (let d=out;d<5.5;d+=0.25) {
         const x = p[k].x+nx*d*side, z = p[k].z+nz*d*side, wet = waterLevel(map.water,x,z);
         if (wet !== undefined && groundAt(map,x,z) <= wet+0.2) continue;
+        const ex = nx*side, ez = nz*side;
+        let clear = true;
+        for (let b=0;b<=dryBack && clear;b+=0.5) for (const t of dryBack && b === dryBack ? [-2,-1,0,1,2] : [0]) clear &&= dryAt(x+ex*b+ez*t,z+ez*b-ex*t) && (!dryBack || groundAt(map,x+ex*b+ez*t,z+ez*b-ex*t)-p[k].level <= 2);
+        if (!clear) break;
         mission.lurkers = [{id:2,x:p[k].x,y:p[k].level-0.7,z:p[k].z,yaw:0,mode:'lurk'}];
         return {x,z,nx:nx*side,nz:nz*side,k};
       }
     }
     return undefined;
   };
-  return {sim,mission,map,player,put,run,lurker,beside};
+  return {sim,mission,map,player,put,run,lurker,beside,dryAt};
 }
 // How closely its heading points from it toward (x, z): 1 dead ahead.
 const facingToward = (l: {x: number; z: number; yaw: number}, x: number, z: number) => {
@@ -105,13 +111,29 @@ test('it goes to where it last heard someone after the sound stops, faces them w
   run(5);
   const l = lurker();
   assert.equal(l.mode,'hunt','still searching');
-  assert.ok(Math.hypot(l.x-p[edge.k].x,l.z-p[edge.k].z) < 3.5,'came to the spot: '+Math.hypot(l.x-p[edge.k].x,l.z-p[edge.k].z).toFixed(1)+' m from it');
+  assert.ok(Math.hypot(l.x-heardAt.x,l.z-heardAt.z) < grabReach,'came to the spot: '+Math.hypot(l.x-heardAt.x,l.z-heardAt.z).toFixed(1)+' m from it');
   assert.ok(facingToward(l,heardAt.x,heardAt.z) > 0.8,'facing the sound');
   // It waits a while, then moves on.
   const there = {x:l.x,z:l.z};
   run(linger+5);
   assert.equal(lurker().mode,'lurk','patrolling again');
   assert.ok(Math.hypot(lurker().x-there.x,lurker().z-there.z) > 1,'moved on');
+});
+
+test('it comes right to the water\'s edge and up the bank: someone walking well back from the water is grabbed', () => {
+  // Most of its reach back from the water's edge, on low, dry ground: it
+  // used to take wading in to be grabbed. The first seed with such a bank.
+  const back = grabReach-1;
+  let found;
+  for (let seed=1;seed<60 && !found;seed++) { const b = bank(seed), edge = b.beside(3,back); if (edge) found = {...b,edge,seed}; }
+  assert.ok(found,'a low bank dry '+back+' m back');
+  const {sim,mission,map,player,put,lurker,dryAt,edge} = found, me = player(1);
+  const along = Math.atan2(-edge.nz,edge.nx);
+  put(me,edge.x+edge.nx*back,edge.z+edge.nz*back);
+  for (let i=0;i<300 && !heldBy(mission,1);i++) { sim.inputs.set(1,{forward:i % 16 < 8 ? 1 : -1,right:0,yaw:along,pitch:0}); sim.tick(1/30); }
+  assert.equal(heldBy(mission,1)?.id,lurker().id,'grabbed from '+back.toFixed(1)+' m back');
+  assert.ok(dryAt(me.x,me.z),'grabbed on dry ground');
+  void map;
 });
 
 test('a grab hurts and holds: the victim can\'t walk away, is dragged in, and drowns if nobody helps', () => {

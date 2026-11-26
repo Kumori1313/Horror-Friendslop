@@ -19,17 +19,19 @@ export const linger = 4;
 // `grabHeight` above it: a low bridge is not safe); it drags its victim at
 // `dragSpeed`, a quarter of that while they struggle; after letting go it
 // stays down `sinkTime` seconds.
-// Hunting, it comes up to `edge` metres toward the bank it heard, as long as
-// the water there is still deep.
+// Hunting, it comes across the river toward where it heard someone, up to
+// `edge` metres from the centre line: through water down to `shallowest`
+// deep, then up to `ashore` metres out onto a bank no more than `climb` above
+// the water. Nobody within `fordSafe` of a ford's middle is grabbed.
 // Holding someone, it backs toward the middle of the channel at `retreat`,
 // so a victim has some seconds before the deep water closes over them.
-export const hearMoving = 16, hearStill = 6, grabReach = 4.2, grabHeight = 3.5, dragSpeed = 0.9, retreat = 0.5, sinkTime = 15, grabDamage = 10, flareFear = 4, edge = 2.6;
+export const hearMoving = 16, hearStill = 6, grabReach = 6, grabHeight = 3.5, dragSpeed = 1.1, retreat = 0.8, sinkTime = 15, grabDamage = 10, flareFear = 4, edge = 10, shallowest = 0.6, ashore = 3, climb = 2, fordSafe = 9;
 const enraged = 1.4, depthNeeded = 2;
 
 // `heard`: where it last heard someone, until it has been there and waited;
 // `dir`: the way along the river it patrols (+1 or -1); `paused`: waiting
 // at the end of a patrol leg.
-interface Plan { s: number; target: number; offset: number; side: number; until: number; struggle: number; dir: number; paused: boolean; heard?: {x: number; z: number; wait: number; now: boolean}; at?: {x: number; z: number}; grabbedAt?: Point3; last: Map<number,{x: number; z: number}> }
+interface Plan { s: number; target: number; offset: number; across: number; until: number; struggle: number; dir: number; paused: boolean; heard?: {x: number; z: number; wait: number; now: boolean}; at?: {x: number; z: number}; grabbedAt?: Point3; last: Map<number,{x: number; z: number}> }
 const plans = new WeakMap<Mission,Map<number,Plan>>();
 // Its stretch of river: the indices of the longest run of deep water inside
 // the map.
@@ -58,6 +60,18 @@ function at(map: Outdoors, s: number) {
   const ta = along(i), tb = along(i+1), tx = ta.x+(tb.x-ta.x)*f, tz = ta.z+(tb.z-ta.z)*f, len = Math.hypot(tx,tz) || 1;
   return {x:a.x+(b.x-a.x)*f,z:a.z+(b.z-a.z)*f,level:a.level+(b.level-a.level)*f,nx:-tz/len,nz:tx/len};
 }
+// How far across the river, toward `side`, it can come at the point `q`:
+// through water at least `shallowest` deep (out from the deep middle), then
+// up to `ashore` metres up a bank no higher than `climb` above the water.
+function reach(map: Outdoors, q: ReturnType<typeof at>, side: number) {
+  let wet = 0;
+  for (let d=0.25;d<=edge;d+=0.25) {
+    const x = q.x+q.nx*d*side, z = q.z+q.nz*d*side, depth = q.level-groundAt(map,x,z);
+    if (depth >= shallowest) { wet = d; continue; }
+    if (d-wet > ashore || -depth > climb) return d-0.25;
+  }
+  return edge;
+}
 // The yaw that faces from (x, z) toward (tx, tz).
 const facing = (x: number, z: number, tx: number, tz: number) => Math.atan2(-(tx-x),-(tz-z));
 // The point of its stretch nearest (x, z).
@@ -70,7 +84,7 @@ function planOf(mission: Mission, id: number, s: number) {
   let all = plans.get(mission);
   if (!all) plans.set(mission,all = new Map());
   let plan = all.get(id);
-  if (!plan) all.set(id,plan = {s,target:s,offset:0,side:0,until:0,struggle:0,dir:1,paused:false,last:new Map()});
+  if (!plan) all.set(id,plan = {s,target:s,offset:0,across:0,until:0,struggle:0,dir:1,paused:false,last:new Map()});
   return plan;
 }
 
@@ -152,7 +166,8 @@ export function stepLurkers(layout: Layout, state: Snapshot, mission: Mission, d
       const heard = prey.filter(p => Math.hypot(p.x-l.x,p.z-l.z) <= (moved.get(p.id) ? hearMoving : hearStill)*(mission.enraged ? 1.5 : 1))
         .sort((a,b) => Math.hypot(a.x-l.x,a.z-l.z)-Math.hypot(b.x-l.x,b.z-l.z))[0];
       const level = at(map,plan.s).level;
-      const caught = heard && Math.hypot(heard.x-l.x,heard.z-l.z) <= grabReach && (heard.feetY ?? 0)-level <= grabHeight;
+      const caught = heard && Math.hypot(heard.x-l.x,heard.z-l.z) <= grabReach && (heard.feetY ?? 0)-level <= grabHeight
+        && !map.water.fords.some(f => Math.hypot(heard.x-f.x,heard.z-f.z) < fordSafe);
       if (caught) {
         l.mode = 'grab'; l.grab = heard.id; l.grabs = (l.grabs ?? 0)+1;
         plan.grabbedAt = {x:heard.x,y:heard.feetY ?? 0,z:heard.z};
@@ -169,7 +184,7 @@ export function stepLurkers(layout: Layout, state: Snapshot, mission: Mission, d
         plan.target = nearest(map,range,heard.x,heard.z);
         if (Math.abs(plan.target-plan.s) > 0.05) plan.dir = Math.sign(plan.target-plan.s);
         const c = at(map,plan.target);
-        plan.side = Math.sign((heard.x-c.x)*c.nx+(heard.z-c.z)*c.nz);
+        plan.across = (heard.x-c.x)*c.nx+(heard.z-c.z)*c.nz;
       } else if (plan.heard) {
         l.mode = 'hunt'; plan.heard.now = false;
         if (Math.abs(plan.target-plan.s) < 0.05 && (plan.heard.wait -= dt) <= 0) { delete plan.heard; l.mode = 'lurk'; plan.paused = true; plan.until = 0; }
@@ -194,16 +209,11 @@ export function stepLurkers(layout: Layout, state: Snapshot, mission: Mission, d
     const ds = Math.sign(plan.target-plan.s)*Math.min(Math.abs(plan.target-plan.s),speed*dt/metres);
     plan.s = Math.max(range.lo,Math.min(range.hi,plan.s+ds));
     const q = at(map,plan.s);
-    // Toward the bank it heard while hunting, back to the middle otherwise;
-    // never into water shallower than it needs.
-    const want = l.mode === 'hunt' ? plan.side*edge : 0;
-    const shift = (l.mode === 'grab' ? retreat : 1.5)*dt;
+    // Across the river toward where it heard someone while hunting (as far
+    // as `reach` lets it), back to the middle otherwise.
+    const want = l.mode === 'hunt' ? Math.sign(plan.across)*Math.min(Math.abs(plan.across),reach(map,q,Math.sign(plan.across))) : 0;
+    const shift = (l.mode === 'grab' ? retreat : l.mode === 'sunk' ? 4 : 2)*dt;
     plan.offset += Math.max(-shift,Math.min(shift,want-plan.offset));
-    while (Math.abs(plan.offset) > 0.05) {
-      const x = q.x+q.nx*plan.offset, z = q.z+q.nz*plan.offset;
-      if (q.level-groundAt(map,x,z) >= depthNeeded) break;
-      plan.offset *= 0.8;
-    }
     const x = q.x+q.nx*plan.offset, z = q.z+q.nz*plan.offset;
     // It faces the way it moves; still, it faces whoever it holds or the
     // sound it came for, and otherwise keeps its heading.
@@ -215,6 +225,8 @@ export function stepLurkers(layout: Layout, state: Snapshot, mission: Mission, d
     else if (plan.heard) l.yaw = facing(x,z,plan.heard.x,plan.heard.z);
     l.yaw = Math.round(l.yaw*100)/100;
     l.x = Math.round(x*100)/100; l.z = Math.round(z*100)/100;
-    l.y = Math.round((q.level-(l.mode === 'sunk' ? 1.6 : l.mode === 'hunt' || l.mode === 'grab' ? 0.45 : 0.7))*100)/100;
+    // Under the surface, or lying on the bank where it has hauled itself out.
+    const ground = groundAt(map,x,z);
+    l.y = Math.round((l.mode === 'sunk' ? q.level-1.6 : Math.max(ground+0.25,q.level-(l.mode === 'lurk' ? 0.7 : 0.45)))*100)/100;
   }
 }

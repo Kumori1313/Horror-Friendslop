@@ -192,6 +192,24 @@ export function buildFacility(layout: Layout, library: Library) {
   for (const [room,byMaterial] of batches) {
     for (const [material,batch] of byMaterial) groups.get(room)!.add(new T.Mesh(batch.build(),material === glow ? material : power.get(room) ? poweredVariant(material) : unpoweredVariant(material)));
   }
+  // A pit fills with darkness: layers of black haze, each a little more, from
+  // just below the walkways down to a black floor at the foot of its walls,
+  // so the bottom is never seen and a falling operator fades from view.
+  const haze = new T.MeshBasicMaterial({color:0x000000,transparent:true,opacity:0.3,depthWrite:false});
+  const black = new T.MeshBasicMaterial({color:0x000000});
+  const sheet = new T.PlaneGeometry(1,1).rotateX(-Math.PI/2);
+  for (const r of layout.rooms) {
+    const t = orient(r.template,r.turn);
+    if (!t.depth) continue;
+    for (const f of t.footprint) {
+      const layers = 12;
+      for (let i=0;i<=layers;i++) {
+        const y = r.y-0.8-(t.depth-1.2)*(i/layers)**1.3, mesh = new T.Mesh(sheet,i === layers ? black : haze);
+        mesh.scale.set(f.w-0.12,1,f.d-0.12); mesh.position.set(r.x+f.x,y,r.z+f.z); mesh.renderOrder = 1;
+        groups.get(r.id)!.add(mesh);
+      }
+    }
+  }
   // Bulkheads are painted steel plate.
   const panel = library.surfaces.get('panel')!.clone();
   panel.vertexColors = false; panel.color.setHex(0xc07a3c); panel.map = panel.map!.clone(); panel.map.repeat.set(1,1);

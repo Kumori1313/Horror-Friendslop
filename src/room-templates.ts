@@ -3,7 +3,9 @@
 // positive rise climbs from north to south, or from west to east along x.
 export const cell = 4, storey = 4, doorWidth = 2.4, doorHeight = 2.5;
 // Feet this far below a pit room's floor, over its pit: fallen in, dead.
-export const pitKill = 2;
+// About a second of falling, out of sight in the dark, leaves room for a
+// future movement upgrade to save someone.
+export const pitKill = 8;
 export type Side = 'north' | 'east' | 'south' | 'west';
 export interface Point3 { x:number; y:number; z:number }
 export interface Patch { x:number; z:number; w:number; d:number }
@@ -103,7 +105,7 @@ const templates = {
   // A bottomless settling pit fills the room. Two broken corner ledges each
   // hold a pair of doorways; the only way between them is an unrailed girder
   // across the middle, with a spur to a small island over the drop.
-  pit:{name:'Settling pit',height:7.6,depth:16,loot:true,footprint:[patch(4,4,12,12)],pad:{x:4,y:0,z:4},surfaces:[
+  pit:{name:'Settling pit',height:7.6,depth:24,loot:true,footprint:[patch(4,4,12,12)],pad:{x:4,y:0,z:4},surfaces:[
     ...[patch(1,-1.2,6,1.6),patch(-1.2,3.2,1.6,7.2),patch(7,9.2,6,1.6),patch(9.2,4.8,1.6,7.2)].map(f=>({...f,y:0})),
     {...patch(4,4,8.8,1.2),y:0},{...patch(2,5.45,1.2,1.7),y:0},{...patch(2,7.5,2.4,2.4),y:0},
   ],props:[prop('pipe',4,7,11.88,0.4,0.4,3.2)],sockets:[
@@ -112,7 +114,7 @@ const templates = {
   ]},
   // A bottomless casting pit beside a ground-floor working platform. Unrailed
   // stairs climb along the pit's edge to bare catwalks on the upper walls.
-  foundry:{name:'Foundry gantry',height:7.6,depth:12,footprint:[patch(4,2,12,8)],pad:{x:0,y:0,z:2},surfaces:[
+  foundry:{name:'Foundry gantry',height:7.6,depth:20,footprint:[patch(4,2,12,8)],pad:{x:0,y:0,z:2},surfaces:[
     {...patch(0,2,4,8),y:0,solid:true},{...patch(5.4,5.2,6.8,1.6),y:0,rise:4,along:'x',stairs:true,solid:true},
     {...patch(9.4,5.2,1.2,1.6),y:4},{...patch(9.2,1.2,1.6,6.4),y:4},{...patch(6.2,-1.2,4.4,1.6),y:4},
   ],props:[prop('machine',0.8,-1,1.2,1.2,1.8),prop('crate',-1.2,2,0.8,0.8,0.5)],sockets:[

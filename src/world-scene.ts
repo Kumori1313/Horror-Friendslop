@@ -190,8 +190,10 @@ function terrain(map: Outdoors) {
   const f = map.ground, half = map.size/2, chunk = 32, group = new T.Group();
   const material = new T.MeshStandardMaterial({vertexColors:true,map:scrub(),roughness:1,metalness:0});
   const h = (x: number, z: number) => fieldHeight(f,x,z);
-  const marsh = map.kind === 'marsh';
-  const scrubColor = new T.Color(marsh ? 0x34402a : 0x3a4530), dirtColor = new T.Color(0x6a5a44), gravel = new T.Color(0x6d6b62), c = new T.Color();
+  const marsh = map.kind === 'marsh', quarry = map.kind === 'quarry';
+  // A quarry: grey-brown ground, bare rock on its steep faces, pale rubble.
+  const scrubColor = new T.Color(marsh ? 0x34402a : quarry ? 0x4a4538 : 0x3a4530), dirtColor = new T.Color(quarry ? 0x6a655c : 0x6a5a44), gravel = new T.Color(0x6d6b62), c = new T.Color();
+  const rubbleColor = new T.Color(0x837b6e);
   const trailColor = new T.Color(marsh ? 0x6a5f4a : 0x857a64), siltColor = new T.Color(marsh ? 0x2b251a : 0x6e6c63);
   // A marsh's bank mud, mottled with wetter and drier patches.
   const mudColor = new T.Color(0x3a3121), mottle = (x: number, z: number) => {
@@ -211,6 +213,7 @@ function terrain(map: Outdoors) {
       const mark = map.marks[Math.round(z-f.z0)*f.n+Math.round(x-f.x0)] ?? 0;
       if (mark === 1) c.lerp(trailColor,0.75); else if (mark === 2) c.lerp(siltColor,0.8);
       else if (mark === 3) c.lerp(mudColor,0.85).multiplyScalar(mottle(x,z));
+      else if (mark === 4) c.lerp(rubbleColor,0.7).multiplyScalar(mottle(x*1.7,z*1.7));
       color.push(c.r,c.g,c.b);
       return position.length/3-1;
     };
@@ -391,6 +394,22 @@ export function buildOutdoors(map: Outdoors, library: Library) {
     reeds.instanceMatrix.needsUpdate = true;
     root.add(reeds);
   }
+  // A quarry's blowing dust: motes drifting downwind around the viewer,
+  // faster in a gust; one point cloud, moved each frame.
+  const wind = map.geometry.wind;
+  let dust: T.Points | undefined;
+  const dustSpan = 28, motes = 360;
+  if (wind) {
+    const g = new T.BufferGeometry(), at = new Float32Array(motes*3);
+    let r = 7;
+    const next = () => (r = (Math.imul(r,1103515245)+12345) >>> 0)/2**32;
+    for (let i=0;i<motes*3;i++) at[i] = (next()-0.5)*dustSpan;
+    g.setAttribute('position',new T.BufferAttribute(at,3));
+    dust = new T.Points(g,new T.PointsMaterial({color:0xb5a88e,size:0.05,transparent:true,opacity:0.55,depthWrite:false}));
+    dust.frustumCulled = false;
+    root.add(dust);
+  }
+  let dustAt = 0;
   const arrival = rift(0x9b7bff);
   arrival.group.position.set(map.arrival.x,map.arrival.y+1.2,map.arrival.z);
   // It faces the building it brought the crew to.
@@ -422,8 +441,19 @@ export function buildOutdoors(map: Outdoors, library: Library) {
   let rungAt: number | undefined;
   return {
     root,seed:map.seed,
-    update(time: number, arrivalOpen: boolean, open?: {x: number; y?: number; z: number}, rung = false) {
+    update(time: number, arrivalOpen: boolean, open?: {x: number; y?: number; z: number}, rung = false, view?: {x: number; y: number; z: number}, gust = false) {
       if (waterMaterial?.map) waterMaterial.map.offset.y = -time*0.05;
+      // Dust: each mote drifts with the wind (and a little down) in the
+      // world, and wraps round to stay within the cube about the viewer.
+      if (dust && wind && view) {
+        const dt = Math.min(0.1,Math.max(0,time-dustAt)); dustAt = time;
+        const speed = gust ? 2.4 : 1, a = dust.geometry.getAttribute('position') as T.BufferAttribute, p = a.array as Float32Array, h = dustSpan/2, centre = [view.x,view.y,view.z];
+        for (let i=0;i<motes;i++) {
+          p[i*3] += wind.x*speed*dt*1.2; p[i*3+1] += (Math.sin(time*0.7+i)*0.3-0.2)*dt; p[i*3+2] += wind.z*speed*dt*1.2;
+          for (let k=0;k<3;k++) { const rel = p[i*3+k]-centre[k]+h; p[i*3+k] = centre[k]-h+((rel % dustSpan)+dustSpan) % dustSpan; }
+        }
+        a.needsUpdate = true;
+      }
       arrival.group.visible = arrivalOpen;
       if (arrivalOpen) arrival.spin(time);
       exit.group.visible = pillar.visible = !!open;

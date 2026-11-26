@@ -6,7 +6,7 @@ import { buildFacility } from './facility-scene.ts';
 import { environment, materialLibrary } from './materials.ts';
 import { anchor, geometryFor, type Geometry, type Layout } from './layout.ts';
 import { home, outdoors, placeOf, type Place } from './places.ts';
-import { mapKind, weather } from './map-kinds.ts';
+import { gusting, mapKind, weather } from './map-kinds.ts';
 import { buildHome, buildOutdoors } from './world-scene.ts';
 import { obstaclesAt, roomTemplates, socketAt, surfaceAt, waterLevel } from './room-templates.ts';
 import { portalGraph, visibleRooms, type PortalGraph } from './visibility.ts';
@@ -644,7 +644,7 @@ export function createScene(canvas: HTMLCanvasElement, generated = false) {
     if (canvas.dataset.built !== built) canvas.dataset.built = built;
     const time = performance.now()/1000;
     homeWorld?.update(time);
-    outside?.update(time,state?.mission?.arrival === 'open',state?.mission?.rift,state?.mission?.bell !== undefined);
+    outside?.update(time,state?.mission?.arrival === 'open',state?.mission?.rift,state?.mission?.bell !== undefined,camera.position,!!layout && gusting(layout.seed,state?.mission?.clock ?? 0));
     if (!document.hidden) adapt(dt);
     if (facility && state) facility.update(state.opened ?? []);
     if (state) {

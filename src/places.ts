@@ -1,7 +1,7 @@
 import { collisionIndex, connections, geometryFor, walkable, type Geometry, type Layout } from './layout.ts';
 import { landings, placeBridges, placeFords, placeRuins, placeWrecks, poolFords, riverCourse, riverFloor, riverSurface, riverWater, trail, type Bridge, type River, type Ruin, type Wreck } from './outdoor-features.ts';
 import { channel, poolAt, wadeDepth, waterLevel, type Pool, type Water } from './room-templates.ts';
-import { mapKind, weather, type MapKind } from './map-kinds.ts';
+import { mapKind, weather, windOf, type MapKind } from './map-kinds.ts';
 import { climbable, fieldGrade, fieldHeight, maxGrade, obstaclesAt, orient, outward, planningGrade, socketAt, surfaceAt } from './room-templates.ts';
 import { clearAt } from './room.ts';
 import type { Heightfield, Point3, RoomWall } from './room-templates.ts';
@@ -76,6 +76,8 @@ export interface Outdoors {
   // The map's kind (see map-kinds.ts). A marsh has pools in `water.pools`,
   // plank boardwalks where its trails cross them, and reeds.
   kind: MapKind; boardwalks: {x: number; y: number; z: number; w: number; d: number}[]; reeds: {x: number; y: number; z: number; h: number}[];
+  // A quarry's pit (its terraces' radii and levels, its ramps) and spoil heaps.
+  quarry?: Quarry & {levels: number[]};
 }
 export const outdoorSize = 160;
 const outdoorCache = new Map<string,Outdoors>();
@@ -99,8 +101,9 @@ const smooth = (t: number) => { const c = Math.max(0,Math.min(1,t)); return c*c*
 export function outdoors(seed: number): Outdoors {
   const kind = mapKind(seed), cacheKey = kind+'/'+seed, found = outdoorCache.get(cacheKey);
   if (found) return found;
-  // A marsh is low and flat: gentle swells, no ditches.
-  const relief = kind === 'marsh' ? 0.3 : 1, ditching = kind === 'marsh' ? 0 : 1;
+  // A marsh is low and flat: gentle swells, no ditches. A quarry's open
+  // ground is milder than the hills, its relief the pit and the spoil heaps.
+  const relief = kind === 'marsh' ? 0.3 : kind === 'quarry' ? 0.55 : 1, ditching = kind === 'marsh' ? 0 : kind === 'quarry' ? 0.5 : 1;
   const next = random(seed ^ 0x0d7e1a), half = outdoorSize/2, room = 'outside';
   const building = {x:0,z:0,w:24,d:18,h:9};
   // Doors: the main door in the south face; one or two fire exits in others.
@@ -124,7 +127,10 @@ export function outdoors(seed: number): Outdoors {
   const offsets = [next(),next(),next(),next()].map(v => v*1000);
   const rockSeeds = Array.from({length:400},() => [next(),next(),next(),next(),next()]);
   // The dry riverbed keeps well clear of the building and the arrival.
-  const river = riverCourse(next,half,[{x:building.x,z:building.z,r:34},{x:ax,z:az,r:18}]) ?? {points:[],fords:[]};
+  const course = riverCourse(next,half,[{x:building.x,z:building.z,r:34},{x:ax,z:az,r:18}]) ?? {points:[],fords:[]};
+  // A quarry is dry: no river. Its pit and spoil heaps instead.
+  const river: River = kind === 'quarry' ? {points:[],fords:[]} : course;
+  const quarry = kind === 'quarry' ? quarryPlan(random(seed ^ 0x6a09e667),doors,{x:ax,z:az},building) : undefined;
   const featureSeed = Math.floor(next()*2**31), fordCount = river.fords.length;
   // Every door and the bell must be reachable on foot, and nowhere an
   // operator can get down to may leave them stranded. Try other ditches
@@ -140,16 +146,25 @@ export function outdoors(seed: number): Outdoors {
     // The fords go where the river would cut least deep into these hills.
     if (river.points.length) river.fords = placeFords(river,riverSurface(river,base,half),base,half,fordCount,[{x:building.x,z:building.z,r:42},{x:ax,z:az,r:28}]);
     const arrivalLevel = base(ax,az);
-    const n = outdoorSize+1, h: number[] = new Array(n*n);
-    for (let k=0;k<n;k++) for (let i=0;i<n;i++) {
-      const x = i-half, z = k-half;
+    // The open ground: the plots levelled into it.
+    const open = (x: number, z: number) => {
       let y = base(x,z);
       // The building's plot, with the bell in front, is level at 0.
       const plot = Math.max(Math.abs(x-building.x)-building.w/2-8,Math.abs(z-building.z-2)-building.d/2-9,0);
       y *= smooth(plot/12);
       // The arrival area is level too, at the height of the ground there.
       const near = Math.hypot(x-ax,z-az);
-      y += (arrivalLevel-y)*(1-smooth((near-7)/8));
+      return y+(arrivalLevel-y)*(1-smooth((near-7)/8));
+    };
+    // The quarry's rim: the open ground around its pit, on average.
+    let rimLevel = 0;
+    if (quarry) { for (let a=0;a<12;a++) rimLevel += open(quarry.x+Math.cos(a*Math.PI/6)*(quarry.radii[0]+1.5),quarry.z+Math.sin(a*Math.PI/6)*(quarry.radii[0]+1.5))/12; rimLevel = Math.round(rimLevel*100)/100; }
+    const n = outdoorSize+1, h: number[] = new Array(n*n);
+    for (let k=0;k<n;k++) for (let i=0;i<n;i++) {
+      const x = i-half, z = k-half;
+      let y = open(x,z);
+      // A quarry's heaps and pit, cut into the levelled ground.
+      if (quarry) y = quarryHeight(quarry,x,z,y,rimLevel,open);
       // Cliffs ring the map: the ground rises too steeply to climb.
       const out = Math.max(Math.abs(x),Math.abs(z))-(half-12);
       if (out > 0) y += out*1.6;
@@ -158,6 +173,9 @@ export function outdoors(seed: number): Outdoors {
     const ground: Heightfield = {x0:-half,z0:-half,step:1,n,h};
     const low = Math.min(...h), height = (x: number, z: number) => fieldHeight(ground,x,z);
     const g = emptyGeometry();
+    // The wind, for throws.
+    const wind = windOf(seed);
+    if (wind) g.wind = wind;
     g.surfaces.push({x:0,z:0,w:outdoorSize,d:outdoorSize,y:low-2,room,field:ground});
     // Invisible walls just short of the cliffs' foot: the cliffs are scenery,
     // and where ground sloping toward the edge meets them it could pen
@@ -227,6 +245,8 @@ export function outdoors(seed: number): Outdoors {
     // Ruins and wrecks, on gentle ground clear of the plots, the riverbed
     // and each other.
     const pick = random(featureSeed+attempt), taken: {x: number; z: number; r: number}[] = [];
+    // Nothing on a quarry's ramps.
+    for (const r of quarry?.ramps ?? []) for (let u=0;u<=1;u+=0.1) { const a = r.start+r.turn*r.span*u, d = r.radius-2; taken.push({x:quarry!.x+Math.cos(a)*d,z:quarry!.z+Math.sin(a)*d,r:2.5}); }
     const clear = (x: number, z: number, r: number) =>
       !(Math.abs(x-building.x) < building.w/2+14+r && Math.abs(z-building.z-2) < building.d/2+15+r) && Math.hypot(x-ax,z-az) > 16+r &&
       Math.max(Math.abs(x),Math.abs(z))+r < half-16 && river.points.every(p => Math.hypot(p.x-x,p.z-z) > r+riverFloor+9) &&
@@ -311,7 +331,8 @@ export function outdoors(seed: number): Outdoors {
     // Boulders, sitting in the ground, clear of the plots and of each other.
     const rocks: Outdoors['rocks'] = ruins.flatMap(r => r.rubble.map(b => ({x:b.x,y:b.y,z:b.z,w:b.w,d:b.d,h:b.h})));
     for (const [a,b,c,d,e] of rockSeeds) {
-      if (rocks.length >= 60) break;
+      // Loose rock: a quarry has more boulders.
+      if (rocks.length >= (quarry ? 95 : 60)) break;
       const w = 0.8+a*2, dd = 0.8+b*2, rh = 0.6+c*2, x = (d-0.5)*(outdoorSize-28), z = (e-0.5)*(outdoorSize-28);
       if (Math.abs(x-building.x) < building.w/2+12 && Math.abs(z-building.z-2) < building.d/2+13) continue;
       if (Math.hypot(x-ax,z-az) < 12 || rocks.some(r => Math.abs(r.x-x) < (r.w+w)/2+2 && Math.abs(r.z-z) < (r.d+dd)/2+2)) continue;
@@ -346,6 +367,17 @@ export function outdoors(seed: number): Outdoors {
       const x = ground.x0+(j % n), z = ground.z0+Math.floor(j/n);
       if (pools.some(p => p.depth < 1 && Math.hypot(x-p.x,z-p.z) < p.r+3 && h[j] < p.level+0.6)) marks[j] = 3;
     }
+    // A quarry's loose rock (mark 4): its pit walls and the ground at their
+    // feet, and its spoil heaps. It slows walkers (`TemplateGeometry.scree`).
+    if (quarry) {
+      for (let j=0;j<n*n;j++) {
+        const i = j % n, k = Math.floor(j/n), x = ground.x0+i, z = ground.z0+k;
+        const steep = [[1,0],[-1,0],[0,1],[0,-1]].some(([di,dk]) => { const a = i+di, b = k+dk; return a >= 0 && b >= 0 && a < n && b < n && Math.abs(h[b*n+a]-h[j]) > 1.2; });
+        const d = Math.hypot(x-quarry.x,z-quarry.z), footing = quarry.radii.some(r => d < r+0.6 && d > r-2.2);
+        if ((steep && d < quarry.radii[0]+2) || (footing && !quarry.ramps.some(r => onRamp(quarry,r,x,z))) || quarry.heaps.some(hp => Math.hypot(x-hp.x,z-hp.z) < hp.r*0.85)) marks[j] = 4;
+      }
+      g.scree = {x0:ground.x0,z0:ground.z0,n,cells:Uint8Array.from(marks,m => m === 4 ? 1 : 0)};
+    }
     for (const line of trails) for (const p of line ?? []) for (let dz=-1;dz<=1;dz++) for (let dx=-1;dx<=1;dx++) {
       const i = Math.round(p.x-ground.x0)+dx, k = Math.round(p.z-ground.z0)+dz;
       if (i >= 0 && k >= 0 && i < n && k < n && Math.hypot(ground.x0+i-p.x,ground.z0+k-p.z) <= 1.3) marks[k*n+i] = 1;
@@ -375,7 +407,7 @@ export function outdoors(seed: number): Outdoors {
       }
     }
     const world: Outdoors = {
-      kind,boardwalks,reeds,seed,geometry:g,size:outdoorSize,ground,arrival:{x:ax,y:arrivalLevel,z:az},spawns,building,doors,door,exit:doors[0].exit,rocks,bell,
+      kind,boardwalks,reeds,quarry:quarry && {...quarry,levels:[rimLevel-4,rimLevel-8,rimLevel-12]},seed,geometry:g,size:outdoorSize,ground,arrival:{x:ax,y:arrivalLevel,z:az},spawns,building,doors,door,exit:doors[0].exit,rocks,bell,
       ringing:{x:bell.x,y:0,z:bell.z+1.5,yaw:0},
       river,fords:river.fords.map(f => ({x:f.x,y:height(f.x,f.z),z:f.z})),ruins,wrecks,trails:trails.map(t => t ?? []),marks,water,bridges,
     };
@@ -386,6 +418,74 @@ export function outdoors(seed: number): Outdoors {
       return world;
     }
   }
+}
+// A quarry: one pit 40 m across, terraced in three steps of 4 m (rings 5 m
+// wide down to a floor 20 m across), out on a side of the building with no
+// door and away from the arrival; a ramp descends along each wall, the three in turn around
+// the pit, so whoever drops down a ledge can always walk back up. Low spoil
+// heaps of loose rock stand about the open ground.
+export interface Ramp { radius: number; start: number; span: number; turn: number }
+export interface Quarry { x: number; z: number; radii: number[]; ramps: Ramp[]; heaps: {x: number; z: number; r: number; h: number}[] }
+const faceVector: Record<Face,[number,number]> = {east:[1,0],west:[-1,0],south:[0,1],north:[0,-1]};
+function quarryPlan(next: () => number, doors: Doorway[], arrival: {x: number; z: number}, building: Outdoors['building']): Quarry {
+  const used = new Set(doors.map(d => d.face)), al = Math.hypot(arrival.x,arrival.z) || 1;
+  const face = (['south','east','west','north'] as Face[]).filter(f => !used.has(f))
+    .sort((a,b) => (faceVector[a][0]*arrival.x+faceVector[a][1]*arrival.z)/al-(faceVector[b][0]*arrival.x+faceVector[b][1]*arrival.z)/al)[0] ?? 'north';
+  const [fx,fz] = faceVector[face], side = (next()-0.5)*12;
+  // 42 m out, its rim 2 m beyond the plot and well inside the map's walls.
+  const x = fx*42-fz*side*0.5, z = fz*42+fx*side*0.5, radii = [20,15,10];
+  const turn = next() < 0.5 ? 1 : -1, ramps: Ramp[] = [];
+  // The first ramp starts on the building's side, where the crew comes from.
+  let start = Math.atan2(-z,-x)+(next()-0.5)*1.2;
+  for (const radius of radii) { const span = 16/(radius-2); ramps.push({radius,start,span,turn}); start += turn*(span+0.3); }
+  const heaps: Quarry['heaps'] = [];
+  for (let t=0;t<200 && heaps.length<4;t++) {
+    const hx = (next()-0.5)*110, hz = (next()-0.5)*110, r = 6+next()*4;
+    if (Math.hypot(hx-x,hz-z) < radii[0]+r+6 || Math.hypot(hx-arrival.x,hz-arrival.z) < r+20) continue;
+    if (Math.abs(hx-building.x) < building.w/2+r+14 && Math.abs(hz-building.z-2) < building.d/2+r+15) continue;
+    if (heaps.some(o => Math.hypot(o.x-hx,o.z-hz) < o.r+r+6)) continue;
+    heaps.push({x:hx,z:hz,r,h:r*0.3});
+  }
+  return {x,z,radii,ramps,heaps};
+}
+// Whether (x, z) is on a ramp's band, and how far down it (0 at its top).
+function rampAt(q: Quarry, r: Ramp, x: number, z: number) {
+  const d = Math.hypot(x-q.x,z-q.z);
+  if (d < r.radius-4 || d > r.radius+0.4) return;
+  let rel = (Math.atan2(z-q.z,x-q.x)-r.start)*r.turn;
+  rel = ((rel % (Math.PI*2))+Math.PI*2) % (Math.PI*2);
+  return rel <= r.span ? rel/r.span : undefined;
+}
+const onRamp = (q: Quarry, r: Ramp, x: number, z: number) => rampAt(q,r,x,z) !== undefined;
+// The ground over a quarry: the open ground, raised in its spoil heaps,
+// stepped down its pit's terraces, with the ramps along the walls.
+// The first ramp comes down from the open ground at the rim where it starts
+// (`openAt`, just outside), one even slope, level across. Each ramp begins
+// with a level landing (its first `landing` of the way), and around the
+// first's the rim is levelled to it, so the crew walks straight on.
+const landing = 0.15;
+function quarryHeight(q: Quarry, x: number, z: number, open: number, rim: number, openAt: (x: number, z: number) => number) {
+  let y = open;
+  for (const hp of q.heaps) { const d = Math.hypot(x-hp.x,z-hp.z); if (d < hp.r) y += hp.h*smooth(1-d/hp.r); }
+  const d = Math.hypot(x-q.x,z-q.z), first = q.ramps[0];
+  const head = () => openAt(q.x+Math.cos(first.start)*(q.radii[0]+0.6),q.z+Math.sin(first.start)*(q.radii[0]+0.6));
+  if (d > q.radii[0]+0.4) {
+    // The rim by the first ramp's landing, levelled to it over a few metres.
+    let rel = (Math.atan2(z-q.z,x-q.x)-first.start)*first.turn;
+    rel = ((rel % (Math.PI*2))+Math.PI*3) % (Math.PI*2)-Math.PI;
+    const along = Math.max(0,-0.12-rel,rel-first.span*landing)*d, out = d-q.radii[0]-0.4, reach = Math.max(along,out-1.5);
+    if (reach < 3.5) y += (head()-y)*(1-smooth(reach/3.5));
+    return y;
+  }
+  const levels = [rim-4,rim-8,rim-12], uppers = [y,levels[0],levels[1]];
+  for (let j=0;j<3;j++) if (d < q.radii[j]+0.4) y = uppers[j]+(levels[j]-uppers[j])*smooth((q.radii[j]+0.4-d)/0.8);
+  q.ramps.forEach((r,j) => {
+    const u = rampAt(q,r,x,z);
+    if (u === undefined) return;
+    const top = j ? uppers[j] : head();
+    y = Math.max(y,top+(levels[j]-top)*Math.max(0,(u-landing)/(1-landing)));
+  });
+  return y;
 }
 // A marsh's pools: clusters of overlapping circles of still water, clear of
 // the building's plot, the arrival, the river and each other, each cluster at

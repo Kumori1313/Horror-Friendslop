@@ -4,6 +4,9 @@ import { collisionIndex, playerRadius, walkable, type Geometry } from '../src/la
 import { groundAt, outdoors, riftZones } from '../src/places.ts';
 import { climbable, fieldGrade, maxGrade } from '../src/room-templates.ts';
 import { route } from '../src/route.ts';
+import { forceMap } from '../src/map-kinds.ts';
+// Written for the rolling hills' river and ditches: every seed here draws them.
+forceMap('hills');
 
 test('every map has its riverbed and fords, plenty of ruins and wrecks of several kinds, and trails, clear of the building and the arrival', () => {
   for (let seed=1;seed<=24;seed++) {

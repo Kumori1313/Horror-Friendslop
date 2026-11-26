@@ -5,7 +5,7 @@ import type { Player, Snapshot } from './room.ts';
 import type { Preferences } from './preferences.ts';
 import { finished, flatOn, healthOf, heldBy, hears, itemName, listen, lossPercent, maxHealth } from './mission.ts';
 import { placeOf } from './places.ts';
-import { mapKind, weather } from './map-kinds.ts';
+import { carrying, gusting, mapKind, weather } from './map-kinds.ts';
 
 const el = (id: string) => document.getElementById(id)!;
 
@@ -93,6 +93,31 @@ export function missionHud(preferences: Preferences, operator = (id: number) => 
     gain.gain.value = level*preferences.volume;
     source.connect(filter).connect(gain).connect(audio.destination);
     source.start(now);
+  }
+  // A swell of noise that rises and falls: wind.
+  function swell(level: number, duration: number, hz: number) {
+    if (audio?.state !== 'running' || preferences.volume === 0 || document.hidden) return;
+    const now = audio.currentTime, length = Math.ceil(audio.sampleRate*duration), buffer = audio.createBuffer(1,length,audio.sampleRate);
+    const data = buffer.getChannelData(0);
+    for (let i=0;i<length;i++) data[i] = (Math.random()*2-1)*Math.sin(Math.PI*i/length);
+    const source = audio.createBufferSource(), filter = audio.createBiquadFilter(), gain = audio.createGain();
+    source.buffer = buffer; filter.type = 'bandpass'; filter.frequency.value = hz; filter.Q.value = 0.8;
+    gain.gain.value = level*preferences.volume;
+    source.connect(filter).connect(gain).connect(audio.destination);
+    source.start(now);
+  }
+  // The wind outside, where the map has any: a steady low rush, rising to a
+  // howl in a gust (whose start is captioned).
+  let nextGust = 0, wasGusting = false;
+  function windCues(layout: Layout, state: Snapshot, self: Player) {
+    const clock = state.mission!.clock ?? 0, now = performance.now();
+    if (placeOf(self) !== 'outside' || !weather[mapKind(layout.seed)].wind) { wasGusting = false; return; }
+    const gust = gusting(layout.seed,clock);
+    if (gust && !wasGusting) subtitle('The wind howls through the quarry');
+    wasGusting = gust;
+    if (now < nextGust) return;
+    nextGust = now+(gust ? 700 : 1600);
+    swell(gust ? 0.22 : 0.07,gust ? 1.4 : 2.4,gust ? 500+Math.random()*300 : 260+Math.random()*120);
   }
   // Each operator's health, bottom left.
   function vitals(state: Snapshot, show: boolean) {
@@ -196,7 +221,8 @@ export function missionHud(preferences: Preferences, operator = (id: number) => 
   }
   function update(layout: Layout, state: Snapshot, self: Player, room: string | undefined, briefing: boolean) {
     const m = state.mission!;
-    carry = weather[mapKind(layout.seed)].carry;
+    carry = carrying(layout.seed,m.clock);
+    if (m.stage === 'explore') windCues(layout,state,self);
     vitals(state,!briefing && m.stage === 'explore' && placeOf(self) !== 'home');
     if (m.stage === 'explore') { hurtCue(self); gnawerCues(state,self); lurkerCues(state,self); stalkerCues(state,self); }
     const c = m.contract;

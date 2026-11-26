@@ -10,6 +10,9 @@ import { spawnSalvage } from '../src/salvage.ts';
 import { generateLayout } from '../src/server/generate-layout.ts';
 import { moveOperator, Simulation } from '../src/server/simulation.ts';
 import type { Player } from '../src/room.ts';
+import { forceMap } from '../src/map-kinds.ts';
+// Written for the rolling hills' river and ditches: every seed here draws them.
+forceMap('hills');
 
 const seed = 19;
 const map = outdoors(seed);

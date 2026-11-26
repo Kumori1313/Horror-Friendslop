@@ -69,6 +69,9 @@ import { geometryFor, socketGroups } from '../src/layout.ts';
 import { pitKill, roomTemplates } from '../src/room-templates.ts';
 import { items } from '../src/mission.ts';
 import { spawnSalvage } from '../src/salvage.ts';
+import { forceMap } from '../src/map-kinds.ts';
+// Written for the rolling hills' river and ditches: every seed here draws them.
+forceMap('hills');
 
 const jump: Input = {...idle,jump:true};
 const yard: Geometry = {

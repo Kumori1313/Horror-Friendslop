@@ -5,6 +5,9 @@ import type { Snapshot } from '../src/room.ts';
 import { generateLayout } from '../src/server/generate-layout.ts';
 import { Simulation } from '../src/server/simulation.ts';
 import { diff, Held, patch, quantize, seenBy, Sent } from '../src/wire.ts';
+import { forceMap } from '../src/map-kinds.ts';
+// Written for the rolling hills' river and ditches: every seed here draws them.
+forceMap('hills');
 
 test('a patch rebuilds the value exactly: keys added, changed and removed, lists by id reordered, grown and shrunk', () => {
   const a = {n:1,s:'x',gone:true,o:{p:1,q:[1,2]},list:[{id:1,x:1},{id:2,x:2}],plain:[1,2,3],empty:[] as {id: number}[]};

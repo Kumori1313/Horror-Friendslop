@@ -117,9 +117,12 @@ export function trajectory(g: Geometry, opened: readonly string[], start: Launch
   let {x,y,z,vx,vy,vz} = start;
   const points = [x,y,z];
   // The last floor the item passed over, in case it never settles.
-  let rest: Point3 | undefined, pushes = 0, last: Point3 | undefined;
+  let rest: Point3 | undefined, pushes = 0, last: Point3 | undefined, aloft = true;
+  // Outdoors the wind pushes it while it flies (not once it is down).
+  const wind = g.wind;
   for (let n=0; n*dt<maxFlight; n++) {
     vy -= gravity*dt;
+    if (wind && aloft) { vx += wind.x*dt; vz += wind.z*dt; }
     // Walls, props, rails and closed bulkheads: bounce back, losing speed.
     const nx = x+vx*dt;
     if (space.hit(nx,y,z,b) || space.wedge(nx,z,y-b.h,y+b.h)) { vx = -vx*0.3; vz *= 0.8; } else x = nx;
@@ -179,6 +182,7 @@ export function trajectory(g: Geometry, opened: readonly string[], start: Launch
         } else if (support && !support.prop) { rest = {x,y:support.y,z}; points.push(x,y,z); break; }
       }
     }
+    aloft = !grounded;
     points.push(x,y,z);
     // Down a bottomless pit: it ends out of sight, where it fell.
     if (y < -20) { rest = {x,y,z}; break; }

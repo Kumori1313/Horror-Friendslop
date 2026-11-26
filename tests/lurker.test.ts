@@ -7,6 +7,9 @@ import type { Player } from '../src/room.ts';
 import { generateLayout } from '../src/server/generate-layout.ts';
 import { grabDamage, grabReach, linger, lurkerStretch, sinkTime } from '../src/server/lurkers.ts';
 import { Simulation } from '../src/server/simulation.ts';
+import { forceMap } from '../src/map-kinds.ts';
+// Written for the rolling hills' river and ditches: every seed here draws them.
+forceMap('hills');
 
 // Operators outdoors on seed 19, with the Lurker in its river.
 function bank(seed = 19) {

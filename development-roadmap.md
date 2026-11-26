@@ -249,6 +249,8 @@ Phase 13's outdoor map is a placeholder made from the facility's own collision p
 
 **Pass when** a crew can reach the façade and the rift by more than one route, uses cover, and describes a landmark they navigated by. Tests show walking and prediction agree on slopes, throws land on the ground and roll down hills, routes reach every rift zone, and the seed check covers the map. Frame p95 outdoors on the Android host stays within budget.
 
+- **Released on November 25, 2026.** The Pages repository pins build `0ce3e6e`, and `/relay-room/release.json` reports generator version 8. The local release suite passed with Horror-Friendslop `0ce3e6e`, game-hub `301211d`, tic-tac-toe `245ebb2`, and poker `dfde121` in Playwright Chromium, skipping only the two Counter-Attack Web tests, and the published smoke test passed the two-guest contract run and the solo test on its first run. Playtested and working: walking into and out of ditches, the river's water and drowning, the bridges, the testing sprint, falling under gravity, and the settling pit and foundry with their dark, bottomless pits. Still to playtest at length: navigating by landmarks and finding more than one route, and frame p95 outdoors and looking into pits on the Android host. To roll back, restore `SOURCE_REVISION` to `692836a`.
+
 ## Phase 17 — Expand the enemy roster, add large outdoor creatures, and give players health
 
 - Introduce health that lasts across multiple hits as the roster grows. Show damage, remaining health, incapacitation, and revival consistently on both devices. Tune damage and recovery so an encounter can leave someone hurt but still able to help their partner.

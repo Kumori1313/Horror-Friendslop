@@ -49,5 +49,14 @@ export function bindPreferences(pause: () => void) {
     dialog.showModal();
   }
   document.getElementById('settings')!.onclick = open;
+  // Fullscreen on any device, from the header; it switches back out too.
+  const toggle = document.getElementById('fullscreen-toggle')!;
+  toggle.hidden = !document.fullscreenEnabled;
+  const label = () => { toggle.textContent = document.fullscreenElement ? 'Exit fullscreen' : 'Fullscreen'; };
+  toggle.onclick = () => {
+    if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
+    else document.documentElement.requestFullscreen().catch(() => {});
+  };
+  document.addEventListener('fullscreenchange',label);
   return { preferences, open };
 }

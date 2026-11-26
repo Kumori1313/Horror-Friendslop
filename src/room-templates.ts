@@ -2,6 +2,8 @@
 // centre at the origin, and each socket sits at the middle of a cell edge. A
 // positive rise climbs from north to south, or from west to east along x.
 export const cell = 4, storey = 4, doorWidth = 2.4, doorHeight = 2.5;
+// Feet this far below a pit room's floor, over its pit: fallen in, dead.
+export const pitKill = 2;
 export type Side = 'north' | 'east' | 'south' | 'west';
 export interface Point3 { x:number; y:number; z:number }
 export interface Patch { x:number; z:number; w:number; d:number }
@@ -31,8 +33,9 @@ export interface Prop extends Patch { kind:PropKind; h:number; y?:number }
 export interface RoomTemplate {
   name:string;
   height:number;
-  // A pit this deep below the floor, walled down to its bottom. Such a room
-  // sits on the ground storey only, so nothing lies beneath it.
+  // A bottomless pit, walled this far down into the dark. Falling more than
+  // `pitKill` below the room's floor is death. Such a room sits on the
+  // ground storey only, so nothing lies beneath it.
   depth?:number;
   footprint:Patch[];
   surfaces:Surface[];
@@ -97,24 +100,22 @@ const templates = {
   office:block("Foreman's office",1,1,{loot:true,props:[prop('desk',1.55,1.55,0.7,0.7,0.8),prop('shelf',-1.6,-1.6,0.6,0.6,1.3)]}),
   workshop:block('Workshop',2,2,{loot:true,props:[prop('bench',2,-1.5,1.4,0.8,0.95),prop('bench',-1.5,2,0.8,1.4,0.95),prop('bench',5.5,2,0.8,1.4,0.95)]}),
   // The bent tunnel turns north at its east end and runs 16 m beneath whatever sits above it.
-  // A sludge pit 10 m deep fills the room. Two broken corner ledges each
+  // A bottomless settling pit fills the room. Two broken corner ledges each
   // hold a pair of doorways; the only way between them is an unrailed girder
-  // across the middle, with a spur to a small island over the sludge.
-  pit:{name:'Settling pit',height:7.6,depth:10,loot:true,footprint:[patch(4,4,12,12)],pad:{x:4,y:0,z:4},surfaces:[
+  // across the middle, with a spur to a small island over the drop.
+  pit:{name:'Settling pit',height:7.6,depth:16,loot:true,footprint:[patch(4,4,12,12)],pad:{x:4,y:0,z:4},surfaces:[
     ...[patch(1,-1.2,6,1.6),patch(-1.2,3.2,1.6,7.2),patch(7,9.2,6,1.6),patch(9.2,4.8,1.6,7.2)].map(f=>({...f,y:0})),
     {...patch(4,4,8.8,1.2),y:0},{...patch(2,5.45,1.2,1.7),y:0},{...patch(2,7.5,2.4,2.4),y:0},
-    {...patch(4,4,12,12),y:-10},
-  ],props:[prop('tank',6.5,1.5,2.4,2.4,1.6,-10),prop('pipe',4,7,11.88,0.4,0.4,3.2)],sockets:[
+  ],props:[prop('pipe',4,7,11.88,0.4,0.4,3.2)],sockets:[
     {name:'north0',side:'north',x:0,z:-2,y:0},{name:'west1',side:'west',x:-2,z:4,y:0},
     {name:'east1',side:'east',x:10,z:4,y:0},{name:'south2',side:'south',x:8,z:10,y:0},
   ]},
-  // A casting pit 7 m deep beside a ground-floor working platform. Unrailed
+  // A bottomless casting pit beside a ground-floor working platform. Unrailed
   // stairs climb along the pit's edge to bare catwalks on the upper walls.
-  foundry:{name:'Foundry gantry',height:7.6,depth:7,footprint:[patch(4,2,12,8)],pad:{x:0,y:0,z:2},surfaces:[
+  foundry:{name:'Foundry gantry',height:7.6,depth:12,footprint:[patch(4,2,12,8)],pad:{x:0,y:0,z:2},surfaces:[
     {...patch(0,2,4,8),y:0,solid:true},{...patch(5.4,5.2,6.8,1.6),y:0,rise:4,along:'x',stairs:true,solid:true},
     {...patch(9.4,5.2,1.2,1.6),y:4},{...patch(9.2,1.2,1.6,6.4),y:4},{...patch(6.2,-1.2,4.4,1.6),y:4},
-    {...patch(6,2,8,8),y:-7},
-  ],props:[prop('machine',0.8,-1,1.2,1.2,1.8),prop('crate',-1.2,2,0.8,0.8,0.5),prop('tank',6,1,2.4,2.4,2.5,-7)],sockets:[
+  ],props:[prop('machine',0.8,-1,1.2,1.2,1.8),prop('crate',-1.2,2,0.8,0.8,0.5)],sockets:[
     {name:'west0',side:'west',x:-2,z:0,y:0},{name:'west1',side:'west',x:-2,z:4,y:0},
     {name:'east0',side:'east',x:10,z:0,y:4},{name:'east1',side:'east',x:10,z:4,y:4},{name:'north2',side:'north',x:8,z:-2,y:4},
   ]},

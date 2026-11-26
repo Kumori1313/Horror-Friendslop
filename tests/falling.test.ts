@@ -63,10 +63,11 @@ test('the guest\'s prediction falls exactly as the host does', () => {
 });
 
 // Jumping and long falls.
-import { fatalFall, jumpHeight, Simulation } from '../src/server/simulation.ts';
+import { jumpHeight, Simulation } from '../src/server/simulation.ts';
 import { generateLayout } from '../src/server/generate-layout.ts';
 import { geometryFor, socketGroups } from '../src/layout.ts';
-import { roomTemplates } from '../src/room-templates.ts';
+import { pitKill, roomTemplates } from '../src/room-templates.ts';
+import { items } from '../src/mission.ts';
 import { spawnSalvage } from '../src/salvage.ts';
 
 const jump: Input = {...idle,jump:true};
@@ -120,7 +121,7 @@ function withRoom(template: 'pit' | 'foundry' | 'hall') {
 }
 const run = (sim: Simulation, seconds: number) => { for (let i=0;i<Math.round(seconds*30);i++) sim.tick(1/30); };
 
-test('stepping off the settling pit\'s girder is fatal; dropping from the hall\'s gallery is not', () => {
+test('falling into the settling pit is fatal; dropping 4 m from the hall\'s gallery is not', () => {
   const {sim,room,layout} = withRoom('pit');
   const g = geometryFor(layout), girder = g.surfaces.find(s => s.room === room.id && s.y === 0 && Math.max(s.w,s.d) > 8 && Math.min(s.w,s.d) < 1.3)!;
   const p = sim.state.players[0], across = girder.w > girder.d ? {x:girder.x,z:girder.z} : {x:girder.x,z:girder.z};
@@ -131,8 +132,8 @@ test('stepping off the settling pit\'s girder is fatal; dropping from the hall\'
   run(sim,0.5);
   sim.inputs.set(1,idle);
   run(sim,2);
-  assert.deepEqual(sim.state.mission!.dead,[1],'died in the fall');
-  assert.ok(p.feetY! < -9,'at the bottom of the pit');
+  assert.deepEqual(sim.state.mission!.dead,[1],'fell into the pit');
+  assert.ok(p.feetY! < -pitKill,'down in the dark');
   // From the hall's gallery to the floor, 4 m, an operator lives.
   const hall = withRoom('hall'), q = hall.sim.state.players[0], hg = geometryFor(hall.layout);
   // In the air at the gallery's height over the hall's floor, then down.
@@ -161,7 +162,7 @@ test('rails keep an operator on the hall\'s gallery', () => {
 test('the settling pit and the foundry join all their doorways, turn up in facilities, and never hold salvage in their pits', () => {
   for (const kind of ['pit','foundry'] as const) {
     assert.equal(new Set(socketGroups(kind).values()).size,1,kind+': one walkable group');
-    assert.ok(roomTemplates[kind].depth! >= fatalFall,kind+': deep enough to kill from the floor');
+    assert.ok(roomTemplates[kind].depth! >= pitKill+8,kind+': walled deep into the dark, well past where a fall kills');
   }
   let pits = 0, foundries = 0;
   for (let seed=0;seed<60;seed++) {
@@ -175,14 +176,37 @@ test('the settling pit and the foundry join all their doorways, turn up in facil
   assert.ok(pits > 20 && foundries > 20,'pits '+pits+', foundries '+foundries+' in 60 facilities');
 });
 
-test('nothing in the foundry opens into the void: its whole footprint has a floor at the bottom or stands solid down to it', () => {
-  const {room,layout} = withRoom('foundry'), g = geometryFor(layout), t = roomTemplates.foundry, bottom = room.y-t.depth!;
-  const f = g.roofs.find(r => r.room === room.id)!;
-  const open: string[] = [];
-  for (let x=f.x-f.w/2+0.2;x<f.x+f.w/2-0.15;x+=0.25) for (let z=f.z-f.d/2+0.2;z<f.z+f.d/2-0.15;z+=0.25) {
-    const floor = g.surfaces.some(s => s.room === room.id && Math.abs(s.y-bottom) < 1e-6 && Math.abs(x-s.x) <= s.w/2 && Math.abs(z-s.z) <= s.d/2);
-    const block = g.walls.some(w => w.room === room.id && w.y <= bottom+1e-6 && Math.min(w.w,w.d) > 0.1 && Math.abs(x-w.x) <= w.w/2 && Math.abs(z-w.z) <= w.d/2);
-    if (!floor && !block) open.push(x.toFixed(2)+','+z.toFixed(2));
+test('a pit has nothing to land on: no floor or construct below the walkways, only solid blocks under the platform and stairs', () => {
+  for (const kind of ['pit','foundry'] as const) {
+    const {room,layout} = withRoom(kind), g = geometryFor(layout), below = room.y-0.5;
+    assert.deepEqual(g.surfaces.filter(s => s.room === room.id && Math.min(s.y,s.y+(s.rise ?? 0)) < below).length,0,kind+': no floor down in the pit');
+    assert.deepEqual(g.props.filter(o => o.room === room.id && o.y+o.h < below).length,0,kind+': nothing standing in the pit');
+    // Blocks reach up to just under a walkable floor, never to stand on.
+    for (const w of g.walls.filter(w => w.room === room.id && Math.min(w.w,w.d) > 0.1)) {
+      const top = w.y+w.h;
+      assert.ok(g.surfaces.some(s => s.room === room.id && s.solid && Math.abs(Math.min(s.y,s.y+(s.rise ?? 0))-0.13-top) < 1e-6),kind+': a block under a floor');
+    }
   }
-  assert.deepEqual(open.slice(0,5),[]);
+});
+
+test('salvage thrown into a pit, or dropped while falling, is lost', () => {
+  const {sim,room,layout} = withRoom('pit'), g = geometryFor(layout), p = sim.state.players[0], mission = sim.state.mission!;
+  const [a,b] = spawnSalvage(layout);
+  for (const item of [a,b]) { Object.assign(p,{x:item.x,z:item.z,feetY:item.y,place:'inside'}); sim.act(1,'take'); }
+  const girder = g.surfaces.find(s => s.room === room.id && s.y === room.y && Math.max(s.w,s.d) > 8 && Math.min(s.w,s.d) < 1.3)!;
+  Object.assign(p,{x:girder.x,z:girder.z,feetY:room.y});
+  // Thrown gently off the girder's side.
+  const side = girder.w > girder.d ? 0 : -Math.PI/2;
+  sim.act(1,'select',{slot:p.slots!.indexOf(a.id)});
+  sim.act(1,'throw',{aim:{yaw:side,pitch:0,power:0.1}});
+  run(sim,4);
+  assert.equal(items(layout,mission).some(i => i.id === a.id),false,'thrown down the pit');
+  // Stepping off with the other, and letting go on the way down.
+  sim.inputs.set(1,girder.w > girder.d ? {forward:1,right:0,yaw:0,pitch:0} : {forward:0,right:1,yaw:0,pitch:0});
+  for (let i=0;i<30 && p.vy === undefined;i++) sim.tick(1/30);
+  assert.ok(p.vy !== undefined,'falling');
+  sim.act(1,'select',{slot:p.slots!.indexOf(b.id)});
+  sim.act(1,'drop');
+  run(sim,4);
+  assert.equal(items(layout,mission).some(i => i.id === b.id),false,'dropped down the pit');
 });

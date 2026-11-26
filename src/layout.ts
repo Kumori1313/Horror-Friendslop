@@ -1,7 +1,7 @@
 import { clearAt } from './room.ts';
 import type { Point } from './room.ts';
 
-import { assembleTemplates, cell, climbable, planningGrade, wadeDepth, waterLevel, corridorKinds, destinationPool, isCorridor, orient, roomTemplates, socketAt, storey, supports, surfaceAt, surfaceHeight, obstaclesAt } from './room-templates.ts';
+import { assembleTemplates, cell, climbable, planningGrade, wadeDepth, waterLevel, corridorKinds, destinationPool, isCorridor, orient, roomTemplates, socketAt, storey, supports, surfaceAt, surfaceHeight, obstaclesAt, pitKill } from './room-templates.ts';
 import type { PlacedSurface, Placement, Point3, Solid, TemplateGeometry, TemplateKind, TemplateLink } from './room-templates.ts';
 
 export const generatorVersion = 8;
@@ -58,6 +58,14 @@ export function geometryFor(layout: Layout): Geometry {
     geometries.set(layout,g);
   }
   return g;
+}
+
+// Whether feet at this height have fallen into a pit room's pit, past saving.
+export function inPit(layout: Layout, p: {x: number; z: number; feetY?: number}) {
+  return layout.rooms.some(r => {
+    const t = orient(r.template,r.turn);
+    return t.depth !== undefined && (p.feetY ?? 0) < r.y-pitKill && t.footprint.some(f => Math.abs(p.x-r.x-f.x) <= f.w/2 && Math.abs(p.z-r.z-f.z) <= f.d/2);
+  });
 }
 
 export function solidsAt(geometry: Geometry, feet: number, opened: readonly string[] = []) {

@@ -180,7 +180,8 @@ export function trajectory(g: Geometry, opened: readonly string[], start: Launch
       }
     }
     points.push(x,y,z);
-    if (y < -20) break;
+    // Down a bottomless pit: it ends out of sight, where it fell.
+    if (y < -20) { rest = {x,y,z}; break; }
   }
   if (!rest) {
     const under = space.floor(x,z,y-b.h);

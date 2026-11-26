@@ -69,7 +69,7 @@ pre { margin-bottom: 0; line-height: 1.5 }
 @media (max-height: 500px) { #mission { max-width: 60vw } #touch-controls { bottom: 3.5rem } #brief { z-index: 1; padding: .8rem 1rem } }
 
 .session-controls { display: flex; align-items: center; gap: .6rem }
-#settings { pointer-events: auto; font: 0.8rem monospace; color: #f2efe3; border-color: #6f7d75; background: #18201e; padding: .45rem }
+#settings, #fullscreen-toggle { pointer-events: auto; font: 0.8rem monospace; color: #f2efe3; border-color: #6f7d75; background: #18201e; padding: .45rem }
 #preferences { width: min(21rem,92vw); max-height: 90dvh; overflow: auto; border: 1px solid #ac9c72; color: #f2efe3; background: #14211e; padding: 1.25rem }
 #preferences::backdrop { background: #070c0cc9 }
 #preferences label { display: block; margin: .85rem 0 .35rem }

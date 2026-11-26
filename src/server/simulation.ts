@@ -3,10 +3,10 @@ import type { Action, Aim, Command, Input, Lamp, Player, Snapshot } from '../roo
 import { flightStep, gravity, launchFrom, trajectory } from '../flight.ts';
 import type { Body, Flight } from '../flight.ts';
 
-import { geometryFor, nearbyDoor, playerRadius, spawnPoints } from '../layout.ts';
+import { geometryFor, inPit, nearbyDoor, playerRadius, spawnPoints } from '../layout.ts';
 import type { Layout, Geometry, Rect } from '../layout.ts';
 
-import { climbable, headHeight, obstaclesAt, surfaceAt, surfaceHeight, wadeDepth, waterLevel, type Solid } from '../room-templates.ts';
+import { climbable, headHeight, obstaclesAt, pitKill, surfaceAt, surfaceHeight, wadeDepth, waterLevel, type Solid } from '../room-templates.ts';
 import { assignment, batonReach, bellSpan, breathTime, swingTime, catalog, deliverySpot, distance, diverBody, finished, flareTime, gone, nearestPickup, prices, wallet } from '../mission.ts';
 import { doorReach, home, insideDoors, outdoors, placeOf, riftOpen, riftReach, riftSpot } from '../places.ts';
 import type { Place, Stand } from '../places.ts';
@@ -20,9 +20,11 @@ import { advanceMission, die, newContract, newMission, stun, wake, wipeSeed } fr
 // water no faster than this.
 export const sinkSpeed = 1.5;
 // A jump rises about 0.6 m: onto crates and sills and over short gaps, never
-// near a ceiling. Landing faster than a 6 m fall is fatal.
-export const jumpHeight = 0.6, fatalFall = 6;
-export const jumpSpeed = Math.sqrt(2*gravity*jumpHeight), fatalSpeed = Math.sqrt(2*gravity*fatalFall);
+// near a ceiling. Falls do no harm; a pit is what kills (`inPit`).
+export const jumpHeight = 0.6;
+export const jumpSpeed = Math.sqrt(2*gravity*jumpHeight);
+// With nothing beneath (down a bottomless pit), a fall stops this far down.
+const abyss = -50;
 const bodyHeight = 1.75;
 // Going down ground no steeper than this (rise over run, about 48 degrees)
 // keeps an operator on their feet; anything steeper, or an edge, and they
@@ -61,7 +63,8 @@ export function fall(p: Player, dt: number, g: Geometry | undefined) {
     const roof = headroom(g,p.x,p.z,feet);
     if (to+bodyHeight > roof) { to = Math.max(feet,roof-bodyHeight); vy = 0; }
   }
-  if (floor === undefined || to <= floor) { p.feetY = floor ?? feet; delete p.vy; return Math.max(0,-vy); }
+  if (floor === undefined && to <= abyss) { p.feetY = abyss; delete p.vy; return; }
+  if (floor !== undefined && to <= floor) { p.feetY = floor; delete p.vy; return Math.max(0,-vy); }
   p.feetY = to; p.vy = vy;
 }
 
@@ -297,9 +300,10 @@ export class Simulation {
         continue;
       }
       const place = placeOf(p);
-      const impact = moveOperator(p,input,dt,this.geometryAt(place),this.openedAt(place));
-      // A long fall is fatal during an expedition.
-      if (impact !== undefined && impact >= fatalSpeed && mission?.stage === 'explore' && !mission.escaped?.includes(p.id)) { die(this.state,mission,p.id); continue; }
+      moveOperator(p,input,dt,this.geometryAt(place),this.openedAt(place));
+      // Fallen into a pit during an expedition: dead, and what they carried
+      // is gone with them.
+      if (place === 'inside' && this.layout && mission?.stage === 'explore' && !mission.escaped?.includes(p.id) && inPit(this.layout,p)) { die(this.state,mission,p.id,true); continue; }
       // Walking into the home rift goes through it; walking into the exit rift escapes.
       if (mission && place === 'home' && distance(p,home().rift) <= riftReach) this.depart(p);
       else if (mission?.rift && place === 'outside' && distance(p,mission.rift) <= riftReach) this.escape(p);
@@ -464,11 +468,15 @@ export class Simulation {
     if (!kind) return;
     let rest = feet, flight: Flight | undefined, banked = false;
     const body: Body = bodyOf(kind), place = placeOf(p), g = this.geometryAt(place);
+    // Dropped in mid-air (jumping, falling), it falls too, like a throw
+    // with no speed.
+    const dropped = !aim && !!g && (p.vy !== undefined || !surfaceAt(g,p.x,p.z,feet.y));
+    if (dropped) aim = {yaw:p.yaw,pitch:0,power:0};
     if (aim && g) {
       // The aim travels with the command, so the throw goes where the thrower
       // was looking even if their latest view hasn't reached the host yet.
       const opened = this.openedAt(place);
-      const speed = throwSpeed(aim.power,kind !== 'lamp' && !!itemKinds[kind].heavy);
+      const speed = dropped ? 0 : throwSpeed(aim.power,kind !== 'lamp' && !!itemKinds[kind].heavy);
       const start = launchFrom(g,opened,p,{fx:-Math.sin(aim.yaw),fz:-Math.cos(aim.yaw),up:Math.sin(aim.pitch),speed},body);
       const path = trajectory(g,opened,start,body,feet);
       rest = path.rest;
@@ -507,9 +515,9 @@ export class Simulation {
         }
       }
     }
-    // Ending up in deep water, it sinks once it lands.
+    // Ending up in deep water, it sinks once it lands; down a pit, it is gone.
     const water = place === 'outside' && layout ? outdoors(layout.seed).geometry.water : undefined, level = water ? waterLevel(water,rest.x,rest.z) : undefined;
-    const sinks = level !== undefined && level-rest.y > wadeDepth+0.5;
+    const sinks = (level !== undefined && level-rest.y > wadeDepth+0.5) || (place === 'inside' && rest.y < -pitKill);
     this.release(p,item);
     if (item === lampSlot) {
       const lamp: Lamp = this.state.lamp;

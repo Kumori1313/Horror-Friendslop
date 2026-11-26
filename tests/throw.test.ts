@@ -33,13 +33,13 @@ const aim = (yaw: number, pitch: number, power: number) => {
 // The rest spot is on a floor, the item overlaps nothing solid, and an
 // operator can stand somewhere within reach of it.
 function settled(g: Geometry, rest: Point3, b: Body, opened: readonly string[], reached: (p: Point3) => boolean, label: string) {
+  // Down a pit below the ground storey, it is lost to the drop by design.
+  if (rest.y < -0.5) return;
   const floor = surfaceAt(g,rest.x,rest.z,rest.y);
   assert.ok(floor && Math.abs(surfaceHeight(floor,rest.x,rest.z)-rest.y) < 1e-6,label+': rests on a floor');
   const solids = [...g.walls,...g.props,...g.rails,...g.doors.filter(d => !opened.includes(d.id))];
   const inside = solids.find(s => Math.abs(rest.x-s.x) < s.w/2+b.r-1e-6 && Math.abs(rest.z-s.z) < s.d/2+b.r-1e-6 && rest.y < s.y+s.h && rest.y+2*b.h > s.y);
   assert.ok(!inside,label+': overlaps a solid at '+JSON.stringify(rest));
-  // In a pit below the ground storey, it is lost to the drop by design.
-  if (rest.y < -0.5) return;
   let reachable = false;
   for (let dx=-1.75;dx<=1.75 && !reachable;dx+=0.25) for (let dz=-1.75;dz<=1.75 && !reachable;dz+=0.25) {
     const stand = surfaceAt(g,rest.x+dx,rest.z+dz,rest.y);

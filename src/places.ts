@@ -78,6 +78,8 @@ export interface Outdoors {
   kind: MapKind; boardwalks: {x: number; y: number; z: number; w: number; d: number}[]; reeds: {x: number; y: number; z: number; h: number}[];
   // A quarry's pit (its terraces' radii and levels, its ramps) and spoil heaps.
   quarry?: Quarry & {levels: number[]};
+  // A quarry's toxic waste: glowing spills and the drums leaking into them.
+  toxic?: Toxic;
 }
 export const outdoorSize = 160;
 const outdoorCache = new Map<string,Outdoors>();
@@ -328,6 +330,38 @@ export function outdoors(seed: number): Outdoors {
       for (const b of r.rubble) g.props.push({x:b.x,z:b.z,w:b.w,d:b.d,y:b.y,h:b.h,kind:'rock',room});
     }
     for (const w of wrecks) for (const b of w.boxes) g.props.push({x:b.x,z:b.z,w:b.w,d:b.d,y:b.y,h:b.h,kind:'wreck',room});
+    // A quarry's waste: clusters of drums, some toppled and leaking into
+    // glowing spills, on level ground about the open ground and in the pit.
+    const toxic: Toxic | undefined = quarry ? {drums:[],spills:[]} : undefined;
+    if (quarry && toxic) {
+      const spill = random(featureSeed ^ 0x7f4a7c15);
+      const level = (x: number, z: number, r: number) => { for (let px=x-r;px<=x+r;px+=0.5) for (let pz=z-r;pz<=z+r;pz+=0.5) if (fieldGrade(ground,px,pz) > 0.04) return false; return true; };
+      // Where: the first on the pit's floor, then near the wrecks, then
+      // anywhere clear.
+      const near = wrecks.map(w => ({x:w.boxes[0].x,z:w.boxes[0].z}));
+      for (let t=0;t<320 && toxic.spills.length<10;t++) {
+        const floor = !toxic.spills.length && t < 60, base = floor ? {x:quarry.x,z:quarry.z} : t < 180 && near.length ? near[t % near.length] : {x:(spill()-0.5)*110,z:(spill()-0.5)*110};
+        const spread = floor ? 5 : t < 180 ? 7 : 0, x = base.x+(spill()-0.5)*spread*2, z = base.z+(spill()-0.5)*spread*2;
+        // On the floor, only kept off the ramps (it is too small for the
+        // general margins); elsewhere, clear of everything.
+        const offRamps = () => [0,1,2,3,4,5,6,7].every(k => !quarry.ramps.some(r => onRamp(quarry,r,x+Math.cos(k*Math.PI/4)*4.5,z+Math.sin(k*Math.PI/4)*4.5))) && !quarry.ramps.some(r => onRamp(quarry,r,x,z));
+        if (!(floor ? offRamps() : clear(x,z,3)) || !level(x,z,2.2)) continue;
+        if (floor && Math.hypot(x-quarry.x,z-quarry.z) > quarry.radii[2]-4) continue;
+        const y = height(x,z), r = floor ? 2.2+spill()*1.2 : 1.1+spill()*1.2;
+        toxic.spills.push({x,y,z,r});
+        // The drums beside it: upright, or on their sides pointing into it.
+        for (let i=0,count=2+Math.floor(spill()*3);i<count;i++) {
+          const a = spill()*Math.PI*2, d = r+0.4+spill()*0.9, dx = x+Math.cos(a)*d, dz = z+Math.sin(a)*d, lying = spill() < 0.45;
+          const along: 'x' | 'z' = Math.abs(Math.cos(a)) > Math.abs(Math.sin(a)) ? 'x' : 'z';
+          const w = lying && along === 'x' ? 0.9 : 0.62, dd = lying && along === 'z' ? 0.9 : 0.62, hh = lying ? 0.62 : 0.9;
+          if (g.props.some(p => Math.abs(p.x-dx) < (p.w+w)/2+0.1 && Math.abs(p.z-dz) < (p.d+dd)/2+0.1)) continue;
+          const dy = height(dx,dz);
+          toxic.drums.push({x:dx,y:dy,z:dz,lying,along,leak:lying && spill() < 0.7,toward:a+Math.PI});
+          g.props.push({x:dx,z:dz,w,d:dd,y:dy,h:hh,kind:'wreck',room});
+        }
+        claim(x,z,r+2);
+      }
+    }
     // Boulders, sitting in the ground, clear of the plots and of each other.
     const rocks: Outdoors['rocks'] = ruins.flatMap(r => r.rubble.map(b => ({x:b.x,y:b.y,z:b.z,w:b.w,d:b.d,h:b.h})));
     for (const [a,b,c,d,e] of rockSeeds) {
@@ -370,7 +404,13 @@ export function outdoors(seed: number): Outdoors {
     // A quarry's loose rock (mark 4): its pit walls and the ground at their
     // feet, and its spoil heaps. It slows walkers (`TemplateGeometry.scree`).
     if (quarry) {
+      // Fallout (mark 5): ashen ground about the spills and the wrecks.
       for (let j=0;j<n*n;j++) {
+        const x = ground.x0+(j % n), z = ground.z0+Math.floor(j/n);
+        if (toxic!.spills.some(s => Math.hypot(x-s.x,z-s.z) < s.r+2.5) || wrecks.some(w => Math.hypot(x-w.boxes[0].x,z-w.boxes[0].z) < 5.5)) marks[j] = 5;
+      }
+      for (let j=0;j<n*n;j++) {
+        if (marks[j] === 5) continue;
         const i = j % n, k = Math.floor(j/n), x = ground.x0+i, z = ground.z0+k;
         const steep = [[1,0],[-1,0],[0,1],[0,-1]].some(([di,dk]) => { const a = i+di, b = k+dk; return a >= 0 && b >= 0 && a < n && b < n && Math.abs(h[b*n+a]-h[j]) > 1.2; });
         const d = Math.hypot(x-quarry.x,z-quarry.z), footing = quarry.radii.some(r => d < r+0.6 && d > r-2.2);
@@ -407,7 +447,7 @@ export function outdoors(seed: number): Outdoors {
       }
     }
     const world: Outdoors = {
-      kind,boardwalks,reeds,quarry:quarry && {...quarry,levels:[rimLevel-4,rimLevel-8,rimLevel-12]},seed,geometry:g,size:outdoorSize,ground,arrival:{x:ax,y:arrivalLevel,z:az},spawns,building,doors,door,exit:doors[0].exit,rocks,bell,
+      kind,boardwalks,reeds,quarry:quarry && {...quarry,levels:[rimLevel-4,rimLevel-8,rimLevel-12]},toxic,seed,geometry:g,size:outdoorSize,ground,arrival:{x:ax,y:arrivalLevel,z:az},spawns,building,doors,door,exit:doors[0].exit,rocks,bell,
       ringing:{x:bell.x,y:0,z:bell.z+1.5,yaw:0},
       river,fords:river.fords.map(f => ({x:f.x,y:height(f.x,f.z),z:f.z})),ruins,wrecks,trails:trails.map(t => t ?? []),marks,water,bridges,
     };
@@ -425,6 +465,9 @@ export function outdoors(seed: number): Outdoors {
 // the pit, so whoever drops down a ledge can always walk back up. Low spoil
 // heaps of loose rock stand about the open ground.
 export interface Ramp { radius: number; start: number; span: number; turn: number }
+// A drum lies on its side `along` x or z, or stands; a leaking one points
+// `toward` its spill (a yaw).
+export interface Toxic { drums: {x: number; y: number; z: number; lying: boolean; along: 'x' | 'z'; leak: boolean; toward: number}[]; spills: {x: number; y: number; z: number; r: number}[] }
 export interface Quarry { x: number; z: number; radii: number[]; ramps: Ramp[]; heaps: {x: number; z: number; r: number; h: number}[] }
 const faceVector: Record<Face,[number,number]> = {east:[1,0],west:[-1,0],south:[0,1],north:[0,-1]};
 function quarryPlan(next: () => number, doors: Doorway[], arrival: {x: number; z: number}, building: Outdoors['building']): Quarry {

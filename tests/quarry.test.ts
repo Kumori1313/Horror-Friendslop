@@ -88,3 +88,22 @@ test('gusts come about 7 s in every 30 and drown sound further; the dust shorten
   assert.ok(carrying(seed,gust) < carrying(seed,calm) && carrying(seed,calm) < 1);
   assert.ok(weather.quarry.sight < 1);
 }));
+
+test('its toxic waste: drums leaking into spills on level ground, one on the pit floor, none on a ramp or in the way', () => quarry(() => {
+  for (const seed of seeds) {
+    const map = outdoors(seed), q = map.quarry!, toxic = map.toxic!;
+    assert.ok(toxic.spills.length >= 6,'seed '+seed+': '+toxic.spills.length+' spills');
+    assert.ok(toxic.spills.some(s => Math.hypot(s.x-q.x,s.z-q.z) < q.radii[2]-2 && Math.abs(s.y-q.levels[2]) < 0.1),'seed '+seed+': one on the pit floor');
+    for (const s of toxic.spills) {
+      assert.ok(toxic.drums.some(d => Math.hypot(d.x-s.x,d.z-s.z) < s.r+1.5),'seed '+seed+': drums by each spill');
+      for (const r of q.ramps) for (let u=0;u<=1;u+=0.1) {
+        const a = r.start+r.turn*r.span*u, x = q.x+Math.cos(a)*(r.radius-2), z = q.z+Math.sin(a)*(r.radius-2);
+        assert.ok(Math.hypot(x-s.x,z-s.z) > s.r+0.5,'seed '+seed+': off the ramps');
+      }
+    }
+    // Every drum is solid, and the crew still reaches every door and the bell.
+    for (const d of toxic.drums) assert.ok(map.geometry.props.some(p => Math.abs(p.x-d.x) < 0.01 && Math.abs(p.z-d.z) < 0.01));
+    const reached = walkable(map.geometry,map.spawns[0],[],0.5);
+    for (const p of [...map.doors.map(d => d.exit),map.ringing]) assert.ok(reached(p),'seed '+seed);
+  }
+}));

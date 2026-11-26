@@ -152,6 +152,112 @@ function mud() {
   mudTexture.wrapS = mudTexture.wrapT = T.RepeatWrapping; mudTexture.colorSpace = T.SRGBColorSpace;
   return mudTexture;
 }
+// Acid stains: green drips and blotches, black elsewhere, as a glow map
+// over rust, tiled every 2 m.
+function acidStains() {
+  const canvas = document.createElement('canvas'); canvas.width = canvas.height = 128;
+  const ctx = canvas.getContext('2d')!;
+  let n = 0x2f6b3c91;
+  const rnd = () => { n ^= n << 13; n ^= n >>> 17; n ^= n << 5; return ((n >>> 0)%1000)/1000; };
+  ctx.fillStyle = '#000'; ctx.fillRect(0,0,128,128);
+  for (let i=0;i<14;i++) {
+    const x = rnd()*128, y = rnd()*80, w = 1+rnd()*3, l = 20+rnd()*60, g = ctx.createLinearGradient(0,y,0,y+l);
+    g.addColorStop(0,'rgba(120,255,140,0.9)'); g.addColorStop(1,'rgba(40,120,50,0)');
+    ctx.fillStyle = g; ctx.fillRect(x,y,w,l); ctx.fillRect(x+128,y,w,l); ctx.fillRect(x-128,y,w,l);
+  }
+  for (let i=0;i<10;i++) { ctx.fillStyle = 'rgba(90,220,110,'+(0.2+rnd()*0.4)+')'; ctx.beginPath(); ctx.arc(rnd()*128,rnd()*128,2+rnd()*7,0,Math.PI*2); ctx.fill(); }
+  const t = new T.CanvasTexture(canvas); t.wrapS = t.wrapT = T.RepeatWrapping; t.colorSpace = T.SRGBColorSpace;
+  return t;
+}
+// A drum's warning band: black trefoils on yellow, worn and rust-spotted.
+function hazardBand() {
+  const canvas = document.createElement('canvas'); canvas.width = 256; canvas.height = 64;
+  const ctx = canvas.getContext('2d')!;
+  ctx.fillStyle = '#d6b21f'; ctx.fillRect(0,0,256,64);
+  for (let k=0;k<4;k++) {
+    const cx = 32+k*64, cy = 32;
+    ctx.fillStyle = '#141210';
+    for (let b=0;b<3;b++) { const a = -Math.PI/2+b*Math.PI*2/3; ctx.beginPath(); ctx.moveTo(cx,cy); ctx.arc(cx,cy,24,a-Math.PI/6,a+Math.PI/6); ctx.closePath(); ctx.fill(); }
+    ctx.fillStyle = '#d6b21f'; ctx.beginPath(); ctx.arc(cx,cy,7,0,Math.PI*2); ctx.fill();
+    ctx.fillStyle = '#141210'; ctx.beginPath(); ctx.arc(cx,cy,4.5,0,Math.PI*2); ctx.fill();
+  }
+  let n = 0x51a3c2e9;
+  const rnd = () => { n ^= n << 13; n ^= n >>> 17; n ^= n << 5; return ((n >>> 0)%1000)/1000; };
+  for (let i=0;i<120;i++) { ctx.fillStyle = rnd() < 0.6 ? 'rgba(110,60,30,0.6)' : 'rgba(30,25,20,0.5)'; ctx.fillRect(rnd()*256,rnd()*64,1+rnd()*5,1+rnd()*4); }
+  const t = new T.CanvasTexture(canvas); t.wrapS = T.RepeatWrapping; t.colorSpace = T.SRGBColorSpace;
+  return t;
+}
+// A soft round glow for halos, white at the middle.
+function glowDisc() {
+  const canvas = document.createElement('canvas'); canvas.width = canvas.height = 64;
+  const ctx = canvas.getContext('2d')!, g = ctx.createRadialGradient(32,32,0,32,32,32);
+  g.addColorStop(0,'rgba(255,255,255,1)'); g.addColorStop(0.45,'rgba(255,255,255,0.35)'); g.addColorStop(1,'rgba(255,255,255,0)');
+  ctx.fillStyle = g; ctx.fillRect(0,0,64,64);
+  return new T.CanvasTexture(canvas);
+}
+// A quarry's toxic waste: rusted drums with warning bands, the toppled
+// ones leaking, and the neon-green spills they leak into, each lying on the
+// ground with a soft halo over it. Returns a pulse to call each frame.
+function toxicWaste(map: Outdoors, root: T.Group, acid: T.Material) {
+  const toxic = map.toxic!, m = new T.Matrix4(), q = new T.Quaternion(), e = new T.Euler(), s = new T.Vector3(1,1,1), at = new T.Vector3();
+  const drums = toxic.drums;
+  const body = new T.InstancedMesh(new T.CylinderGeometry(0.3,0.3,0.88,14),acid,drums.length);
+  const band = new T.InstancedMesh(new T.CylinderGeometry(0.306,0.306,0.22,14,1,true),new T.MeshStandardMaterial({map:hazardBand(),roughness:0.7,metalness:0.2}),drums.length*2);
+  drums.forEach((d,i) => {
+    // Standing, or on its side across its axis.
+    if (d.lying) e.set(d.along === 'z' ? Math.PI/2 : 0,0,d.along === 'x' ? Math.PI/2 : 0); else e.set(0,0,0);
+    q.setFromEuler(e);
+    at.set(d.x,d.y+(d.lying ? 0.28 : 0.44),d.z); body.setMatrixAt(i,m.compose(at,q,s));
+    for (const [k,off] of [[0,0.22],[1,-0.22]] as const) {
+      const o = new T.Vector3(0,off,0).applyQuaternion(q);
+      band.setMatrixAt(i*2+k,m.compose(at.clone().add(o),q,s));
+    }
+  });
+  body.instanceMatrix.needsUpdate = band.instanceMatrix.needsUpdate = true;
+  root.add(body,band);
+  // The spills: a disc that follows the ground, glowing, rippling; a halo.
+  const neon = new T.MeshBasicMaterial({color:0x2dff52,transparent:true,opacity:0.9,depthWrite:false,polygonOffset:true,polygonOffsetFactor:-2,polygonOffsetUnits:-2});
+  const ripple = new T.CanvasTexture((() => {
+    const c = document.createElement('canvas'); c.width = c.height = 64; const x = c.getContext('2d')!;
+    x.fillStyle = '#5fd877'; x.fillRect(0,0,64,64);
+    for (let i=0;i<24;i++) { x.strokeStyle = i % 3 ? 'rgba(10,70,25,0.45)' : 'rgba(210,255,215,0.55)'; x.lineWidth = 1+((i*7)%2); x.beginPath(); x.arc(((i*37)%64),((i*23)%64),4+((i*11)%10),0,Math.PI*2); x.stroke(); }
+    return c;
+  })());
+  ripple.wrapS = ripple.wrapT = T.RepeatWrapping; neon.map = ripple;
+  const halo = new T.MeshBasicMaterial({color:0x1fd447,map:glowDisc(),transparent:true,opacity:0.35,blending:T.AdditiveBlending,depthWrite:false});
+  const pools: T.BufferGeometry[] = [], halos: T.BufferGeometry[] = [];
+  for (const [n,sp] of toxic.spills.entries()) {
+    const rings = 4, around = 24, position: number[] = [], uv: number[] = [], index: number[] = [];
+    const edge = (a: number) => sp.r*(0.8+0.2*Math.sin(a*3+n)+0.08*Math.sin(a*7+n*2));
+    position.push(sp.x,groundAt(map,sp.x,sp.z)+0.03,sp.z); uv.push(sp.x/2,sp.z/2);
+    for (let r=1;r<=rings;r++) for (let k=0;k<around;k++) {
+      const a = k/around*Math.PI*2, d = edge(a)*r/rings, x = sp.x+Math.cos(a)*d, z = sp.z+Math.sin(a)*d;
+      position.push(x,groundAt(map,x,z)+0.03,z); uv.push(x/2,z/2);
+    }
+    for (let k=0;k<around;k++) index.push(0,1+(k+1)%around,1+k);
+    for (let r=1;r<rings;r++) for (let k=0;k<around;k++) {
+      const a = 1+(r-1)*around+k, b = 1+(r-1)*around+(k+1)%around, c = a+around, d = b+around;
+      index.push(a,b,c,b,d,c);
+    }
+    const g = new T.BufferGeometry(); g.setAttribute('position',new T.Float32BufferAttribute(position,3)); g.setAttribute('uv',new T.Float32BufferAttribute(uv,2)); g.setIndex(index); g.computeVertexNormals();
+    pools.push(g);
+    const h = new T.PlaneGeometry(sp.r*3.2,sp.r*3.2); h.rotateX(-Math.PI/2); h.translate(sp.x,sp.y+0.12,sp.z); halos.push(h);
+  }
+  // Leaks: a thin glowing trickle from each leaking drum's mouth to the ground.
+  for (const d of drums) if (d.leak) {
+    const dx = Math.cos(d.toward), dz = Math.sin(d.toward), x = d.x+dx*0.55, z = d.z+dz*0.55;
+    const t = new T.BoxGeometry(0.07,0.025,0.9); t.rotateY(Math.atan2(dx,dz)); t.translate(x+dx*0.35,groundAt(map,x,z)+0.05,z+dz*0.35); pools.push(t);
+  }
+  const spills = new T.Mesh(mergeGeometries(pools),neon), glow = new T.Mesh(mergeGeometries(halos),halo);
+  glow.renderOrder = 2;
+  root.add(spills,glow);
+  for (const g of [...pools,...halos]) g.dispose();
+  return (time: number) => {
+    ripple.offset.set(Math.sin(time*0.3)*0.05,time*0.04);
+    halo.opacity = 0.3+0.08*Math.sin(time*1.7);
+    neon.color.setHSL(0.37,1,0.5+0.05*Math.sin(time*2.3));
+  };
+}
 // A marsh's mud over its banks and pool beds (marks 2 and 3), on the height
 // map's own grid and triangles a hair above the ground, fading out at its
 // edge, with a wet sheen.
@@ -193,7 +299,7 @@ function terrain(map: Outdoors) {
   const marsh = map.kind === 'marsh', quarry = map.kind === 'quarry';
   // A quarry: grey-brown ground, bare rock on its steep faces, pale rubble.
   const scrubColor = new T.Color(marsh ? 0x34402a : quarry ? 0x4a4538 : 0x3a4530), dirtColor = new T.Color(quarry ? 0x6a655c : 0x6a5a44), gravel = new T.Color(0x6d6b62), c = new T.Color();
-  const rubbleColor = new T.Color(0x837b6e);
+  const rubbleColor = new T.Color(0x837b6e), ashColor = new T.Color(0x34322a), sickly = new T.Color(0x6f7a32);
   const trailColor = new T.Color(marsh ? 0x6a5f4a : 0x857a64), siltColor = new T.Color(marsh ? 0x2b251a : 0x6e6c63);
   // A marsh's bank mud, mottled with wetter and drier patches.
   const mudColor = new T.Color(0x3a3121), mottle = (x: number, z: number) => {
@@ -214,6 +320,8 @@ function terrain(map: Outdoors) {
       if (mark === 1) c.lerp(trailColor,0.75); else if (mark === 2) c.lerp(siltColor,0.8);
       else if (mark === 3) c.lerp(mudColor,0.85).multiplyScalar(mottle(x,z));
       else if (mark === 4) c.lerp(rubbleColor,0.7).multiplyScalar(mottle(x*1.7,z*1.7));
+      // Fallout: ash, with sickly yellow-green patches.
+      else if (mark === 5) { const m = mottle(x*0.9,z*0.9); c.lerp(ashColor,0.75).lerp(sickly,Math.max(0,m-0.9)*2.5).multiplyScalar(0.85+0.2*m); }
       color.push(c.r,c.g,c.b);
       return position.length/3-1;
     };
@@ -304,7 +412,12 @@ export function buildOutdoors(map: Outdoors, library: Library) {
   for (const r of map.ruins) for (const p of r.pieces) b.box(concrete,0x8c8a80,p.x,p.y+p.h/2,p.z,p.w,p.h,p.d);
   // Wrecks and debris, rusted through: boxes batched with the rest, and
   // cylinders (tanks, pipes, silos, barrels) as a few merged meshes.
-  const rustMat = new T.MeshStandardMaterial({color:0x6a4a36,roughness:0.85,metalness:0.4,map:rust.map ?? null,side:T.DoubleSide});
+  // In a quarry, rust eaten through by glowing acid: on the wrecks, the
+  // drums, and the batched wreck boxes alike.
+  const stains = map.kind === 'quarry' ? acidStains() : undefined;
+  const acidic = (m: T.MeshStandardMaterial) => { if (stains) { m.emissive = new T.Color(0x3cff6a); m.emissiveMap = stains; m.emissiveIntensity = 0.45; } return m; };
+  const rustMat = acidic(new T.MeshStandardMaterial({color:0x6a4a36,roughness:0.85,metalness:0.4,map:rust.map ?? null,side:T.DoubleSide}));
+  const wreckRust = stains ? acidic((rust as T.MeshStandardMaterial).clone()) : rust;
   const cylinders: T.BufferGeometry[] = [];
   const cylinder = (x: number, y: number, z: number, radius: number, length: number, axis: 'x' | 'y' | 'z', open = false) => {
     const c = new T.CylinderGeometry(radius,radius,length,14,1,open);
@@ -320,13 +433,14 @@ export function buildOutdoors(map: Outdoors, library: Library) {
     // Five upright barrels in two rows.
     else if (w.kind === 'barrels') for (const [bx,bz] of [[-0.8,-0.5],[0,-0.5],[0.8,-0.5],[-0.4,0.5],[0.4,0.5]]) cylinder(main.x+bx,foot+0.45,main.z+bz,0.32,0.9,'y');
     else w.boxes.forEach((p,i) => b.box(
-      (w.kind === 'crane' && i === 0) || (w.kind === 'pylon' && i === 0) ? b.surface('grating') : w.kind === 'shed' ? b.surface('wood') : rust,
+      (w.kind === 'crane' && i === 0) || (w.kind === 'pylon' && i === 0) ? b.surface('grating') : w.kind === 'shed' ? b.surface('wood') : wreckRust,
       paint[w.kind] ?? 0x8a6a52,p.x,p.y+p.h/2,p.z,p.w,p.h,p.d));
   }
   if (cylinders.length) {
     root.add(new T.Mesh(mergeGeometries(cylinders),rustMat));
     for (const c of cylinders) c.dispose();
   }
+  const pulse = map.toxic ? toxicWaste(map,root,rustMat) : undefined;
   // Bridges: plank decks with holes, broken railings, posts into the water.
   const wood = b.surface('wood');
   for (const br of map.bridges) {
@@ -443,6 +557,7 @@ export function buildOutdoors(map: Outdoors, library: Library) {
     root,seed:map.seed,
     update(time: number, arrivalOpen: boolean, open?: {x: number; y?: number; z: number}, rung = false, view?: {x: number; y: number; z: number}, gust = false) {
       if (waterMaterial?.map) waterMaterial.map.offset.y = -time*0.05;
+      pulse?.(time);
       // Dust: each mote drifts with the wind (and a little down) in the
       // world, and wraps round to stay within the cube about the viewer.
       if (dust && wind && view) {

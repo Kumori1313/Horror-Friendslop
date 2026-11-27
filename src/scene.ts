@@ -524,7 +524,7 @@ export function createScene(canvas: HTMLCanvasElement, generated = false) {
   // Footprints in a snowfield: every walker outside leaves a print every
   // `step` metres, left and right in turn, a stalker bigger ones; each fades
   // into the snow over `printFade` seconds. A ring of instanced ovals.
-  const printsMax = 500, printFade = 60, dent = new T.Color(0x7f8b98), snowTone = new T.Color(0xc9d2dc);
+  const printsMax = 500, printFade = 20, dent = new T.Color(0x7f8b98), snowTone = new T.Color(0xc9d2dc);
   const printShape = new T.CircleGeometry(0.5,10); printShape.rotateX(-Math.PI/2);
   const printMesh = new T.InstancedMesh(printShape,new T.MeshStandardMaterial({color:0xffffff,roughness:1,polygonOffset:true,polygonOffsetFactor:-2,polygonOffsetUnits:-2}),printsMax);
   printMesh.count = 0; printMesh.frustumCulled = false; printMesh.visible = false; scene.add(printMesh);

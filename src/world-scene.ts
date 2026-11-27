@@ -475,7 +475,9 @@ export function buildOutdoors(map: Outdoors, library: Library) {
     else w.boxes.forEach((p,i) => b.box(
       (w.kind === 'crane' && i === 0) || (w.kind === 'pylon' && i === 0) ? b.surface('grating') : w.kind === 'shed' ? b.surface('wood') : wreckRust,
       paint[w.kind] ?? 0x8a6a52,p.x,p.y+p.h/2,p.z,p.w,p.h,p.d));
-    if (w.kind !== 'pipes' && w.kind !== 'barrels') snowCap(w.boxes[0]);
+    // Not on the round ones (tanks, silos, pipes, barrels): a flat cap
+    // over their box would sit on them like a lid.
+    if (!['pipes','barrels','tank','silo'].includes(w.kind)) snowCap(w.boxes[0]);
   }
   if (cylinders.length) {
     root.add(new T.Mesh(mergeGeometries(cylinders),rustMat));

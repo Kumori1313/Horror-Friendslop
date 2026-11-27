@@ -194,19 +194,24 @@ test('a baton hit, a thrown item or a lit flare near it frees the victim back on
   }
 });
 
-test('struggling slows the drag', () => {
-  const dragged = (mash: boolean) => {
-    const {sim,mission,player,put,run,lurker,beside} = bank();
+test('struggling slows the drag to three quarters, whatever the rhythm, and never stalls it', () => {
+  // How far the victim is dragged in 1.5 s, pressing the jump key to a
+  // pattern (true: held this tick).
+  const dragged = (press: (i: number) => boolean) => {
+    const {sim,mission,player,beside,put} = bank();
     const spot = beside(3)!, p = player(1);
     put(p,spot.x,spot.z);
     for (let i=0;i<180 && !heldBy(mission,1);i++) sim.tick(1/30);
     assert.ok(heldBy(mission,1));
-    const start = Math.hypot(p.x-lurker().x,p.z-lurker().z);
-    for (let i=0;i<45;i++) { sim.inputs.set(1,{forward:0,right:0,yaw:0,pitch:0,jump:mash && i % 4 < 2}); sim.tick(1/30); }
-    return start-Math.hypot(p.x-lurker().x,p.z-lurker().z);
+    const from = {x:p.x,z:p.z};
+    for (let i=0;i<45;i++) { sim.inputs.set(1,{forward:0,right:0,yaw:0,pitch:0,jump:press(i)}); sim.tick(1/30); }
+    return Math.hypot(p.x-from.x,p.z-from.z);
   };
-  const free = dragged(false), fighting = dragged(true);
-  assert.ok(fighting < free*0.6,'struggling: '+fighting.toFixed(2)+' m against '+free.toFixed(2)+' m');
+  const free = dragged(() => false);
+  for (const [name,press] of [['every tick',(i: number) => i % 2 === 0],['every other',(i: number) => i % 4 < 2],['steadily',(i: number) => i % 8 < 2],['every half second',(i: number) => i % 15 === 0]] as const) {
+    const fighting = dragged(press);
+    assert.ok(fighting > free*0.7 && fighting < free*0.8,name+': '+fighting.toFixed(2)+' m against '+free.toFixed(2)+' m');
+  }
 });
 
 test('the fords are safe: someone wading across is never grabbed', () => {

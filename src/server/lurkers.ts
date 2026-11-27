@@ -18,7 +18,9 @@ export const linger = 4;
 // It hears someone moving within `hearMoving` m, someone still within
 // `hearStill`; it grabs within `grabReach` m (from under the water, so up to
 // `grabHeight` above it: a low bridge is not safe); it drags its victim at
-// `dragSpeed`, a quarter of that while they struggle; after letting go it
+// `dragSpeed`, `struggleDrag` of that while they struggle (a press of the
+// jump key within the last `struggleFor` s: mashing faster, or to any rhythm,
+// does no better, so it can never stall the pull); after letting go it
 // stays down `sinkTime` seconds.
 // Hunting, it comes across the river toward where it heard someone, up to
 // `edge` metres from the centre line: through water down to `shallowest`
@@ -27,6 +29,7 @@ export const linger = 4;
 // Holding someone, it backs toward the middle of the channel at `retreat`,
 // so a victim has some seconds before the deep water closes over them.
 export const hearMoving = 16, hearStill = 6, grabReach = 9, grabHeight = 5, dragSpeed = 1.1, retreat = 0.8, sinkTime = 15, grabDamage = 10, flareFear = 4, edge = 10, shallowest = 0.6, ashore = 3, climb = 2, fordSafe = 9;
+export const struggleDrag = 0.75, struggleFor = 0.5;
 const enraged = 1.4, depthNeeded = 2;
 
 // `heard`: where it last heard someone, until it has been there and waited;
@@ -114,7 +117,7 @@ function release(mission: Mission, state: Snapshot, l: Lurker) {
 // The victim mashes the jump key: the drag slows for a moment.
 export function struggle(mission: Mission, id: number) {
   const l = mission.lurkers?.find(n => n.mode === 'grab' && n.grab === id), plan = l && plans.get(mission)?.get(l.id);
-  if (plan) plan.struggle = 0.4;
+  if (plan) plan.struggle = struggleFor;
 }
 
 // A baton swing: a hit near the Lurker or the one it holds makes it let go;
@@ -151,7 +154,7 @@ export function stepLurkers(layout: Layout, state: Snapshot, mission: Mission, d
       // Dragged toward it, into the deep water, where the breath runs out.
       const dx = l.x-victim.x, dz = l.z-victim.z, d = Math.hypot(dx,dz);
       if (d > 0.6) {
-        const step = Math.min(d-0.6,dragSpeed*fast*(plan.struggle > 0 ? 0.25 : 1)*dt);
+        const step = Math.min(d-0.6,dragSpeed*fast*(plan.struggle > 0 ? struggleDrag : 1)*dt);
         victim.x = Math.round((victim.x+dx/d*step)*100)/100; victim.z = Math.round((victim.z+dz/d*step)*100)/100;
         victim.vy ??= 0;
       }

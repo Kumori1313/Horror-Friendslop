@@ -93,11 +93,13 @@ export class Batch {
   }
 }
 
+export interface SalvageVisual { geometry: T.BufferGeometry; material: T.Material }
+
 // Each room is one group of merged meshes, so whole rooms can be hidden at
 // once. Shell surfaces come from the room's palette, props keep their colour
 // over metal, rust, paint or wood, and markers and lamps glow. Materials are
 // shared from `library` and outlive the facility.
-export function buildFacility(layout: Layout, library: Library) {
+export function buildFacility(layout: Layout, library: Library, visuals: ReadonlyMap<ItemKind,SalvageVisual>) {
   const root = new T.Group();
   const geometry = geometryFor(layout);
   const byId = new Map(layout.rooms.map(r => [r.id,r]));
@@ -219,16 +221,20 @@ export function buildFacility(layout: Layout, library: Library) {
     const passage = layout.passages.find(p => p.id === d.id)!;
     return {id:d.id,mesh,rooms:[passage.a,passage.b]};
   });
-  // One instanced box per kind of salvage, so any number of items costs one
+  // One instanced mesh per kind of salvage, so any number of items costs one
   // draw each. Items in rooms the camera cannot see are left out.
   const salvageMeshes = new Map((Object.keys(itemKinds) as ItemKind[]).map(kind => {
     // Room for a few bought items carried in as well.
-    const k = itemKinds[kind], count = spawnSalvage(layout).filter(i => i.kind === kind).length+4;
-    const metal = kind !== 'board' && kind !== 'toolbox';
-    const mesh = new T.InstancedMesh(Batch.unit,new T.MeshStandardMaterial({color:k.color,roughness:metal ? 0.32 : 0.6,metalness:metal ? 0.85 : 0.2,envMap:metal ? library.reflections ?? null : null,emissive:k.color,emissiveIntensity:kind === 'cell' ? 0.55 : kind === 'flare' ? 0.45 : 0.08,envMapIntensity:0.3}),Math.max(1,count));
+    const count = spawnSalvage(layout).filter(i => i.kind === kind).length+4;
+    const {geometry,material} = visuals.get(kind)!;
+    const mesh = new T.InstancedMesh(geometry,material,Math.max(1,count));
     mesh.count = 0; mesh.frustumCulled = false; root.add(mesh);
     return [kind,mesh];
   }));
+  function setSalvageVisual(kind: ItemKind, visual: SalvageVisual) {
+    const mesh = salvageMeshes.get(kind)!;
+    mesh.geometry = visual.geometry; mesh.material = visual.material;
+  }
   const place = new T.Object3D();
   let salvageKey = '';
   function salvage(list: {kind: ItemKind; x: number; y: number; z: number; room: string}[]) {
@@ -260,7 +266,10 @@ export function buildFacility(layout: Layout, library: Library) {
     // The material library is shared with the next facility.
     for (const shared of [matte,glow,...library.surfaces.values()]) materials.delete(shared);
     panel.map?.dispose();
-    for (const mesh of salvageMeshes.values()) mesh.dispose();
+    // Pickup visuals are also used in hand, outdoors and in the next layout.
+    for (const mesh of salvageMeshes.values()) {
+      geometries.delete(mesh.geometry); materials.delete(mesh.material); mesh.dispose();
+    }
     for (const mat of labels.values()) mat.map?.dispose();
     for (const resource of [...geometries,...materials]) resource.dispose();
     root.removeFromParent();
@@ -274,5 +283,5 @@ export function buildFacility(layout: Layout, library: Library) {
     // `reach`: from the middle of the ceiling to its farthest corner.
     lamps.set(r.room,{x:r.x,y:r.y-0.12,z:r.z,height:r.y-floor,reach:Math.hypot(r.w,r.d)/2});
   }
-  return {root,update,show,dispose,salvage,lamps,rooms:groups.size};
+  return {root,update,show,dispose,salvage,setSalvageVisual,lamps,rooms:groups.size};
 }

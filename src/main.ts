@@ -303,10 +303,9 @@ function start(render: ReturnType<typeof createScene>, mode?: Crew | 'solo', sce
     return kinds.get(item) ?? state?.mission?.haul.find(h => h.id === item)?.kind;
   }
   const nameOf = (kind: ItemKind | 'lamp') => kind === 'lamp' ? 'Flashlight' : itemName(kind);
-  let previews: Record<string,string> | undefined;
   // The flashlight's slot shows how much battery is left.
   function showHotbar(p: Player, lamp: Lamp) {
-    previews ??= render.previews();
+    const previews = render.previews();
     const slots = slotsOf(p), current = handOf(p), left = chargeOf(lamp)/batteryLife;
     slots.forEach((item,i) => {
       const b = slotButtons[i], kind = item ? kindOf(item) : undefined, img = b.querySelector('img')!;
@@ -317,7 +316,7 @@ function start(render: ReturnType<typeof createScene>, mode?: Crew | 'solo', sce
         if (bar.style.width !== width) bar.style.width = width;
         meter.classList.toggle('low',left < 0.2);
       }
-      const src = kind ? previews![kind] : '';
+      const src = kind ? previews[kind] : '';
       if (img.getAttribute('src') !== src) { if (src) img.src = src; else img.removeAttribute('src'); }
       img.hidden = !kind;
       b.setAttribute('aria-label','Slot '+(i+1)+': '+(kind ? nameOf(kind) : 'empty'));

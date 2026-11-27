@@ -4,7 +4,7 @@ import { createStalkerModel, type StalkerModel } from './stalker-model.ts';
 import { createGnawerModel, type GnawerModel } from './gnawer-model.ts';
 import { createLurkerModel, type LurkerModel } from './lurker-model.ts';
 import { catalog, flatOn, itemName, items, pace, stunTime, swingTime, type Diver, type Stalker } from './mission.ts';
-import { buildFacility } from './facility-scene.ts';
+import { buildFacility, type SalvageVisual } from './facility-scene.ts';
 import { environment, materialLibrary } from './materials.ts';
 import { anchor, geometryFor, type Geometry, type Layout } from './layout.ts';
 import { groundAt, home, outdoors, placeOf, type Place } from './places.ts';
@@ -16,7 +16,7 @@ import { batteryLife, chargeOf, lampSlot, selected, walls } from './room.ts';
 import type { Snapshot } from './room.ts';
 import { gravity, positionAt, trajectory } from './flight.ts';
 import type { Flight } from './flight.ts';
-import { bodyOf, itemKinds, spawnSalvage, type ItemKind } from './salvage.ts';
+import { bodyOf, itemKinds, type ItemKind } from './salvage.ts';
 import { heldLamp } from './server/simulation.ts';
 
 function painted(color: string, seam: string) {
@@ -123,23 +123,21 @@ export function createScene(canvas: HTMLCanvasElement, generated = false) {
   let facility: ReturnType<typeof buildFacility> | undefined;
   const people = new Map<number,T.Group>();
   // Salvage looks the same on the floor, in flight, in hand and in the hotbar.
-  const itemMaterials = new Map<ItemKind,T.Material>();
-  function itemMaterial(kind: ItemKind) {
-    let m = itemMaterials.get(kind);
-    if (!m) {
-      const k = itemKinds[kind], metal = kind !== 'board' && kind !== 'toolbox';
-      m = new T.MeshStandardMaterial({color:k.color,roughness:metal ? 0.32 : 0.6,metalness:metal ? 0.85 : 0.2,envMap:metal ? library?.reflections ?? null : null,emissive:k.color,emissiveIntensity:kind === 'cell' ? 0.55 : kind === 'flare' ? 0.45 : 0.08,envMapIntensity:0.3});
-      itemMaterials.set(kind,m);
-    }
-    return m;
+  const itemVisuals = new Map<ItemKind,SalvageVisual>();
+  for (const kind of Object.keys(itemKinds) as ItemKind[]) {
+    const k = itemKinds[kind], metal = kind !== 'board' && kind !== 'toolbox';
+    const material = new T.MeshStandardMaterial({color:k.color,roughness:metal ? 0.32 : 0.6,metalness:metal ? 0.85 : 0.2,envMap:metal ? library?.reflections ?? null : null,emissive:k.color,emissiveIntensity:kind === 'cell' ? 0.55 : kind === 'flare' ? 0.45 : 0.08,envMapIntensity:0.3});
+    itemVisuals.set(kind,{geometry:cube,material});
   }
-  // The item an operator has selected, shown in their hand.
-  function holdItem(mesh: T.Mesh, kind: ItemKind | undefined, scale = 0.85) {
-    mesh.visible = !!kind;
-    if (!kind) return;
-    mesh.material = itemMaterial(kind);
+  function showItem(mesh: T.Mesh, kind: ItemKind, scale = 1) {
+    const visual = itemVisuals.get(kind)!;
+    mesh.geometry = visual.geometry; mesh.material = visual.material;
     const [w,h,d] = itemKinds[kind].size;
     mesh.scale.set(w*scale,h*scale,d*scale);
+  }
+  function holdItem(mesh: T.Mesh, kind: ItemKind | undefined, scale = 0.85) {
+    mesh.visible = !!kind;
+    if (kind) showItem(mesh,kind,scale);
   }
   const inHand = new T.Mesh(cube,steel);
   inHand.visible = false; scene.add(inHand);
@@ -230,7 +228,7 @@ export function createScene(canvas: HTMLCanvasElement, generated = false) {
   const lurkerEye = new T.MeshBasicMaterial({color:0xd8dcc4});
   const lurkerModels = new Map<number,LurkerModel>();
   const chest = new T.Vector3();
-  function creatureAsset(file: string) {
+  function modelAsset(file: string) {
     let asset: GLTF | undefined, loading = false, retryAt = 0;
     return () => {
       if (!asset && !loading && performance.now() >= retryAt) {
@@ -239,13 +237,28 @@ export function createScene(canvas: HTMLCanvasElement, generated = false) {
           asset = result; loading = false;
         },undefined,error => {
           loading = false; retryAt = performance.now()+30_000;
-          console.warn('Creature model unavailable: '+file,error);
+          console.warn('Model unavailable: '+file,error);
         });
       }
       return asset;
     };
   }
-  const loadLurker = creatureAsset('lurker.glb'), loadStalker = creatureAsset('stalker.glb'), loadGnawer = creatureAsset('gnawer.glb');
+  const loadLurker = modelAsset('lurker.glb'), loadStalker = modelAsset('stalker.glb'), loadGnawer = modelAsset('gnawer.glb');
+  const loadValve = modelAsset('brass-valve.glb');
+  function installValve(asset: GLTF) {
+    const valve = asset.scene.getObjectByProperty('isMesh',true) as T.Mesh<T.BufferGeometry,T.MeshStandardMaterial>;
+    const [w,h,d] = itemKinds.valve.size;
+    // All pickup draws scale a centered unit mesh to the catalog's dimensions.
+    // The Blender export is in metres with its origin on the floor.
+    valve.geometry.applyMatrix4(valve.matrixWorld).center().scale(1/w,1/h,1/d);
+    valve.material.envMap = library?.reflections ?? null;
+    valve.material.envMapIntensity = 0.3;
+    valve.material.emissive.setHex(itemKinds.valve.color);
+    valve.material.emissiveIntensity = 0.08;
+    itemVisuals.set('valve',valve);
+    facility?.setSalvageVisual('valve',valve);
+    if (previewImages) delete previewImages.valve;
+  }
   let showingLurker: GLTF | undefined;
   // Keep the original silhouette and grab visible while the model downloads.
   function fallbackLurker(): LurkerModel {
@@ -396,7 +409,7 @@ export function createScene(canvas: HTMLCanvasElement, generated = false) {
   // Each kind's hotbar picture, rendered once in a small off-screen scene.
   let previewImages: Record<string,string> | undefined;
   function previews() {
-    if (previewImages) return previewImages;
+    if (previewImages?.valve) return previewImages;
     const size = 96, target = new T.WebGLRenderTarget(size,size), stage = new T.Scene();
     const lens2 = new T.PerspectiveCamera(30,1,0.1,10);
     lens2.position.set(1.25,1,1.25); lens2.lookAt(0,0,0);
@@ -424,17 +437,19 @@ export function createScene(canvas: HTMLCanvasElement, generated = false) {
       ctx.putImageData(image,0,0);
       return canvas.toDataURL();
     }
-    const out: Record<string,string> = {};
+    const out: Record<string,string> = previewImages ?? {};
     for (const kind of Object.keys(itemKinds) as ItemKind[]) {
-      const [w,h,d] = itemKinds[kind].size, fit = 0.75/Math.max(w,h,d);
-      const mesh = new T.Mesh(cube,itemMaterial(kind));
-      mesh.scale.set(w*fit,h*fit,d*fit); mesh.rotation.y = 0.35;
+      if (out[kind]) continue;
+      const mesh = new T.Mesh(cube,steel);
+      showItem(mesh,kind,0.75/Math.max(...itemKinds[kind].size)); mesh.rotation.y = 0.35;
       out[kind] = shoot(mesh);
     }
-    const light = new T.Group();
-    for (const part of [barrel,head,lens]) light.add(part.clone());
-    light.scale.setScalar(2.2); light.rotation.set(0.2,0.8,0);
-    out.lamp = shoot(light);
+    if (!out.lamp) {
+      const light = new T.Group();
+      for (const part of [barrel,head,lens]) light.add(part.clone());
+      light.scale.setScalar(2.2); light.rotation.set(0.2,0.8,0);
+      out.lamp = shoot(light);
+    }
     target.dispose();
     renderer.setClearColor(0x000000,1);
     return previewImages = out;
@@ -651,6 +666,10 @@ export function createScene(canvas: HTMLCanvasElement, generated = false) {
     const squall = here === 'outside' && !!layout && squalling(layout.seed,state?.mission?.clock ?? 0);
     storm += ((squall ? 1 : 0)-storm)*Math.min(1,dt*0.6);
     if (generated && here) look(here,state?.mission?.clock,surface !== undefined && camera.position.y < surface,layout?.seed,storm);
+    if (layout && itemVisuals.get('valve')!.geometry === cube) {
+      const valve = loadValve();
+      if (valve) installValve(valve);
+    }
     // Build only the place this camera is in. Home drops the expedition.
     if (here === 'home') {
       facility?.dispose(); facility = undefined; loaded = undefined; portals = undefined;
@@ -658,7 +677,7 @@ export function createScene(canvas: HTMLCanvasElement, generated = false) {
     }
     if (layout && here === 'inside' && (layout !== loaded || !facility)) {
       facility?.dispose();
-      facility = buildFacility(layout,library!);
+      facility = buildFacility(layout,library!,itemVisuals);
       for (const light of ceilingLamps) { light.userData.room = ''; light.intensity = 0; }
       scene.add(facility.root);
       portals = portalGraph(layout,geometryFor(layout));
@@ -940,10 +959,10 @@ export function createScene(canvas: HTMLCanvasElement, generated = false) {
           // Banked salvage is drawn only while it flies into the rift.
           if (i.owner !== null || (i.banked && !i.flight) || i.place !== here) continue;
           let mesh = loose.get(i.id);
-          if (!mesh) { mesh = new T.Mesh(cube,itemMaterial(i.kind)); loose.set(i.id,mesh); scene.add(mesh); }
-          const [w,h,d] = itemKinds[i.kind].size;
+          if (!mesh) { mesh = new T.Mesh(cube,steel); loose.set(i.id,mesh); scene.add(mesh); }
+          const [,h] = itemKinds[i.kind].size;
           const at = i.flight ? inFlight(g,[],i.id,i.flight,i.kind,i,performance.now()) : {x:i.x,y:i.y+h/2,z:i.z};
-          mesh.position.set(at.x,at.y,at.z); mesh.scale.set(w,h,d); mesh.rotation.y = (i.x*7+i.z*3)%Math.PI;
+          showItem(mesh,i.kind); mesh.position.set(at.x,at.y,at.z); mesh.rotation.y = (i.x*7+i.z*3)%Math.PI;
           wanted.add(i.id);
         }
       }

@@ -1,6 +1,7 @@
 import * as T from 'three';
 import { GLTFLoader, type GLTF } from 'three/addons/loaders/GLTFLoader.js';
 import { createStalkerModel, type StalkerModel } from './stalker-model.ts';
+import { createGnawerModel, type GnawerModel } from './gnawer-model.ts';
 import { createLurkerModel, type LurkerModel } from './lurker-model.ts';
 import { catalog, flatOn, itemName, items, pace, stunTime, swingTime, type Diver, type Stalker } from './mission.ts';
 import { buildFacility } from './facility-scene.ts';
@@ -196,10 +197,10 @@ export function createScene(canvas: HTMLCanvasElement, generated = false) {
   const shell = new T.MeshStandardMaterial({color:0x9a8f7a,roughness:0.55,metalness:0.1});
   const claw = new T.MeshStandardMaterial({color:0x3e382e,roughness:0.7});
   const eye = new T.MeshBasicMaterial({color:0xcfc8b0});
-  const gnawerModels = new Map<number,{group: T.Group; legs: T.Group[]; phase: number; last: T.Vector3}>();
-  function gnawerModel(id: number) {
-    let model = gnawerModels.get(id);
-    if (model) return model;
+  const gnawerModels = new Map<number,GnawerModel>();
+  let showingGnawer: GLTF | undefined;
+  // The stand-in, while the model downloads or when detailed models are off.
+  function fallbackGnawer(): GnawerModel {
     const group = new T.Group(), legs: T.Group[] = [];
     // Forward is -z, as for operators.
     box(0,0.24,0.05,0.5,0.16,0.62,shell,group);
@@ -214,10 +215,13 @@ export function createScene(canvas: HTMLCanvasElement, generated = false) {
         const leg = box(side*0.17,-0.06,0,0.32,0.035,0.035,claw,hip); leg.rotation.z = -side*0.55;
       }
     }
-    scene.add(group);
-    model = {group,legs,phase:0,last:new T.Vector3()};
-    gnawerModels.set(id,model);
-    return model;
+    let phase = 0;
+    return {group,dispose:() => group.removeFromParent(),
+      pose(_g,travel,_dt,reducedMotion) {
+        phase += Math.min(travel,0.5)*18;
+        legs.forEach((leg,i) => { leg.rotation.y = (reducedMotion ? 0.15 : 0.45)*Math.sin(phase+(i%3)*2.1+(i<3 ? 0 : Math.PI)); });
+      },
+      jaws:out => out.set(-Math.sin(group.rotation.y)*0.62,0.08,-Math.cos(group.rotation.y)*0.62).add(group.position)};
   }
   // The Lurker: a long, dark, ridged shape lying just under the river's
   // surface, two pale eyes on top; when it grabs, a long arm reaches out of
@@ -241,7 +245,7 @@ export function createScene(canvas: HTMLCanvasElement, generated = false) {
       return asset;
     };
   }
-  const loadLurker = creatureAsset('lurker.glb'), loadStalker = creatureAsset('stalker.glb');
+  const loadLurker = creatureAsset('lurker.glb'), loadStalker = creatureAsset('stalker.glb'), loadGnawer = creatureAsset('gnawer.glb');
   let showingLurker: GLTF | undefined;
   // Keep the original silhouette and grab visible while the model downloads.
   function fallbackLurker(): LurkerModel {
@@ -875,21 +879,31 @@ export function createScene(canvas: HTMLCanvasElement, generated = false) {
           const g2 = people.get(p.id);
           if (g2) g2.visible = p.id !== self && sameHere(p) && shown(p.x,p.z,p.feetY ?? 0);
         }
-        // Gnawers glide between snapshots, scuttling as they go.
+        // Gnawers glide between snapshots, scuttling as they go; only one in a
+        // room in view is animated.
         const jaws = new Map<number,{x: number; y: number; z: number}>();
+        const gnawerAsset = models && state.mission?.gnawers?.length ? loadGnawer() : undefined;
+        if (showingGnawer !== gnawerAsset) {
+          for (const model of gnawerModels.values()) model.dispose();
+          gnawerModels.clear(); showingGnawer = gnawerAsset;
+        }
         for (const n of state.mission?.gnawers ?? []) {
-          const model = gnawerModel(n.id), at = glide('g'+n.id,state.update,n.x,n.y,n.z,now,model.group.position);
-          const moved = model.last.distanceTo(at);
-          model.last.copy(at); model.group.position.copy(at);
+          let model = gnawerModels.get(n.id);
+          if (!model) {
+            model = gnawerAsset ? createGnawerModel(gnawerAsset) : fallbackGnawer();
+            model.group.position.set(n.x,n.y,n.z); model.group.rotation.y = n.yaw;
+            scene.add(model.group); gnawerModels.set(n.id,model);
+          }
+          const at = glide('g'+n.id,state.update,n.x,n.y,n.z,now,model.group.position), travel = model.group.position.distanceTo(at);
+          model.group.position.copy(at);
           const turn = Math.atan2(Math.sin(n.yaw-model.group.rotation.y),Math.cos(n.yaw-model.group.rotation.y));
           model.group.rotation.y += turn*Math.min(1,dt*12);
-          model.phase += Math.min(moved,0.5)*18;
-          model.legs.forEach((leg,i) => { leg.rotation.y = (reducedMotion ? 0.15 : 0.45)*Math.sin(model.phase+(i%3)*2.1+(i<3 ? 0 : Math.PI)); });
           model.group.visible = shown(at.x,at.z,at.y);
-          const yaw = model.group.rotation.y;
-          jaws.set(n.id,{x:at.x-Math.sin(yaw)*0.62,y:at.y+0.08,z:at.z-Math.cos(yaw)*0.62});
+          if (model.group.visible) model.pose(n,travel,dt,reducedMotion);
+          const mouth = model.jaws(new T.Vector3());
+          jaws.set(n.id,{x:mouth.x,y:mouth.y,z:mouth.z});
         }
-        for (const [id,model] of gnawerModels) if (!state.mission?.gnawers?.some(n => n.id === id)) { scene.remove(model.group); gnawerModels.delete(id); }
+        for (const [id,model] of gnawerModels) if (!state.mission?.gnawers?.some(n => n.id === id)) { model.dispose(); gnawerModels.delete(id); tracks.delete('g'+id); }
         // While it drags itself out of a room, it shows from that room too.
         if (diver.visible && drawn && room) diver.visible = drawn.has(room.id) || (!!creature?.from && drawn.has(creature.from.bay));
         // Pose the Diver only while it is drawn.

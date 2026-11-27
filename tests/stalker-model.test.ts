@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
-import { Vector3 } from 'three';
+import { AnimationMixer, LoopOnce, Matrix4, SkinnedMesh, Vector3 } from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import type { Stalker } from '../src/mission.ts';
 import { createStalkerModel } from '../src/stalker-model.ts';
@@ -44,4 +44,57 @@ test('a late snapshot uses the windup pose immediately and a charge advances its
   assert.ok(reach>0.4);
   assert.ok(otherHand.getWorldPosition(new Vector3()).distanceTo(still)<1e-6);
   charging.dispose(); other.dispose();
+});
+
+
+test('exported clips aim forward, swing the tail evenly, and let the walking claws hang', () => {
+  const mesh = asset.scene.getObjectByProperty('isSkinnedMesh', true) as SkinnedMesh;
+  const { position, skinIndex, skinWeight } = mesh.geometry.attributes;
+  const skull = mesh.skeleton.getBoneByName('Skull')!;
+  const skullBind = mesh.skeleton.boneInverses[mesh.skeleton.bones.indexOf(skull)];
+  // The lens points diagonally in bind space. Local -Z is forward in the game.
+  const lensAxis = new Vector3(0.32, 0.14, -0.94).normalize();
+  const tail = mesh.skeleton.getBoneByName('Tail0')!;
+  let tip = 0;
+  for (let i = 1; i < position.count; i++) {
+    if (position.getZ(i) > position.getZ(tip)) tip = i;
+  }
+  const hands = ['HandL', 'HandR'].map(name => {
+    const wrist = mesh.skeleton.getBoneByName(name)!;
+    const joint = mesh.skeleton.bones.indexOf(wrist);
+    let claw = -1;
+    for (let i = 0; i < position.count; i++) {
+      if (skinIndex.getX(i) === joint && skinWeight.getX(i) > 0.95 &&
+          (claw < 0 || position.getZ(i) < position.getZ(claw))) claw = i;
+    }
+    assert.ok(claw >= 0);
+    return { wrist, claw };
+  });
+
+  const mixer = new AnimationMixer(asset.scene);
+  for (const clip of asset.animations) {
+    const action = mixer.clipAction(clip).setLoop(LoopOnce, 1);
+    action.clampWhenFinished = true;
+    action.play();
+    const offsets: number[] = [];
+    for (let step = 0; step <= 48; step++) {
+      mixer.setTime(clip.duration * step / 48);
+      asset.scene.updateMatrixWorld(true);
+      const aim = lensAxis.clone().transformDirection(new Matrix4().multiplyMatrices(skull.matrixWorld, skullBind));
+      assert.ok(Math.abs(Math.atan2(aim.x, -aim.z)) < 0.02, clip.name + ' lens heading');
+      const tailTip = mesh.getVertexPosition(tip, new Vector3());
+      offsets.push(tailTip.x - tail.getWorldPosition(new Vector3()).x);
+      if (clip.name === 'Walk' || clip.name === 'Track') {
+        for (const { wrist, claw } of hands) {
+          const end = mesh.getVertexPosition(claw, new Vector3());
+          assert.ok(end.y > 0.04, clip.name + ' claw clearance');
+          const direction = end.sub(wrist.getWorldPosition(new Vector3())).normalize();
+          assert.ok(direction.y < -0.85, clip.name + ' claw angle');
+        }
+      }
+    }
+    const left = Math.min(...offsets), right = Math.max(...offsets);
+    assert.ok(left < -0.25 && right > 0.25 && Math.abs(left + right) < 0.04, clip.name + ' tail swing');
+    mixer.stopAllAction();
+  }
 });

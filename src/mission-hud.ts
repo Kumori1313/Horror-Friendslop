@@ -220,7 +220,7 @@ export function missionHud(preferences: Preferences, operator = (id: number) => 
   function update(layout: Layout, state: Snapshot, self: Player, room: string | undefined, briefing: boolean) {
     const m = state.mission!;
     carry = carrying(layout.seed,m.clock);
-    ambient(m.stage === 'explore' && placeOf(self) === 'outside' && !!weather[mapKind(layout.seed)].wind,gusting(layout.seed,m.clock ?? 0));
+    ambient(m.stage === 'explore' && placeOf(self) === 'outside' && mapKind(layout.seed) === 'quarry',gusting(layout.seed,m.clock ?? 0));
     vitals(state,!briefing && m.stage === 'explore' && placeOf(self) !== 'home');
     if (m.stage === 'explore') { hurtCue(self); gnawerCues(state,self); lurkerCues(state,self); stalkerCues(state,self); }
     const c = m.contract;

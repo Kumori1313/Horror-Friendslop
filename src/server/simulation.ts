@@ -9,7 +9,7 @@ import { swatStalker } from './stalkers.ts';
 import { geometryFor, inPit, nearbyDoor, playerRadius, spawnPoints } from '../layout.ts';
 import type { Layout, Geometry, Rect } from '../layout.ts';
 
-import { climbable, headHeight, mudDepth, onScree, obstaclesAt, pitKill, surfaceAt, surfaceHeight, wadeDepth, waterLevel, type Point3, type Solid } from '../room-templates.ts';
+import { climbable, footingAt, footingPace, headHeight, mudDepth, obstaclesAt, pitKill, surfaceAt, surfaceHeight, wadeDepth, waterLevel, type Point3, type Solid } from '../room-templates.ts';
 import { assignment, batonReach, bellSpan, breathTime, flatOn, heldBy, recoverAfter, revivedHealth, swingTime, catalog, deliverySpot, distance, diverBody, finished, flareTime, gone, nearestPickup, prices, wallet } from '../mission.ts';
 import { doorReach, home, insideDoors, outdoors, placeOf, riftOpen, riftReach, riftSpot } from '../places.ts';
 import type { Place, Stand } from '../places.ts';
@@ -45,9 +45,9 @@ export function moveOperator(p: Player, input: Input, dt: number, geometry: Geom
   const mired = !wading && !!geometry?.water?.mud && level !== undefined && level-feet > mudDepth && p.vy === undefined;
   // Jump from the ground, but not off a riverbed with the water over the chest.
   if (input.jump === true && p.vy === undefined && geometry && !(level !== undefined && level-feet > wadeDepth+0.5)) p.vy = jumpSpeed;
-  // Loose rock slows a walker on the ground a little.
-  const loose = !wading && !mired && !!geometry?.scree && p.vy === undefined && onScree(geometry,p.x,p.z) && !surfaceAt(geometry,p.x,p.z,feet)?.rise && !!surfaceAt(geometry,p.x,p.z,feet)?.field;
-  const step = 3.3 * (wading ? 0.6 : mired ? 0.8 : loose ? 0.85 : 1) * (input.sprint === true ? sprintSpeed : 1) * dt / Math.max(1, Math.hypot(input.forward, input.right));
+  // Loose rock or deep snow slows a walker on the ground.
+  const footing = !wading && !mired && !!geometry?.scree && p.vy === undefined && !!surfaceAt(geometry,p.x,p.z,feet)?.field ? footingPace[footingAt(geometry,p.x,p.z)] : 1;
+  const step = 3.3 * (wading ? 0.6 : mired ? 0.8 : footing) * (input.sprint === true ? sprintSpeed : 1) * dt / Math.max(1, Math.hypot(input.forward, input.right));
   const x = p.x + (Math.cos(p.yaw) * input.right - Math.sin(p.yaw) * input.forward) * step;
   const z = p.z - (Math.cos(p.yaw) * input.forward + Math.sin(p.yaw) * input.right) * step;
   stepTo(p,x,p.z,geometry,opened);

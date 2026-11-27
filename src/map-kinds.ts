@@ -1,9 +1,9 @@
 // Outdoor map kinds and their weather. Each expedition's outdoor map is drawn
 // from its seed, so every client agrees on it without being told. Like
 // `Simulation`, no Node-only APIs.
-export type MapKind = 'hills' | 'marsh' | 'quarry';
-export const mapKinds: readonly MapKind[] = ['hills','marsh','quarry'];
-export const mapNames: Record<MapKind,string> = {hills:'Rolling hills',marsh:'Fog-bound marsh',quarry:'Windswept quarry'};
+export type MapKind = 'hills' | 'marsh' | 'quarry' | 'snow';
+export const mapKinds: readonly MapKind[] = ['hills','marsh','quarry','snow'];
+export const mapNames: Record<MapKind,string> = {hills:'Rolling hills',marsh:'Fog-bound marsh',quarry:'Windswept quarry',snow:'Snowfield'};
 
 // A test build or a solo testing session may force one kind everywhere.
 let forced: MapKind | undefined;
@@ -23,10 +23,12 @@ export function mapKind(seed: number): MapKind {
 // hides as much from the crew); `carry` scales how far sounds carry, both
 // the crew's to creatures and creatures' to the crew; `mud` slows anyone in
 // shallow water; `wind` (m/s², or 0) pushes anything thrown, and comes in
-// gusts that drown sound further.
+// gusts that drown sound further; `squall`, a snowstorm that closes in for a
+// while every so often: thicker fog (`density`), shorter sight and sound.
 export interface Weather {
   look: {background: number; fog: number; density: number; sky: number; skyGround: number; skyLevel: number; moon: number; moonLevel: number; far: number};
   sight: number; carry: number; mud: boolean; wind: number;
+  squall?: {every: number; for: number; density: number; sight: number; carry: number};
 }
 export const weather: Record<MapKind,Weather> = {
   hills:{look:{background:0x141d26,fog:0x18222b,density:0.017,sky:0x7f95b3,skyGround:0x3a352c,skyLevel:1.05,moon:0xb3c6ea,moonLevel:0.95,far:110},sight:1,carry:1,mud:false,wind:0},
@@ -34,7 +36,20 @@ export const weather: Record<MapKind,Weather> = {
   marsh:{look:{background:0x2b3532,fog:0x2e3935,density:0.11,sky:0x8a9a92,skyGround:0x2f3326,skyLevel:1.1,moon:0xb8c6bc,moonLevel:0.6,far:42},sight:0.45,carry:1.15,mud:true,wind:0},
   // Wind and blown dust: a little haze, sound carried off, throws pushed.
   quarry:{look:{background:0x26241f,fog:0x332f28,density:0.03,sky:0xa59a86,skyGround:0x3a342a,skyLevel:1.05,moon:0xc9bea6,moonLevel:0.85,far:80},sight:0.8,carry:0.7,mud:false,wind:2.6},
+  // Overcast snow: pale and quiet, the snow muffling sound; every 45 s a
+  // squall closes in for 12 s.
+  snow:{look:{background:0x5d6773,fog:0x6b7581,density:0.032,sky:0xc9d4e2,skyGround:0x8a929c,skyLevel:1.15,moon:0xdde6f2,moonLevel:0.8,far:85},sight:0.75,carry:0.85,mud:false,wind:0,
+    squall:{every:45,for:12,density:0.1,sight:0.45,carry:0.65}},
 };
+// Whether a squall is blowing, by the expedition clock (as gusts are).
+export function squalling(seed: number, clock: number) {
+  const squall = weather[mapKind(seed)].squall;
+  if (!squall) return false;
+  const phase = ((seed >>> 5) % squall.every+squall.every) % squall.every;
+  return (clock+phase) % squall.every < squall.for;
+}
+// How far creatures see now, as a share of their clear-weather sight.
+export const seeing = (seed: number, clock = 0) => { const w = weather[mapKind(seed)]; return w.squall && squalling(seed,clock) ? w.squall.sight : w.sight; };
 // The wind's push on a thrown item (m/s², horizontal) from the map's seed:
 // one of eight compass directions, written out so every browser replays a
 // throw with exactly the same numbers (as flight.ts, no trigonometry).
@@ -53,5 +68,6 @@ export function gusting(seed: number, clock: number) {
   const phase = ((seed >>> 3) % gustEvery+gustEvery) % gustEvery;
   return (clock+phase) % gustEvery < gustFor;
 }
-// How far sound carries now: the weather's `carry`, less in a gust.
-export const carrying = (seed: number, clock = 0) => weather[mapKind(seed)].carry*(gusting(seed,clock) ? gustCarry : 1);
+// How far sound carries now: the weather's `carry`, less in a gust or a
+// squall.
+export const carrying = (seed: number, clock = 0) => { const w = weather[mapKind(seed)]; return (w.squall && squalling(seed,clock) ? w.squall.carry : w.carry)*(gusting(seed,clock) ? gustCarry : 1); };

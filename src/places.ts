@@ -105,7 +105,8 @@ export function outdoors(seed: number): Outdoors {
   if (found) return found;
   // A marsh is low and flat: gentle swells, no ditches. A quarry's open
   // ground is milder than the hills, its relief the pit and the spoil heaps.
-  const relief = kind === 'marsh' ? 0.3 : kind === 'quarry' ? 0.55 : 1, ditching = kind === 'marsh' ? 0 : kind === 'quarry' ? 0.5 : 1;
+  // A snowfield rolls a little less, its ditches filled in.
+  const relief = kind === 'marsh' ? 0.3 : kind === 'quarry' ? 0.55 : kind === 'snow' ? 0.8 : 1, ditching = kind === 'marsh' ? 0 : kind === 'quarry' || kind === 'snow' ? 0.5 : 1;
   const next = random(seed ^ 0x0d7e1a), half = outdoorSize/2, room = 'outside';
   const building = {x:0,z:0,w:24,d:18,h:9};
   // Doors: the main door in the south face; one or two fire exits in others.
@@ -416,12 +417,29 @@ export function outdoors(seed: number): Outdoors {
         const d = Math.hypot(x-quarry.x,z-quarry.z), footing = quarry.radii.some(r => d < r+0.6 && d > r-2.2);
         if ((steep && d < quarry.radii[0]+2) || (footing && !quarry.ramps.some(r => onRamp(quarry,r,x,z))) || quarry.heaps.some(hp => Math.hypot(x-hp.x,z-hp.z) < hp.r*0.85)) marks[j] = 4;
       }
-      g.scree = {x0:ground.x0,z0:ground.z0,n,cells:Uint8Array.from(marks,m => m === 4 ? 1 : 0)};
+    }
+    // A snowfield's deep drifts (mark 6): patches across the open ground and
+    // in its hollows, clear of the plots; the trails are trodden down
+    // (marked after, over them). They slow walkers (`TemplateGeometry.scree`, 2).
+    if (kind === 'snow') {
+      const drift = noise(seed ^ 0x3c6ef372);
+      for (let j=0;j<n*n;j++) {
+        if (marks[j]) continue;
+        const i = j % n, k = Math.floor(j/n), x = ground.x0+i, z = ground.z0+k;
+        if (Math.abs(x-building.x) < building.w/2+10 && Math.abs(z-building.z-2) < building.d/2+11) continue;
+        if (Math.hypot(x-ax,z-az) < 12) continue;
+        let around = 0, count = 0;
+        for (const [di,dk] of [[3,0],[-3,0],[0,3],[0,-3]]) { const a = i+di, b = k+dk; if (a >= 0 && b >= 0 && a < n && b < n) { around += h[b*n+a]; count++; } }
+        const hollow = count && h[j] < around/count-0.35;
+        if (drift(x/14,z/14) > 0.3 || hollow) marks[j] = 6;
+      }
     }
     for (const line of trails) for (const p of line ?? []) for (let dz=-1;dz<=1;dz++) for (let dx=-1;dx<=1;dx++) {
       const i = Math.round(p.x-ground.x0)+dx, k = Math.round(p.z-ground.z0)+dz;
       if (i >= 0 && k >= 0 && i < n && k < n && Math.hypot(ground.x0+i-p.x,ground.z0+k-p.z) <= 1.3) marks[k*n+i] = 1;
     }
+    // Footing that slows: a quarry's loose rock, a snowfield's deep drifts.
+    if (marks.some(m => m === 4 || m === 6)) g.scree = {x0:ground.x0,z0:ground.z0,n,cells:Uint8Array.from(marks,m => m === 4 ? 1 : m === 6 ? 2 : 0)};
     // Trails: decks over each stretch of a trail through a pool, onto the
     // banks either side, where both come ashore low; elsewhere it wades.
     for (const line of trails) {

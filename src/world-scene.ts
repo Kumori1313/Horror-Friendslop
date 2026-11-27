@@ -152,6 +152,25 @@ function mud() {
   mudTexture.wrapS = mudTexture.wrapT = T.RepeatWrapping; mudTexture.colorSpace = T.SRGBColorSpace;
   return mudTexture;
 }
+// Snow: nearly even white with soft, wind-blown ripples and a few glints,
+// tiled every 4 m.
+let snowTexture: T.CanvasTexture | undefined;
+function snowSurface() {
+  if (snowTexture) return snowTexture;
+  const canvas = document.createElement('canvas'); canvas.width = canvas.height = 256;
+  const ctx = canvas.getContext('2d')!, img = ctx.createImageData(256,256);
+  let n = 0x6c8e9cf5;
+  const rnd = () => { n ^= n << 13; n ^= n >>> 17; n ^= n << 5; return ((n >>> 0)%1000)/1000; };
+  for (let y=0;y<256;y++) for (let x=0;x<256;x++) {
+    const ripple = Math.sin((x+Math.sin(y/23)*9)/11)*Math.sin(y/37+x/71), v = 236+ripple*9+rnd()*8;
+    img.data.set([v,v,v+4,255],(y*256+x)*4);
+  }
+  ctx.putImageData(img,0,0);
+  for (let i=0;i<160;i++) { ctx.fillStyle = 'rgba(255,255,255,0.9)'; ctx.fillRect(rnd()*256,rnd()*256,1,1); }
+  snowTexture = new T.CanvasTexture(canvas);
+  snowTexture.wrapS = snowTexture.wrapT = T.RepeatWrapping; snowTexture.colorSpace = T.SRGBColorSpace;
+  return snowTexture;
+}
 // Acid stains: green drips and blotches, black elsewhere, as a glow map
 // over rust, tiled every 2 m.
 function acidStains() {
@@ -294,13 +313,15 @@ function mudBanks(map: Outdoors) {
 // level ground, dirt on slopes, gravel on the building's plot.
 function terrain(map: Outdoors) {
   const f = map.ground, half = map.size/2, chunk = 32, group = new T.Group();
-  const material = new T.MeshStandardMaterial({vertexColors:true,map:scrub(),roughness:1,metalness:0});
+  const material = new T.MeshStandardMaterial({vertexColors:true,map:map.kind === 'snow' ? snowSurface() : scrub(),roughness:map.kind === 'snow' ? 0.9 : 1,metalness:0});
   const h = (x: number, z: number) => fieldHeight(f,x,z);
-  const marsh = map.kind === 'marsh', quarry = map.kind === 'quarry';
+  const marsh = map.kind === 'marsh', quarry = map.kind === 'quarry', snowy = map.kind === 'snow';
   // A quarry: grey-brown ground, bare rock on its steep faces, pale rubble.
-  const scrubColor = new T.Color(marsh ? 0x34402a : quarry ? 0x4a4538 : 0x3a4530), dirtColor = new T.Color(quarry ? 0x6a655c : 0x6a5a44), gravel = new T.Color(0x6d6b62), c = new T.Color();
+  // A snowfield: white over everything level, dark rock where it is steep.
+  const scrubColor = new T.Color(marsh ? 0x34402a : quarry ? 0x4a4538 : snowy ? 0xc9d2dc : 0x3a4530), dirtColor = new T.Color(quarry ? 0x6a655c : snowy ? 0x4c5054 : 0x6a5a44), gravel = new T.Color(snowy ? 0x8d939a : 0x6d6b62), c = new T.Color();
+  const driftColor = new T.Color(0xe4ebf2);
   const rubbleColor = new T.Color(0x837b6e), ashColor = new T.Color(0x34322a), sickly = new T.Color(0x6f7a32);
-  const trailColor = new T.Color(marsh ? 0x6a5f4a : 0x857a64), siltColor = new T.Color(marsh ? 0x2b251a : 0x6e6c63);
+  const trailColor = new T.Color(marsh ? 0x6a5f4a : snowy ? 0x8f969d : 0x857a64), siltColor = new T.Color(marsh ? 0x2b251a : snowy ? 0x4a4f54 : 0x6e6c63);
   // A marsh's bank mud, mottled with wetter and drier patches.
   const mudColor = new T.Color(0x3a3121), mottle = (x: number, z: number) => {
     const s = Math.sin(x*1.7+Math.sin(z*0.9)*2)+Math.sin(z*1.3+Math.sin(x*0.7)*2.5);
@@ -322,6 +343,8 @@ function terrain(map: Outdoors) {
       else if (mark === 4) c.lerp(rubbleColor,0.7).multiplyScalar(mottle(x*1.7,z*1.7));
       // Fallout: ash, with sickly yellow-green patches.
       else if (mark === 5) { const m = mottle(x*0.9,z*0.9); c.lerp(ashColor,0.75).lerp(sickly,Math.max(0,m-0.9)*2.5).multiplyScalar(0.85+0.2*m); }
+      // Deep drifts: brighter, smoother snow.
+      else if (mark === 6) c.lerp(driftColor,0.7);
       color.push(c.r,c.g,c.b);
       return position.length/3-1;
     };
@@ -410,6 +433,10 @@ export function buildOutdoors(map: Outdoors, library: Library) {
   // Ruins: broken concrete walls, standing in the ground.
   const concrete = b.surface('concrete');
   for (const r of map.ruins) for (const p of r.pieces) b.box(concrete,0x8c8a80,p.x,p.y+p.h/2,p.z,p.w,p.h,p.d);
+  // In a snowfield, snow lies on the tops of things.
+  const snowCap = (p: {x: number; y: number; z: number; w: number; d: number; h: number}) => { if (map.kind === 'snow') b.box(concrete,0xeef2f6,p.x,p.y+p.h+0.06,p.z,p.w+0.06,0.12,p.d+0.06); };
+  for (const r of map.ruins) for (const p of r.pieces) snowCap(p);
+  for (const r of map.rocks) snowCap({...r,w:r.w*0.8,d:r.d*0.8,h:r.h-0.05});
   // Wrecks and debris, rusted through: boxes batched with the rest, and
   // cylinders (tanks, pipes, silos, barrels) as a few merged meshes.
   // In a quarry, rust eaten through by glowing acid: on the wrecks, the
@@ -435,6 +462,7 @@ export function buildOutdoors(map: Outdoors, library: Library) {
     else w.boxes.forEach((p,i) => b.box(
       (w.kind === 'crane' && i === 0) || (w.kind === 'pylon' && i === 0) ? b.surface('grating') : w.kind === 'shed' ? b.surface('wood') : wreckRust,
       paint[w.kind] ?? 0x8a6a52,p.x,p.y+p.h/2,p.z,p.w,p.h,p.d));
+    if (w.kind !== 'pipes' && w.kind !== 'barrels') snowCap(w.boxes[0]);
   }
   if (cylinders.length) {
     root.add(new T.Mesh(mergeGeometries(cylinders),rustMat));
@@ -508,18 +536,19 @@ export function buildOutdoors(map: Outdoors, library: Library) {
     reeds.instanceMatrix.needsUpdate = true;
     root.add(reeds);
   }
-  // A quarry's blowing dust: motes drifting downwind around the viewer,
-  // faster in a gust; one point cloud, moved each frame.
-  const wind = map.geometry.wind;
+  // A quarry's blowing dust, or a snowfield's falling snow: motes drifting
+  // around the viewer, faster in a gust or a squall; one point cloud, moved
+  // each frame.
+  const snowing = map.kind === 'snow', wind = map.geometry.wind ?? (snowing ? {x:0.6,z:0.3} : undefined);
   let dust: T.Points | undefined;
-  const dustSpan = 28, motes = 360;
+  const dustSpan = 28, motes = snowing ? 1100 : 360;
   if (wind) {
     const g = new T.BufferGeometry(), at = new Float32Array(motes*3);
     let r = 7;
     const next = () => (r = (Math.imul(r,1103515245)+12345) >>> 0)/2**32;
     for (let i=0;i<motes*3;i++) at[i] = (next()-0.5)*dustSpan;
     g.setAttribute('position',new T.BufferAttribute(at,3));
-    dust = new T.Points(g,new T.PointsMaterial({color:0xb5a88e,size:0.05,transparent:true,opacity:0.55,depthWrite:false}));
+    dust = new T.Points(g,new T.PointsMaterial(snowing ? {color:0xf4f8ff,size:0.07,transparent:true,opacity:0.85,depthWrite:false} : {color:0xb5a88e,size:0.05,transparent:true,opacity:0.55,depthWrite:false}));
     dust.frustumCulled = false;
     root.add(dust);
   }
@@ -562,9 +591,9 @@ export function buildOutdoors(map: Outdoors, library: Library) {
       // world, and wraps round to stay within the cube about the viewer.
       if (dust && wind && view) {
         const dt = Math.min(0.1,Math.max(0,time-dustAt)); dustAt = time;
-        const speed = gust ? 2.4 : 1, a = dust.geometry.getAttribute('position') as T.BufferAttribute, p = a.array as Float32Array, h = dustSpan/2, centre = [view.x,view.y,view.z];
+        const speed = gust ? (snowing ? 4 : 2.4) : 1, fall = snowing ? 1.1*(gust ? 1.6 : 1) : 0.2, a = dust.geometry.getAttribute('position') as T.BufferAttribute, p = a.array as Float32Array, h = dustSpan/2, centre = [view.x,view.y,view.z];
         for (let i=0;i<motes;i++) {
-          p[i*3] += wind.x*speed*dt*1.2; p[i*3+1] += (Math.sin(time*0.7+i)*0.3-0.2)*dt; p[i*3+2] += wind.z*speed*dt*1.2;
+          p[i*3] += (wind.x*speed*1.2+(snowing ? Math.sin(time*0.9+i)*0.25 : 0))*dt; p[i*3+1] += (Math.sin(time*0.7+i)*0.3-fall)*dt; p[i*3+2] += wind.z*speed*dt*1.2;
           for (let k=0;k<3;k++) { const rel = p[i*3+k]-centre[k]+h; p[i*3+k] = centre[k]-h+((rel % dustSpan)+dustSpan) % dustSpan; }
         }
         a.needsUpdate = true;

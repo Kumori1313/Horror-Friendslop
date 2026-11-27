@@ -6,8 +6,8 @@ import { catalog, flatOn, itemName, items, pace, stunTime, swingTime, type Diver
 import { buildFacility } from './facility-scene.ts';
 import { environment, materialLibrary } from './materials.ts';
 import { anchor, geometryFor, type Geometry, type Layout } from './layout.ts';
-import { home, outdoors, placeOf, type Place } from './places.ts';
-import { gusting, mapKind, weather } from './map-kinds.ts';
+import { groundAt, home, outdoors, placeOf, type Place } from './places.ts';
+import { gusting, mapKind, squalling, weather } from './map-kinds.ts';
 import { buildHome, buildOutdoors } from './world-scene.ts';
 import { obstaclesAt, roomTemplates, socketAt, surfaceAt, waterLevel } from './room-templates.ts';
 import { portalGraph, visibleRooms, type PortalGraph } from './visibility.ts';
@@ -501,21 +501,55 @@ export function createScene(canvas: HTMLCanvasElement, generated = false) {
   let looked = '';
   const mix = (a: number, b: number, t: number) => new T.Color(a).lerp(new T.Color(b),t);
   // Outdoors, the map's weather sets the look (see map-kinds.ts).
-  function look(place: Place, clock = 0, under = false, seed?: number) {
+  // `storm`: how far a squall has closed in (0 to 1, eased on this client).
+  function look(place: Place, clock = 0, under = false, seed?: number, storm = 0) {
     const kind = place === 'outside' && seed !== undefined ? mapKind(seed) : undefined;
-    const dusk = place === 'outside' ? Math.min(1,clock/nightfall) : 0, key = place+'/'+kind+'/'+dusk.toFixed(3)+'/'+under;
+    const dusk = place === 'outside' ? Math.min(1,clock/nightfall) : 0, key = place+'/'+kind+'/'+dusk.toFixed(3)+'/'+under+'/'+storm.toFixed(2);
     if (key === looked) return;
     looked = key;
-    const l = kind ? weather[kind].look : looks[place];
+    const l = kind ? weather[kind].look : looks[place], squall = kind ? weather[kind].squall : undefined;
     (scene.background as T.Color).copy(mix(l.background,night.background,dusk));
-    (scene.fog as T.FogExp2).color.copy(mix(l.fog,night.fog,dusk)); (scene.fog as T.FogExp2).density = l.density;
+    (scene.fog as T.FogExp2).color.copy(mix(l.fog,night.fog,dusk)); (scene.fog as T.FogExp2).density = squall ? l.density+(squall.density-l.density)*storm : l.density;
     // Under water: murky, green, and close.
     if (under) { (scene.background as T.Color).setHex(0x0a1c1c); (scene.fog as T.FogExp2).color.setHex(0x0c2421); (scene.fog as T.FogExp2).density = 0.35; }
     sky.color.setHex(l.sky); sky.groundColor.setHex(l.skyGround); sky.intensity = l.skyLevel+(night.skyLevel-l.skyLevel)*dusk;
     skylight.color.setHex(l.moon); skylight.intensity = l.moonLevel+(night.moonLevel-l.moonLevel)*dusk;
     camera.far = l.far; camera.updateProjectionMatrix();
   }
-  let homeWorld: ReturnType<typeof buildHome> | undefined;
+  let homeWorld: ReturnType<typeof buildHome> | undefined, storm = 0;
+  // Footprints in a snowfield: every walker outside leaves a print every
+  // `step` metres, left and right in turn, a stalker bigger ones; each fades
+  // into the snow over `printFade` seconds. A ring of instanced ovals.
+  const printsMax = 500, printFade = 60, dent = new T.Color(0x7f8b98), snowTone = new T.Color(0xc9d2dc);
+  const printShape = new T.CircleGeometry(0.5,10); printShape.rotateX(-Math.PI/2);
+  const printMesh = new T.InstancedMesh(printShape,new T.MeshStandardMaterial({color:0xffffff,roughness:1,polygonOffset:true,polygonOffsetFactor:-2,polygonOffsetUnits:-2}),printsMax);
+  printMesh.count = 0; printMesh.frustumCulled = false; printMesh.visible = false; scene.add(printMesh);
+  const prints: {at: number}[] = [], strides = new Map<string,{x: number; z: number; side: number}>();
+  let printSeed = -1, nextPrint = 0;
+  function footprints(layout: Layout, walkers: {key: string; x: number; z: number; feet: number; big: boolean}[], now: number) {
+    const map = outdoors(layout.seed), m = new T.Matrix4(), q = new T.Quaternion(), s = new T.Vector3(), at = new T.Vector3(), c = new T.Color();
+    if (printSeed !== layout.seed) { printSeed = layout.seed; prints.length = 0; strides.clear(); nextPrint = 0; printMesh.count = 0; }
+    for (const w of walkers) {
+      const last = strides.get(w.key), step = w.big ? 1.6 : 0.75;
+      if (!last) { strides.set(w.key,{x:w.x,z:w.z,side:1}); continue; }
+      const dx = w.x-last.x, dz = w.z-last.z, d = Math.hypot(dx,dz);
+      if (d > 6) { strides.set(w.key,{x:w.x,z:w.z,side:1}); continue; }
+      if (d < step) continue;
+      const ground = groundAt(map,w.x,w.z);
+      last.x = w.x; last.z = w.z; last.side = -last.side;
+      // Only on the ground itself, not on a bridge's deck.
+      if (Math.abs(w.feet-ground) > 0.3) continue;
+      const nx = -dz/d, nz = dx/d, off = (w.big ? 0.45 : 0.12)*last.side, x = w.x+nx*off, z = w.z+nz*off;
+      q.setFromAxisAngle(new T.Vector3(0,1,0),Math.atan2(dx,dz));
+      printMesh.setMatrixAt(nextPrint,m.compose(at.set(x,groundAt(map,x,z)+0.02,z),q,s.set(w.big ? 0.32 : 0.13,1,w.big ? 0.6 : 0.28)));
+      prints[nextPrint] = {at:now};
+      nextPrint = (nextPrint+1) % printsMax;
+      printMesh.count = Math.max(printMesh.count,prints.length);
+      printMesh.instanceMatrix.needsUpdate = true;
+    }
+    for (let i=0;i<printMesh.count;i++) printMesh.setColorAt(i,c.copy(dent).lerp(snowTone,Math.min(1,(now-prints[i].at)/1000/printFade)));
+    if (printMesh.instanceColor) printMesh.instanceColor.needsUpdate = true;
+  }
   let outside: ReturnType<typeof buildOutdoors> | undefined;
   // Salvage lying outdoors or at home: a few meshes, made as needed.
   const loose = new Map<string,T.Mesh>();
@@ -609,7 +643,10 @@ export function createScene(canvas: HTMLCanvasElement, generated = false) {
     // Without a contract everything is inside, as it always was.
     const here: Place | undefined = !state?.mission ? (layout ? 'inside' : undefined) : me ? placeOf(me) : undefined;
     const water = here === 'outside' && layout ? outdoors(layout.seed).geometry.water : undefined, surface = water ? waterLevel(water,camera.position.x,camera.position.z) : undefined;
-    if (generated && here) look(here,state?.mission?.clock,surface !== undefined && camera.position.y < surface,layout?.seed);
+    // A squall closes in and lifts over a couple of seconds.
+    const squall = here === 'outside' && !!layout && squalling(layout.seed,state?.mission?.clock ?? 0);
+    storm += ((squall ? 1 : 0)-storm)*Math.min(1,dt*0.6);
+    if (generated && here) look(here,state?.mission?.clock,surface !== undefined && camera.position.y < surface,layout?.seed,storm);
     // Build only the place this camera is in. Home drops the expedition.
     if (here === 'home') {
       facility?.dispose(); facility = undefined; loaded = undefined; portals = undefined;
@@ -640,7 +677,7 @@ export function createScene(canvas: HTMLCanvasElement, generated = false) {
     if (canvas.dataset.built !== built) canvas.dataset.built = built;
     const time = performance.now()/1000;
     homeWorld?.update(time);
-    outside?.update(time,state?.mission?.arrival === 'open',state?.mission?.rift,state?.mission?.bell !== undefined,camera.position,!!layout && gusting(layout.seed,state?.mission?.clock ?? 0));
+    outside?.update(time,state?.mission?.arrival === 'open',state?.mission?.rift,state?.mission?.bell !== undefined,camera.position,!!layout && (gusting(layout.seed,state?.mission?.clock ?? 0) || squalling(layout.seed,state?.mission?.clock ?? 0)));
     if (!document.hidden) adapt(dt);
     if (facility && state) facility.update(state.opened ?? []);
     if (state) {
@@ -654,6 +691,12 @@ export function createScene(canvas: HTMLCanvasElement, generated = false) {
       diver.visible = here === 'inside' && !!room;
       for (const model of gnawerModels.values()) model.group.visible = false;
       const stalkers = here === 'outside' ? state.mission?.stalkers : undefined;
+      // Tracks in the snow: the crew's (this operator's from the camera) and the stalkers'.
+      printMesh.visible = here === 'outside' && !!layout && mapKind(layout.seed) === 'snow';
+      if (printMesh.visible && layout) footprints(layout,[
+        ...state.players.filter(p => placeOf(p) === 'outside' && !state.mission?.dead?.includes(p.id)).map(p => p.id === self && !watching ? {key:'p'+p.id,x:camera.position.x,z:camera.position.z,feet:p.feetY ?? 0,big:false} : {key:'p'+p.id,x:p.x,z:p.z,feet:p.feetY ?? 0,big:false}),
+        ...(stalkers ?? []).map(s => ({key:'s'+s.id,x:s.x,z:s.z,feet:s.y,big:true})),
+      ],performance.now());
       const stalkerAsset = models && stalkers?.length ? loadStalker() : undefined;
       if (showingStalker !== stalkerAsset) {
         for (const model of stalkerModels.values()) model.dispose();

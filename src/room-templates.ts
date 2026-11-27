@@ -212,19 +212,22 @@ export interface RoomSolid extends Solid { room:string }
 /** A wall face; `inward` is the sign, along the thin axis, that points into its room. */
 export interface RoomWall extends RoomSolid { inward:number }
 // Outdoors, `wind` pushes thrown items (m/s²), and `scree` marks the height
-// map's points of loose rock (1), which slow walkers.
+// map's points of loose rock (1) or deep snow (2), which slow walkers.
 export interface TemplateGeometry {
   surfaces:PlacedSurface[]; walls:RoomWall[]; roofs:RoomSolid[]; rails:RoomSolid[];
   props:(Solid & {kind:PropKind; room:string})[]; doors:(Solid & {id:string})[]; openings:Opening[];
   water?:Water; wind?:{x:number; z:number}; scree?:{x0:number; z0:number; n:number; cells:Uint8Array};
 }
-// Whether (x, z) is on loose rock.
-export const onScree = (g:TemplateGeometry,x:number,z:number) => {
+// What underfoot slows a walker at (x, z): 1 loose rock, 2 deep snow, or 0.
+export const footingAt = (g:TemplateGeometry,x:number,z:number) => {
   const s = g.scree;
-  if (!s) return false;
+  if (!s) return 0;
   const i = Math.round(x-s.x0), k = Math.round(z-s.z0);
-  return i >= 0 && k >= 0 && i < s.n && k < s.n && s.cells[k*s.n+i] === 1;
+  return i >= 0 && k >= 0 && i < s.n && k < s.n ? s.cells[k*s.n+i] : 0;
 };
+export const onScree = (g:TemplateGeometry,x:number,z:number) => footingAt(g,x,z) === 1;
+// How fast a walker goes on each footing.
+export const footingPace = [1,0.85,0.75];
 // Water along a river: its centre line with the water's surface at each
 // point (never rising downstream), and its fords. The riverbed is cut to a
 // fixed depth under that surface, `deepWater` in the channel and `fordWater`

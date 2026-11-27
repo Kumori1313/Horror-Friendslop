@@ -433,10 +433,23 @@ export function buildOutdoors(map: Outdoors, library: Library) {
   // Ruins: broken concrete walls, standing in the ground.
   const concrete = b.surface('concrete');
   for (const r of map.ruins) for (const p of r.pieces) b.box(concrete,0x8c8a80,p.x,p.y+p.h/2,p.z,p.w,p.h,p.d);
-  // In a snowfield, snow lies on the tops of things.
-  const snowCap = (p: {x: number; y: number; z: number; w: number; d: number; h: number}) => { if (map.kind === 'snow') b.box(concrete,0xeef2f6,p.x,p.y+p.h+0.06,p.z,p.w+0.06,0.12,p.d+0.06); };
+  // In a snowfield, snow lies on the tops of walls and wrecks: a layer of
+  // the ground's own snow, just over the edges, with a softer mound settled
+  // on its middle. (Not on boulders: a slab can't follow their shape.)
+  let snowMat: T.MeshStandardMaterial | undefined;
+  const snowCap = (p: {x: number; y: number; z: number; w: number; d: number; h: number}) => {
+    if (map.kind !== 'snow') return;
+    if (!snowMat) {
+      // The batch's texture coordinates run in metres; the snow tiles every 4 m, as on the ground.
+      const map = snowSurface().clone(); map.repeat.set(0.25,0.25); map.needsUpdate = true;
+      snowMat = new T.MeshStandardMaterial({map,vertexColors:true,roughness:0.9,metalness:0});
+    }
+    const top = p.y+p.h;
+    b.box(snowMat,0xf2f5f9,p.x,top+0.05,p.z,p.w+0.08,0.1,p.d+0.08);
+    if (p.w > 0.5 && p.d > 0.5) b.box(snowMat,0xf7f9fc,p.x,top+0.13,p.z,p.w*0.72,0.07,p.d*0.72);
+    else b.box(snowMat,0xf7f9fc,p.x,top+0.12,p.z,p.w+0.02,0.05,p.d+0.02);
+  };
   for (const r of map.ruins) for (const p of r.pieces) snowCap(p);
-  for (const r of map.rocks) snowCap({...r,w:r.w*0.8,d:r.d*0.8,h:r.h-0.05});
   // Wrecks and debris, rusted through: boxes batched with the rest, and
   // cylinders (tanks, pipes, silos, barrels) as a few merged meshes.
   // In a quarry, rust eaten through by glowing acid: on the wrecks, the

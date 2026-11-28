@@ -6,7 +6,7 @@ import { assembleTemplates, cell, climbable, planningGrade, wadeDepth, waterLeve
 import type { PlacedSurface, Placement, Point3, Solid, TemplateGeometry, TemplateKind, TemplateLink } from './room-templates.ts';
 import { shaftKillDepth, towerRadius } from './spiral.ts';
 
-export const generatorVersion = 13;
+export const generatorVersion = 14;
 export const playerRadius = 0.25;
 export interface Rect extends Point { w: number; d: number }
 export type Kind = Exclude<TemplateKind,typeof corridorKinds[number]> | 'corridor';

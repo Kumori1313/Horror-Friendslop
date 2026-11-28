@@ -47,9 +47,10 @@ export function listenForSockets(server: EventEmitter, path: string, maxPayload:
   return shutdown;
 }
 
-export function createLiveRoom(graceMs: number, onEmpty?: () => void, layout?: Layout) {
+export function createLiveRoom(graceMs: number, onEmpty?: () => void, initial?: Layout | number) {
   const seats = new Map<string, Seat>();
-  let room = new Simulation(layout);
+  let room = new Simulation(initial);
+  if (room.layout?.fallback) console.warn('Relay layout fallback',room.layout.version,room.layout.seed);
   function send(socket: WebSocket, message: ServerMessage) {
     if (socket.readyState === WebSocket.OPEN) socket.send(JSON.stringify(message));
   }
@@ -138,7 +139,7 @@ export function createLiveRoom(graceMs: number, onEmpty?: () => void, layout?: L
         seats.delete(seat.token);
       } else if (now - seat.lastInput > 350) stopWalking(seat.id);
     }
-    if (!seats.size) { room = new Simulation(layout); shown = room.layout; onEmpty?.(); return; }
+    if (!seats.size) { room = new Simulation(initial); shown = room.layout; onEmpty?.(); return; }
     room.tick(1 / 30);
     // Each seat gets the creatures where it looks, rounded (see wire.ts).
     for (const {ws,lastPong,id} of seats.values()) {

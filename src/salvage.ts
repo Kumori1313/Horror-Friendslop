@@ -111,8 +111,7 @@ export function spawnSalvage(layout: Layout): Salvage[] {
 
 export const facilityValue = (layout: Layout) => spawnSalvage(layout).reduce((sum,item) => sum+item.value,0);
 
-// Each expedition of a contract has its own facility. The first uses the
-// contract seed itself, so a pinned seed still opens on the same layout.
+// Mix a contract seed and expedition index before picking its layout seed.
 export function expeditionSeed(contract: number, index: number) {
   if (index === 0) return contract >>> 0;
   let h = (contract ^ Math.imul(index,0x9e3779b9)) >>> 0;

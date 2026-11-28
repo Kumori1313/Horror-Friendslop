@@ -286,6 +286,7 @@ Phase 13's outdoor map is a placeholder made from the facility's own collision p
   - **Playtest follow-up.** Version 12 removes the Spire's interior railings and fills the deeper shaft with the pit-room fog. The fall is fatal 20 m below the lowest landing. The Bell Diver's stair coverage lets it hold one spot while operators move a short distance up or down.
   - **Version 12 playtest passed.** The user tested the follow-up changes and confirmed they look good.
   - **Seeded tower heights.** Generator version 13 draws four, five, or six storeys when an expedition draws the Spire. The fifth and sixth floors each have three exposed wings. Their pit rooms sit beyond the rooms on the floors below. The circular exterior and diagnostics map scale with the tower. Solo presets reproduce all three heights for playtesting.
+  - **Facility progression.** Generator version 14 opens normal contracts at the factory. The seeded Spire draw is 20% on expedition two and 75% on expedition three. Pinned Spire presets still open directly at the tower for playtesting.
 
 **Pass when** a contract can draw at least two maps and both facility types. A crew climbs the Spire past its second floor, crosses between room networks by an inner stairwell, and hauls salvage out through the tower. Fresh players describe the map, weather, and facility they played without prompting. Each type passes its seed check and the frame budget.
 

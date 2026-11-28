@@ -1,4 +1,5 @@
 import { anchor, connections, isSpireFlight, nextWiredBay, neighbours, zoneAt, type Layout, type Module } from '../layout.ts';
+import { facilityKind } from '../facility-kinds.ts';
 import { storey, type Point3 } from '../room-templates.ts';
 import { gone, healthOf, items, kept, maxHealth, pace, recoverAfter, recoverRate, recoverTo, sameStorey, sprawl, stunTime } from '../mission.ts';
 import { spawnGnawers, stepGnawers } from './gnawers.ts';
@@ -14,13 +15,29 @@ export const expeditionsPerContract = 3;
 // The quota asks for a little under half of everything the three facilities hold.
 export const quotaShare = 0.45;
 
-export function newContract(seed: number, expeditions = expeditionsPerContract): Contract {
-  let total = 0;
-  for (let i=0;i<expeditions;i++) total += facilityValue(generateLayout(expeditionSeed(seed,i)));
-  return {seed:seed >>> 0,expeditions,index:0,layout:seed >>> 0,quota:Math.floor(total*quotaShare/10)*10,credited:0,receipts:[]};
+const spireChance = [0,0.2,0.75] as const;
+
+export function contractLayoutSeed(contract: number, index: number) {
+  // Draw the facility independently of the layout. The chosen layout seed still
+  // identifies the facility by itself for clients, checkpoints, and replays.
+  const roll = expeditionSeed(contract ^ 0x4cb6a2d9,index)/2**32;
+  const facility = roll < spireChance[Math.min(index,spireChance.length-1)] ? 'spire' : 'factory';
+  let seed = expeditionSeed(contract,index);
+  while (facilityKind(seed) !== facility) seed = (seed+0x9e3779b9) >>> 0;
+  return seed;
 }
 
-export function newMission(layout: Layout, contract = newContract(layout.seed)): Mission {
+export function newContract(seed: number, expeditions = expeditionsPerContract, first?: Layout): Contract {
+  const layout = first?.seed ?? contractLayoutSeed(seed,0);
+  let total = 0;
+  for (let i=0;i<expeditions;i++) {
+    const plan = i === 0 ? first ?? generateLayout(layout) : generateLayout(contractLayoutSeed(seed,i));
+    total += facilityValue(plan);
+  }
+  return {seed:seed >>> 0,expeditions,index:0,layout,quota:Math.floor(total*quotaShare/10)*10,credited:0,receipts:[]};
+}
+
+export function newMission(layout: Layout, contract = newContract(layout.seed,expeditionsPerContract,layout)): Mission {
   return {stage:'explore',contract,haul:[],down:[],diver:{mode:'dormant',bay:'',seconds:0}};
 }
 

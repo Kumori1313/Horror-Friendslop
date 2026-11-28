@@ -1,14 +1,15 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
+import { facilityKind, spirePlaytestSeeds } from '../src/facility-kinds.ts';
 import { anchor, lampSpawn } from '../src/layout.ts';
 import { assignment, collectable, items, kept, lossPercent, pace, pack } from '../src/mission.ts';
 import type { Mission } from '../src/mission.ts';
 import { home, outdoors, placeOf, riftOpen, riftSpot, riftZones } from '../src/places.ts';
 import { freeSlot, hotbarSize, lampSlot, slotsOf } from '../src/room.ts';
 import type { Player } from '../src/room.ts';
-import { expeditionSeed, facilityValue, spawnSalvage } from '../src/salvage.ts';
+import { facilityValue, spawnSalvage } from '../src/salvage.ts';
 import { generateLayout } from '../src/server/generate-layout.ts';
-import { expeditionsPerContract, newContract, quotaShare, settle, wipeSeed } from '../src/server/mission.ts';
+import { contractLayoutSeed, expeditionsPerContract, newContract, quotaShare, settle, wipeSeed } from '../src/server/mission.ts';
 import { Simulation } from '../src/server/simulation.ts';
 import { walkable } from '../src/layout.ts';
 import { bank, escape, goInside, goOutside, ring } from './travel.ts';
@@ -44,11 +45,47 @@ test('every facility seeds the same reachable salvage, and the quota can be met'
     assert.ok(salvage.every(i => plan.rooms.find(r => r.id === i.room)!.kind !== 'intake'));
     const contract = newContract(seed);
     let total = 0;
-    for (let i=0;i<expeditionsPerContract;i++) total += facilityValue(generateLayout(expeditionSeed(seed,i)));
-    assert.ok(contract.quota > 0 && contract.quota <= total*quotaShare,'quota '+contract.quota+' of '+total);
+    for (let i=0;i<expeditionsPerContract;i++) total += facilityValue(generateLayout(contractLayoutSeed(seed,i)));
+    assert.equal(contract.quota,Math.floor(total*quotaShare/10)*10,'quota for seed '+seed);
   }
-  assert.equal(expeditionSeed(19,0),19,'the first expedition keeps a pinned seed');
-  assert.notEqual(expeditionSeed(19,1),expeditionSeed(19,2));
+});
+
+test('the seeded facility draw guarantees a factory, then draws Spires 20% and 75% of the time', () => {
+  const sample = 65536;
+  const spires = [0,0,0];
+  for (let seed=0;seed<sample;seed++) {
+    for (let i=0;i<spires.length;i++) {
+      if (facilityKind(contractLayoutSeed(seed,i)) === 'spire') spires[i]++;
+    }
+  }
+  assert.equal(spires[0],0);
+  assert.ok(Math.abs(spires[1]/sample-0.2) < 0.005);
+  assert.ok(Math.abs(spires[2]/sample-0.75) < 0.005);
+});
+
+test('a normal contract follows its layout draws after refresh and a pinned Spire starts immediately', () => {
+  const seed = 22;
+  const sim = new Simulation(seed,'solo');
+  assert.equal(sim.layout!.facility,'factory');
+  assert.equal(sim.state.mission!.contract.seed,seed);
+  assert.deepEqual(sim.state.mission!.contract,newContract(seed));
+  sim.state.mission!.stage = 'settled';
+  sim.nextExpedition();
+  assert.deepEqual(sim.layout,generateLayout(contractLayoutSeed(seed,1)));
+  assert.equal(sim.layout!.facility,'spire');
+
+  const restored = new Simulation(generateLayout(sim.layout!.seed),'solo');
+  restored.state = structuredClone(sim.state);
+  restored.state.mission!.stage = 'settled';
+  restored.nextExpedition();
+  assert.equal(restored.state.mission!.contract.index,2);
+  assert.deepEqual(restored.layout,generateLayout(contractLayoutSeed(seed,2)));
+  assert.equal(restored.layout!.facility,'spire');
+  assert.equal(restored.state.mission!.contract.quota,sim.state.mission!.contract.quota);
+
+  const pin = spirePlaytestSeeds.spire;
+  const pinned = new Simulation(generateLayout(pin),'solo');
+  assert.deepEqual([pinned.layout!.seed,pinned.layout!.facility],[pin,'spire']);
 });
 
 test('the exit rift opens somewhere reachable from the bell, far from where the crew arrived', () => {
@@ -192,7 +229,8 @@ test('if nobody escapes, the crew is wiped and a fresh contract follows with not
   sim.act(1,'next');
   const fresh = mission().contract;
   assert.deepEqual([fresh.seed,fresh.index,fresh.credited,fresh.receipts.length],[wipeSeed(first.seed),0,0,0]);
-  assert.equal(sim.layout!.seed,fresh.seed);
+  assert.equal(sim.layout!.seed,contractLayoutSeed(fresh.seed,0));
+  assert.equal(sim.layout!.facility,'factory');
   assert.equal(mission().stage,'home');
   assert.equal(mission().bell,undefined);
   // A crew struck down together is wiped at once.

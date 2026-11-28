@@ -35,9 +35,13 @@ export class SoloSession {
   constructor(events: Events, preset?: SoloLayout) {
     const stairwell = preset === 'stairwell';
     this.checkpointKey = `relay-room-${preset ?? 'solo'}-v1`;
-    const override = import.meta.env.MODE !== 'pages' && import.meta.env.VITE_RELAY_TEST_SEED;
-    const seed = preset && preset !== 'stairwell' ? spirePlaytestSeeds[preset] : override ? Number(override) : crypto.getRandomValues(new Uint32Array(1))[0];
-    this.sim = resume(this.checkpointKey,stairwell) ?? new Simulation(stairwell ? stairwellLayout() : generateLayout(seed),'solo');
+    const testing = import.meta.env.MODE !== 'pages';
+    const override = testing && import.meta.env.VITE_RELAY_TEST_SEED;
+    const replay = testing && import.meta.env.VITE_RELAY_TEST_CONTRACT_SEED;
+    const pinned = preset && preset !== 'stairwell' ? spirePlaytestSeeds[preset] : override ? Number(override) : undefined;
+    const seed = replay ? Number(replay) : crypto.getRandomValues(new Uint32Array(1))[0];
+    this.sim = resume(this.checkpointKey,stairwell) ?? new Simulation(
+      stairwell ? stairwellLayout() : pinned === undefined ? seed : generateLayout(pinned),'solo');
     if (!this.sim.state.players.length) this.sim.join(1);
     this.sim.stalkers = !(import.meta.env.MODE !== 'pages' && import.meta.env.VITE_RELAY_NO_STALKERS);
     this.events = events;

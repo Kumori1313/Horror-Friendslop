@@ -110,9 +110,13 @@ export class CreatorSession {
       this.end('This shift uses a different layout version',true);
       return;
     }
-    const override = import.meta.env.MODE !== 'pages' && import.meta.env.VITE_RELAY_TEST_SEED;
-    const seed = saved?.seed ?? (override ? Number(override) : crypto.getRandomValues(new Uint32Array(1))[0]);
-    const sim = new Simulation(generateLayout(seed)); this.sim = sim;
+    const testing = import.meta.env.MODE !== 'pages';
+    const override = testing && import.meta.env.VITE_RELAY_TEST_SEED;
+    const replay = testing && import.meta.env.VITE_RELAY_TEST_CONTRACT_SEED;
+    const pinned = saved?.seed ?? (override ? Number(override) : undefined);
+    const seed = replay ? Number(replay) : crypto.getRandomValues(new Uint32Array(1))[0];
+    const sim = new Simulation(pinned === undefined ? seed : generateLayout(pinned));
+    this.sim = sim;
     // A test build may keep stalkers out (never a release build).
     sim.stalkers = !(import.meta.env.MODE !== 'pages' && import.meta.env.VITE_RELAY_NO_STALKERS);
     sim.join(1);

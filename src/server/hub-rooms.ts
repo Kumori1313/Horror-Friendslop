@@ -62,9 +62,7 @@ export function attachHubRooms(server: EventEmitter, backend: string, key: strin
         function discard() { live?.stop(); rooms.delete(id); }
         if (!live) {
           const seed = override === undefined ? createHash('sha256').update(id).digest().readUInt32LE() : Number(override);
-          const layout = generateLayout(seed);
-          if (layout.fallback) console.warn('Relay layout fallback',layout.version,layout.seed);
-          live = createLiveRoom(20000,discard,layout);
+          live = createLiveRoom(20000,discard,override === undefined ? seed : generateLayout(seed));
           rooms.set(id,live);
         }
         live.accept(ws,member.seat);

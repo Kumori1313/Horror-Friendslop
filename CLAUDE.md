@@ -28,7 +28,7 @@ Useful URLs and overrides:
 - `?solo=1` runs a browser-local solo shift. `?solo=1&layout=stairwell` loads the fixed Phase 9 multi-floor walkthrough. In a testing build, `?solo=1&map=marsh` (or `quarry`, `snow`, `hills`) forces the outdoor map kind; `VITE_RELAY_TEST_MAP=marsh npm run build` does it for both seats of a build (ignored in `pages` mode).
 - `?delay=<ms>` (≤ 500) adds artificial latency to the standalone WebSocket client.
 - `VITE_RELAY_NO_STALKERS=1 npm run build` keeps stalkers out (`Simulation.stalkers = false`, set by the solo and creator sessions; ignored in `pages` mode). Build this way before the Game Hub acceptance test, whose walkers can't survive them.
-- `VITE_RELAY_TEST_SEED=<n> npm run build` pins the contract seed, and with it all three expedition facilities (ignored in `pages` mode). `RELAY_LAYOUT_SEED` does the same for the Node hub runtime.
+- `VITE_RELAY_TEST_CONTRACT_SEED=<n> npm run build` replays a normal contract's facility draws. `VITE_RELAY_TEST_SEED=<n>` pins the starting layout for a playtest. Pages builds ignore both flags. `RELAY_LAYOUT_SEED` pins the starting layout for the Node hub runtime.
 
 Type-checking is the only static check. There is no linter or formatter.
 

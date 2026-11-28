@@ -132,3 +132,22 @@ chronological order. Use `development-roadmap.md` for phase goals and the local
   pinned to seed 2 and Stalkers disabled through the existing test flag.
 - The user confirmed the taller Spires looked good and approved publishing
   the release.
+
+### Facility progression by expedition
+
+- Generator version 14 guarantees a factory on the first expedition in a
+  normal contract. The second draws a Spire with 20% probability and the third
+  with 75% probability. A wipe starts a fresh contract at the factory.
+- The contract seed and expedition number determine the facility draw. The
+  resulting layout seed identifies the interior and exterior for both players.
+  Quota calculation uses the same three layouts as the simulation.
+- The Spire solo presets and `VITE_RELAY_TEST_SEED` still pin a starting layout.
+  `VITE_RELAY_TEST_CONTRACT_SEED` replays the normal progression for a reported
+  contract seed. Pages builds ignore the environment overrides.
+- Across 65,536 sampled contract seeds, 0, 13,142, and 49,254 Spires appeared
+  on expeditions one, two, and three respectively. All 186 game tests passed,
+  including quota, wipe restart, and saved-contract progression checks.
+- Production and diagnostics builds passed. Chromium replayed contract seed 22
+  through all three expeditions in solo and two-player Game Hub sessions.
+  Checkpoint refreshes preserved the layout and contract, and the six-storey
+  solo preset still opened directly at the Spire.

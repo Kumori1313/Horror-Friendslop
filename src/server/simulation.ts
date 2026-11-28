@@ -13,9 +13,9 @@ import { climbable, footingAt, footingPace, headHeight, mudDepth, obstaclesAt, p
 import { assignment, batonReach, bellSpan, breathTime, flatOn, heldBy, recoverAfter, revivedHealth, swingTime, catalog, deliverySpot, distance, diverBody, finished, flareTime, gone, nearestPickup, prices, wallet } from '../mission.ts';
 import { doorReach, home, insideDoors, outdoors, placeOf, riftOpen, riftReach, riftSpot } from '../places.ts';
 import type { Place, Stand } from '../places.ts';
-import { bodyOf, expeditionSeed, itemKinds, spawnSalvage } from '../salvage.ts';
+import { bodyOf, itemKinds, spawnSalvage } from '../salvage.ts';
 import { generateLayout } from './generate-layout.ts';
-import { advanceMission, die, newContract, newMission, stun, wake, wipeSeed } from './mission.ts';
+import { advanceMission, contractLayoutSeed, die, expeditionsPerContract, newContract, newMission, stun, wake, wipeSeed } from './mission.ts';
 
 // Operator movement shared by the host and by clients predicting their own
 // operator, so both agree on walls, stairs and closed bulkheads.
@@ -243,7 +243,8 @@ export class Simulation {
   // can start the first expedition with everyone already inside Intake.
   private readonly start: 'home' | 'inside';
 
-  constructor(layout?: Layout, mode: 'solo' | 'coop' = 'coop', start: 'home' | 'inside' = 'home') {
+  constructor(initial?: Layout | number, mode: 'solo' | 'coop' = 'coop', start: 'home' | 'inside' = 'home') {
+    const layout = typeof initial === 'number' ? generateLayout(contractLayoutSeed(initial,0)) : initial;
     this.layout = layout;
     if (layout) {
       let s = (layout.seed ^ 0x5bd1e995) >>> 0;
@@ -252,7 +253,10 @@ export class Simulation {
     this.start = layout && !layout.tour ? start : 'inside';
     if (layout) {
       this.state.opened = [];
-      if (!layout.tour) this.state.mission = newMission(layout);
+      if (!layout.tour) {
+        const seed = typeof initial === 'number' ? initial : layout.seed;
+        this.state.mission = newMission(layout,newContract(seed,expeditionsPerContract,layout));
+      }
       if (this.state.mission && mode === 'solo') this.state.mission.solo = true;
       // Starting inside, the whole crew is already through the arrival rift.
       if (this.state.mission && this.start === 'inside') this.state.mission.arrival = 'closed';
@@ -768,7 +772,7 @@ export class Simulation {
       delete lamp.charge; delete lamp.flight;
     } else {
       mission.contract.index++;
-      mission.contract.layout = expeditionSeed(mission.contract.seed,mission.contract.index);
+      mission.contract.layout = contractLayoutSeed(mission.contract.seed,mission.contract.index);
     }
     this.layout = generateLayout(mission.contract.layout);
     this.state.opened = [];

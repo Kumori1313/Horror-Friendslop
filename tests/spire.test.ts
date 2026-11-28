@@ -7,7 +7,7 @@ import { listen, pace } from '../src/mission.ts';
 import { groundAt, insideDoors, outdoors, placeOf } from '../src/places.ts';
 import { assembleTemplates, orient, roomTemplates, storey, surfaceContains, turnPoint } from '../src/room-templates.ts';
 import { shaftKillDepth } from '../src/spiral.ts';
-import { expeditionSeed, spawnSalvage } from '../src/salvage.ts';
+import { spawnSalvage } from '../src/salvage.ts';
 import { generateLayout } from '../src/server/generate-layout.ts';
 import { moveOperator, Simulation } from '../src/server/simulation.ts';
 import { walkRoute } from './walk.ts';
@@ -15,10 +15,8 @@ import { goInside } from './travel.ts';
 
 const spire = () => generateLayout(spirePlaytestSeeds.spire);
 
-test('contracts draw both facilities and each facility can appear on every outdoor map', () => {
+test('layout seeds draw both facilities and each facility can appear on every outdoor map', () => {
   const pairings = new Set<string>();
-  const draws = new Set(Array.from({length:3},(_,i) => facilityKind(expeditionSeed(spirePlaytestSeeds.spire,i))));
-  assert.deepEqual(draws,new Set(['factory','spire']));
   for (let seed=0;seed<128;seed++) pairings.add(`${facilityKind(seed)}/${mapKind(seed)}`);
   for (const map of mapKinds) {
     assert.ok(pairings.has(`factory/${map}`));

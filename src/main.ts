@@ -1,4 +1,5 @@
 import { forceMap, isMapKind } from './map-kinds.ts';
+import { facilityNames } from './facility-kinds.ts';
 import { bindPreferences } from './preferences.ts';
 import { assignment, finished, flatOn, gone, heldBy, itemName, nearestPickup, prices, swingTime, wallet, wareInfo } from './mission.ts';
 import { spawnSalvage, type ItemKind } from './salvage.ts';
@@ -370,7 +371,10 @@ function start(render: ReturnType<typeof createScene>, mode?: Crew | 'solo', sce
       hud.update(layout,s,p,here?.id,!brief.hidden);
     }
     const funds = place === 'home' && s.mission ? '  ·  Wallet '+wallet(s.mission.contract) : '';
-    if (layout) element('sector').textContent = (place !== 'inside' ? placeNames[place] : here ? roomLabel(here) : 'Corridor')+funds;
+    if (layout) {
+      const sector = place === 'outside' ? facilityNames[layout.facility] : place === 'home' ? placeNames.home : here ? roomLabel(here,p.feetY) : 'Corridor';
+      element('sector').textContent = sector+funds;
+    }
     if (touchMode) {
       take.hidden = !pick;
       take.textContent = 'Pick up '+pickName;
@@ -473,7 +477,8 @@ function start(render: ReturnType<typeof createScene>, mode?: Crew | 'solo', sce
       }
     },
   };
-  const connection = mode === 'solo' ? new SoloSession(events,new URLSearchParams(location.search).get('layout')==='stairwell')
+  const preset = new URLSearchParams(location.search).get('layout');
+  const connection = mode === 'solo' ? new SoloSession(events,preset === 'stairwell' || preset === 'spire' ? preset : undefined)
     : crew ? new CreatorSession(crew,events) : new RoomConnection(url.href,saved,events,delay);
   const soloSession = connection instanceof SoloSession ? connection : undefined;
   const network = connection instanceof SoloSession ? undefined : connection;

@@ -1,4 +1,4 @@
-// Rooms snap to a 4 m grid with two 4 m storeys. Local coordinates put a cell
+// Rooms snap to a 4 m grid with 4 m storeys. Local coordinates put a cell
 // centre at the origin, and each socket sits at the middle of a cell edge. A
 // positive rise climbs from north to south, or from west to east along x.
 export const cell = 4, storey = 4, doorWidth = 2.4, doorHeight = 2.5;

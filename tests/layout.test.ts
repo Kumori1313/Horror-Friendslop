@@ -6,7 +6,7 @@ import type { Layout } from '../src/layout.ts';
 import { obstaclesAt, roomTemplates, storey } from '../src/room-templates.ts';
 import { maxPerRoom, spawnSalvage } from '../src/salvage.ts';
 import { clearAt } from '../src/room.ts';
-import { generateLayout } from '../src/server/generate-layout.ts';
+import { generateFactoryLayout as generateLayout } from '../src/server/generate-layout.ts';
 import { Simulation } from '../src/server/simulation.ts';
 import { route } from '../src/route.ts';
 import { walkRoute } from './walk.ts';

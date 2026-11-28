@@ -55,7 +55,10 @@ test('every outdoor map lets the crew walk from the arrival rift to every door a
   }
   const a = outdoors(5), b = outdoors(6);
   assert.notDeepEqual(a.rocks,b.rocks,'each seed lays out its own map');
-  assert.deepEqual(a.building,b.building,'the façade is the same every run');
+  assert.deepEqual(a.building,outdoors(1).building,'the Spire has a fixed façade');
+  assert.deepEqual(a.tower,outdoors(1).tower);
+  assert.deepEqual(b.building,outdoors(19).building,'the factory has a fixed façade');
+  assert.equal(b.tower,undefined);
 });
 
 test('the façade door leads to Intake and back, and each place keeps its own things', () => {

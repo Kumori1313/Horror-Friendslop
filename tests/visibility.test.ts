@@ -6,6 +6,7 @@ import type { Geometry, Layout } from '../src/layout.ts';
 import { outward, surfaceAt } from '../src/room-templates.ts';
 import { generateLayout } from '../src/server/generate-layout.ts';
 import { portalGraph, visibleRooms } from '../src/visibility.ts';
+import { spirePlaytestSeed } from '../src/facility-kinds.ts';
 
 function camera(x: number, y: number, z: number, yaw: number, pitch = 0) {
   const c = new T.PerspectiveCamera(72,16/9,0.055,48);
@@ -75,6 +76,16 @@ test('the stairwell landing sees across the hall gallery into the closet', () =>
   const east = look(plan,camera(0,5.59,-16,-Math.PI/2),4,[]);
   assert.ok(east.has('hall') && east.has('closet'));
   assert.ok(!east.has('intake'),'Intake lies behind the camera, down the stairs');
+});
+
+test('Spire landings reveal rooms through their own doors and cull the closed-off floors', () => {
+  const plan = generateLayout(spirePlaytestSeed), open = geometryFor(plan).doors.map(d => d.id);
+  const second = look(plan,camera(4,5.59,-16,0),4,open);
+  assert.ok(second.has('lockers') && second.has('stairwell-a'));
+  assert.ok(!second.has('stores'));
+  const fourth = look(plan,camera(16,13.59,0,Math.PI),12,open);
+  assert.ok(fourth.has('stores'));
+  assert.ok(!fourth.has('lockers') && !fourth.has('intake'));
 });
 
 test('culling never hides a room the camera can see, and skips most of the facility', t => {

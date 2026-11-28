@@ -64,7 +64,7 @@ test('the guest\'s prediction falls exactly as the host does', () => {
 
 // Jumping and long falls.
 import { jumpHeight, Simulation } from '../src/server/simulation.ts';
-import { generateLayout } from '../src/server/generate-layout.ts';
+import { generateFactoryLayout, generateLayout } from '../src/server/generate-layout.ts';
 import { geometryFor, socketGroups } from '../src/layout.ts';
 import { pitKill, roomTemplates } from '../src/room-templates.ts';
 import { items } from '../src/mission.ts';
@@ -169,7 +169,7 @@ test('the settling pit and the foundry join all their doorways, turn up in facil
   }
   let pits = 0, foundries = 0;
   for (let seed=0;seed<60;seed++) {
-    const layout = generateLayout(seed);
+    const layout = generateFactoryLayout(seed);
     for (const r of layout.rooms) if (r.template === 'pit' || r.template === 'foundry') {
       r.template === 'pit' ? pits++ : foundries++;
       assert.equal(r.y,0,'on the ground storey');

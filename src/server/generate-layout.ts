@@ -2,6 +2,8 @@ import { cellsOf, generatorVersion, kindOf, validLayout } from '../layout.ts';
 import type { Layout, Module, Passage } from '../layout.ts';
 import { cell, destinationPool, opposite, orient, outward, roomTemplates, socketAt, storey, turnSide } from '../room-templates.ts';
 import type { Side, TemplateKind } from '../room-templates.ts';
+import { facilityKind } from '../facility-kinds.ts';
+import { spireLayout } from './spire-layout.ts';
 
 function randomSource(seed: number) {
   let n = seed >>> 0;
@@ -16,7 +18,7 @@ function randomSource(seed: number) {
 interface Open { room: string; name: string; x: number; y: number; z: number; side: Side }
 const bounds = {x:32, north:-48, south:4};
 
-// Grows corridors, stairwells and destinations outward from Intake. Each branch
+// Grows the factory's corridors, stairwells and destinations outward from Intake. Each branch
 // is built tentatively and rolled back unless its destination fits.
 class Facility {
   rooms: Module[] = [];
@@ -148,11 +150,15 @@ function grow(seed: number, random: () => number): Layout | undefined {
   }
   fitCorridors(f.rooms,f.passages);
   f.passages[0].bulkhead = true;
-  return {version:generatorVersion,seed,fallback:false,rooms:f.rooms,passages:f.passages,lampId:'inspection-light'};
+  return {version:generatorVersion,seed,facility:'factory',fallback:false,rooms:f.rooms,passages:f.passages,lampId:'inspection-light'};
 }
 
 let fallback: Layout | undefined;
 export function generateLayout(seed: number, attempts = 8): Layout {
+  return facilityKind(seed) === 'spire' ? spireLayout(seed) : generateFactoryLayout(seed,attempts);
+}
+
+export function generateFactoryLayout(seed: number, attempts = 8): Layout {
   seed >>>= 0;
   const random = randomSource(seed);
   for (let attempt=0; attempt<attempts; attempt++) {

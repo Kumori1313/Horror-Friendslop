@@ -29,7 +29,7 @@ type HostFrame =
   | {type:'ready'}
   | {type:'welcome'; layout:Layout; state:Snapshot; ack:number; peer:string; epoch:number}
   | {type:'state'; state?:Snapshot; base?:number; patch?:unknown; ack:number; echo:number; epoch:number};
-interface Checkpoint { seed:number; state:Snapshot; time:number; ack:number; peer:string }
+interface Checkpoint { version:number; seed:number; state:Snapshot; time:number; ack:number; peer:string }
 
 function validInput(v: Input) {
   return v && [v.forward,v.right,v.yaw,v.pitch].every(Number.isFinite) && Math.abs(v.forward)<=1 &&
@@ -106,6 +106,10 @@ export class CreatorSession {
       this.end('Host session expired',true);
       return;
     }
+    if (saved && saved.version !== generatorVersion) {
+      this.end('This shift uses a different layout version',true);
+      return;
+    }
     const override = import.meta.env.MODE !== 'pages' && import.meta.env.VITE_RELAY_TEST_SEED;
     const seed = saved?.seed ?? (override ? Number(override) : crypto.getRandomValues(new Uint32Array(1))[0]);
     const sim = new Simulation(generateLayout(seed)); this.sim = sim;
@@ -129,7 +133,8 @@ export class CreatorSession {
   }
   private checkpoint() {
     if (!this.sim) return;
-    const record: Checkpoint = {time:Date.now(),seed:this.sim.layout!.seed,state:this.sim.state,ack:this.ack,peer:this.remotePeer};
+    const layout = this.sim.layout!;
+    const record: Checkpoint = {time:Date.now(),version:layout.version,seed:layout.seed,state:this.sim.state,ack:this.ack,peer:this.remotePeer};
     sessionStorage.setItem(this.key,JSON.stringify(record));
   }
   private joinChannels() {

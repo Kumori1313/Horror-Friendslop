@@ -1,4 +1,5 @@
 import { drawMap } from './layout-map.ts';
+import { facilityNames } from './facility-kinds.ts';
 import { wallet } from './mission.ts';
 import type { Layout } from './layout.ts';
 import { batteryLife, chargeOf, type Snapshot } from './room.ts';
@@ -12,7 +13,7 @@ export function mountDiagnostics(sceneStarted: number, interrupt?: () => void, r
       <h2>Room diagnostics</h2>
       <div id="floor-plan" hidden>
         <canvas id="layout-map" width="300" height="175" aria-label="Facility floor plan"></canvas>
-        <small>I · Intake (base)　≡ · Stairwell　amber · salvage</small>
+        <small>I · Intake　S · Spire stairs　≡ · Stairwell　amber · salvage</small>
       </div>
       <pre id="stats"></pre><button id="outage">Simulate 2 s outage</button>
       <button id="grant">Grant 200 to the wallet</button>
@@ -65,7 +66,7 @@ export function mountDiagnostics(sceneStarted: number, interrupt?: () => void, r
       'Light   ' + (l.owner ? 'P' + l.owner : 'floor') + (l.on ? ' · on' : ' · off'),
       'Lamp x,z  ' + pos(l.x,l.z),
       ...(layout ? [
-        'Layout v' + layout.version + ' · seed ' + layout.seed + (layout.fallback ? ' (fallback)' : ''),
+        'Layout v' + layout.version + ' · ' + facilityNames[layout.facility] + ' · seed ' + layout.seed + (layout.fallback ? ' (fallback)' : ''),
         'Rooms   ' + layout.rooms.length + ' · passages ' + layout.passages.length,
         ...(s.mission ? ['Contract  '+s.mission.contract.seed+' · expedition '+(s.mission.contract.index+1)+'/'+s.mission.contract.expeditions+' · '+s.mission.contract.credited+'/'+s.mission.contract.quota+' · wallet '+wallet(s.mission.contract),
           'Salvage moved  '+s.mission.haul.length+(s.mission.awake ? ' · Diver awake' : ''),

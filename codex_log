@@ -1,0 +1,54 @@
+# Codex change log
+
+Work done by Codex in Relay Room and the sibling `../game-hub` checkout, in
+chronological order. Use `development-roadmap.md` for phase goals and the local
+`claude_log` for Claude Code's work. This file is tracked for future handoffs.
+
+## Earlier work
+
+- Built Relay Room's initial two-player flashlight prototype in `7f981c0`.
+  The subsequent two-floor stairwell walkthrough from Codex was committed by
+  Claude Code in `8d19c69`. See the Git history and `claude_log` for the work
+  between those changes and the Spire.
+
+## 2026-11-27 — Phase 18, Part 2: the four-storey Spire
+
+- Picked up after the Marsh, Quarry, and Snowfield playtests. The existing
+  facility generator was still limited to two storeys.
+- Added `src/facility-kinds.ts` and `src/server/spire-layout.ts`. Each expedition
+  draws its facility independently of its outdoor map. The abandoned factory
+  uses its existing two-storey generator. The Spire has one fixed room layout
+  with three flights that turn around its core, rooms off all four floors, and
+  an inner stairwell connecting the second-floor lockers to the third-floor
+  chiller. Salvage varies with the seed. The Spire's fire exits lead to rooms
+  on the ground floor.
+- Added the tower façade and collision, upstairs and downstairs doorway signs,
+  and a four-floor view in diagnostics. `npm run dev` and `?solo=1&layout=spire`
+  start the seed 1 contract at the Spire. Use seed 19 to start at the factory.
+- Bumped the generator to version 10. Creator-hosted checkpoints now record
+  their layout version and reject older saves before loading old player
+  positions into a newly drawn facility. Solo already checked the version.
+- Game Hub commit `7e4d05f` updates `tests/browser/relay-room.spec.js` for version
+  10 and checks the seeded facility choice at admission and on the next
+  expedition. Relay Room stays at `/relay-room/` with solo and two-player co-op.
+
+### Verification
+
+- Production and diagnostics builds passed. The game test files passed, with
+  live WebSocket tests run separately with access to loopback. `tests/spire.test.ts`
+  checks traversal through the inner stairwell, fourth-floor pickup and
+  extraction, and Bell Diver pursuit and hearing. Its traversal test disables
+  Gnawers and Stalkers to isolate the route and sale.
+- Checked 1,000 factory seeds through `tests/layout.test.ts`. A separate sweep
+  validated 1,000 Spire seeds, with reachable fourth-floor salvage in each.
+- Chromium rendered the façade and fourth floor, restored a solo checkpoint
+  on the top floor, and checked current and stale host checkpoints. Both local
+  Game Hub acceptance tests passed on the seed 1 build with Stalkers disabled
+  via `VITE_RELAY_NO_STALKERS=1` for the test.
+
+### User playtest and handoff
+
+- The user confirmed that the four-storey Spire and its separate stairwell both
+  work. They have additional feedback to share after the commit.
+- Seeded Spire room layouts, five- and six-storey variants, per-map seed sweeps,
+  and the Android frame-time measurements remain open in Phase 18.

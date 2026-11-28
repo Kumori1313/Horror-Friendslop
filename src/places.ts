@@ -2,9 +2,10 @@ import { collisionIndex, connections, geometryFor, walkable, type Geometry, type
 import { landings, placeBridges, placeFords, placeRuins, placeWrecks, poolFords, riverCourse, riverFloor, riverSurface, riverWater, trail, type Bridge, type River, type Ruin, type Wreck } from './outdoor-features.ts';
 import { channel, poolAt, wadeDepth, waterLevel, type Pool, type Water } from './room-templates.ts';
 import { mapKind, weather, windOf, type MapKind } from './map-kinds.ts';
+import { facilityKind, type FacilityKind } from './facility-kinds.ts';
 import { climbable, fieldGrade, fieldHeight, maxGrade, obstaclesAt, orient, outward, planningGrade, socketAt, surfaceAt } from './room-templates.ts';
 import { clearAt } from './room.ts';
-import type { Heightfield, Point3, RoomWall } from './room-templates.ts';
+import type { Heightfield, Point3, RoomWall, Solid } from './room-templates.ts';
 
 // An operator, the flashlight or a piece of salvage is in one of three
 // places, each with its own coordinates: the crew's home dimension, the
@@ -63,6 +64,8 @@ export interface Outdoors {
   // The building: its footprint, its doors (the main door first), and the
   // main door and where an operator leaving through it stands.
   building: {x: number; z: number; w: number; d: number; h: number};
+  facility: FacilityKind;
+  tower?: {shaft: Solid; crown: Solid};
   doors: Doorway[]; door: Point3; exit: Stand;
   // The bell in front of the main door, and where to stand to ring it.
   bell: Point3; ringing: Stand;
@@ -108,7 +111,12 @@ export function outdoors(seed: number): Outdoors {
   // A snowfield rolls a little less, its ditches filled in.
   const relief = kind === 'marsh' ? 0.3 : kind === 'quarry' ? 0.55 : kind === 'snow' ? 0.8 : 1, ditching = kind === 'marsh' ? 0 : kind === 'quarry' || kind === 'snow' ? 0.5 : 1;
   const next = random(seed ^ 0x0d7e1a), half = outdoorSize/2, room = 'outside';
-  const building = {x:0,z:0,w:24,d:18,h:9};
+  const facility = facilityKind(seed);
+  const building = {x:0,z:0,w:24,d:18,h:facility === 'spire' ? 4.2 : 9};
+  const tower = facility === 'spire' ? {
+    shaft:{x:0,z:-1,y:building.h,w:14,d:12,h:12.8},
+    crown:{x:0,z:-1,y:17,w:9,d:8,h:2.4},
+  } : undefined;
   // Doors: the main door in the south face; one or two fire exits in others.
   const faces: Face[] = ['east','west','north'];
   for (let i=faces.length-1;i>0;i--) { const k = Math.floor(next()*(i+1)); [faces[i],faces[k]] = [faces[k],faces[i]]; }
@@ -186,6 +194,7 @@ export function outdoors(seed: number): Outdoors {
     const edge = half-13;
     for (const [x0,z0,x1,z1] of [[-edge,-edge-0.5,edge,-edge],[-edge,edge,edge,edge+0.5],[-edge-0.5,-edge,-edge,edge],[edge,-edge,edge+0.5,edge]]) g.walls.push(wall(room,x0,z0,x1,z1,low-5,80));
     g.walls.push(wall(room,building.x-building.w/2,building.z-building.d/2,building.x+building.w/2,building.z+building.d/2,0,building.h));
+    if (tower) for (const part of [tower.shaft,tower.crown]) g.walls.push({...part,room,inward:1});
     g.props.push({x:bell.x,z:bell.z,w:1.3,d:1.3,y:0,h:2.7,kind:'bell',room});
     // Nowhere to get stuck: fill any ground that has no way back out.
     for (let pass=0;pass<6 && unstrand(g,ground,{x:ax,y:arrivalLevel,z:az});pass++);
@@ -465,7 +474,7 @@ export function outdoors(seed: number): Outdoors {
       }
     }
     const world: Outdoors = {
-      kind,boardwalks,reeds,quarry:quarry && {...quarry,levels:[rimLevel-4,rimLevel-8,rimLevel-12]},toxic,seed,geometry:g,size:outdoorSize,ground,arrival:{x:ax,y:arrivalLevel,z:az},spawns,building,doors,door,exit:doors[0].exit,rocks,bell,
+      kind,boardwalks,reeds,quarry:quarry && {...quarry,levels:[rimLevel-4,rimLevel-8,rimLevel-12]},toxic,seed,geometry:g,size:outdoorSize,ground,arrival:{x:ax,y:arrivalLevel,z:az},spawns,building,facility,tower,doors,door,exit:doors[0].exit,rocks,bell,
       ringing:{x:bell.x,y:0,z:bell.z+1.5,yaw:0},
       river,fords:river.fords.map(f => ({x:f.x,y:height(f.x,f.z),z:f.z})),ruins,wrecks,trails:trails.map(t => t ?? []),marks,water,bridges,
     };
@@ -620,6 +629,7 @@ export function insideDoors(layout: Layout): InsideDoor[] {
     const fire = outdoors(layout.seed).doors.slice(1), used = new Set(layout.passages.flatMap(l => [l.a+'/'+l.from,l.b+'/'+l.to]));
     const hops = connections(layout), g = geometryFor(layout), next = random(layout.seed ^ 0x2f6b1c);
     const deep = layout.rooms.filter(r => r.kind !== 'intake' && r.kind !== 'corridor' && r.kind !== 'stairwell')
+      .filter(r => layout.facility !== 'spire' || r.y === 0)
       .sort((a,b) => hops('intake',b.id)-hops('intake',a.id) || (a.id < b.id ? -1 : 1));
     for (const d of fire) {
       for (const r of deep.slice(0,Math.max(4,Math.ceil(deep.length/2))).sort(() => next()-0.5)) {

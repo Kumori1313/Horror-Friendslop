@@ -1,8 +1,8 @@
 import * as T from 'three';
 import { drawTemplates } from './template-scene.ts';
-import { anchor, geometryFor, powered, roomLabel } from './layout.ts';
+import { anchor, geometryFor, isSpireFlight, powered, roomLabel } from './layout.ts';
 import type { Layout, Kind } from './layout.ts';
-import { doorWidth, orient, outward } from './room-templates.ts';
+import { doorWidth, orient, outward, storey } from './room-templates.ts';
 import { itemKinds, spawnSalvage, type ItemKind } from './salvage.ts';
 import { shellFinish, surfaceFor, worldUV, type Finish, type Library } from './materials.ts';
 import { insideDoors, intakeDoor } from './places.ts';
@@ -159,7 +159,12 @@ export function buildFacility(layout: Layout, library: Library, visuals: Readonl
     // Over each doorway, a sign on either side names the room ahead.
     for (const [here,ahead,sign] of [[a,b,-1],[b,a,1]] as const) {
       if (ahead.kind === 'corridor' || orient(here.template,here.turn).height < 3.1) continue;
-      label(here.id,roomLabel(ahead),o.x+sign*nx*0.16,o.y+2.78,o.z+sign*nz*0.16,Math.atan2(sign*nx,sign*nz));
+      let name = roomLabel(ahead);
+      if (isSpireFlight(ahead)) {
+        const floor = 1+ahead.y/storey;
+        name = o.y === ahead.y ? 'Up to floor '+(floor+1) : 'Down to floor '+floor;
+      }
+      label(here.id,name,o.x+sign*nx*0.16,o.y+2.78,o.z+sign*nz*0.16,Math.atan2(sign*nx,sign*nz));
     }
     // The amber jambs frame Intake, the way back to base, even after its
     // bulkhead opens. They are drawn once, with Intake, and sit 5 mm inside

@@ -1,17 +1,18 @@
 import { clearAt } from './room.ts';
 import type { Point } from './room.ts';
+import { facilityStoreys, type FacilityKind } from './facility-kinds.ts';
 
 import { assembleTemplates, cell, climbable, planningGrade, wadeDepth, waterLevel, corridorKinds, destinationPool, isCorridor, orient, roomTemplates, socketAt, storey, supports, surfaceAt, surfaceHeight, obstaclesAt, pitKill } from './room-templates.ts';
 import type { PlacedSurface, Placement, Point3, Solid, TemplateGeometry, TemplateKind, TemplateLink } from './room-templates.ts';
 
-export const generatorVersion = 9;
+export const generatorVersion = 10;
 export const playerRadius = 0.25;
 export interface Rect extends Point { w: number; d: number }
 export type Kind = Exclude<TemplateKind,typeof corridorKinds[number]> | 'corridor';
 export interface Module extends Placement { kind: Kind }
 export interface Passage extends TemplateLink { id: string; bulkhead: boolean }
 export interface Layout {
-  seed: number; version: number; fallback: boolean; tour?: boolean;
+  seed: number; version: number; fallback: boolean; tour?: boolean; facility: FacilityKind;
   rooms: Module[]; passages: Passage[];
   lampId: 'inspection-light';
 }
@@ -19,8 +20,11 @@ export type Geometry = TemplateGeometry;
 
 export const kindOf = (template: TemplateKind): Kind => isCorridor(template) ? 'corridor' : template as Kind;
 
-// Destinations are unique per facility; repeated stairwells carry a letter.
-export function roomLabel(room: Module) {
+export const isSpireFlight = (room: Module) => room.kind === 'stairwell' && room.id.startsWith('spire-flight-');
+
+// Factory and inner stairwells carry a letter. Tower landings show their floor.
+export function roomLabel(room: Module, height = room.y) {
+  if (isSpireFlight(room)) return 'Spire · Floor '+(1+Math.round(height/storey));
   if (room.kind === 'stairwell') return 'Stairwell '+room.id.replace(/^stairwell-?/,'').toUpperCase();
   return roomTemplates[room.template].name;
 }
@@ -46,7 +50,7 @@ export function stairwellLayout(): Layout {
     {a:'hall',from:'floor-east-4',b:'tunnel',to:'side'},
     {a:'tunnel',from:'mouth',b:'intake',to:'east0'},
   ] as TemplateLink[]).map(e=>({...e,id:e.a+'-'+e.b,bulkhead:false}));
-  return {version:generatorVersion,seed:0,fallback:false,tour:true,lampId:'inspection-light',rooms,passages};
+  return {version:generatorVersion,seed:0,facility:'factory',fallback:false,tour:true,lampId:'inspection-light',rooms,passages};
 }
 
 // Both collision and rendering use these exact slabs.
@@ -297,10 +301,11 @@ export const lampSpawn = {x:0,z:2};
 // per template by `socketGroups`, so walking routes follow from the link graph.
 export function validLayout(layout: Layout) {
   const {rooms,passages} = layout;
+  const levels = facilityStoreys[layout.facility];
   const byId = new Map(rooms.map(r => [r.id,r]));
-  if (byId.size !== rooms.length || rooms.length < 5) return false;
+  if (!levels || byId.size !== rooms.length || rooms.length < 5) return false;
   if (rooms.some(r => !(r.template in roomTemplates) || r.kind !== kindOf(r.template) || ![0,1,2,3].includes(r.turn) ||
-      ![0,storey].includes(r.y) || !Number.isInteger(r.x/cell) || !Number.isInteger(r.z/cell))) return false;
+      r.y < 0 || r.y >= levels*storey || !Number.isInteger(r.y/storey) || !Number.isInteger(r.x/cell) || !Number.isInteger(r.z/cell))) return false;
   // A room with a pit sits on the ground storey.
   if (rooms.some(r => roomTemplates[r.template].depth && r.y !== 0)) return false;
   const intake = rooms.find(r => r.kind === 'intake');
@@ -310,7 +315,7 @@ export function validLayout(layout: Layout) {
   if (destinations.some(r => r.kind !== 'intake' && !destinationPool.includes(r.template))) return false;
   const filled = new Set<string>();
   for (const r of rooms) for (const key of cellsOf(r)) {
-    if (filled.has(key) || +key.split(',')[2] > 1) return false;
+    if (filled.has(key) || +key.split(',')[2] >= levels) return false;
     filled.add(key);
   }
   let g: Geometry;
@@ -325,7 +330,8 @@ export function validLayout(layout: Layout) {
     if (r.kind === 'stairwell' && !(ends.some(e => e.startsWith('upper')) && ends.some(e => e.startsWith('lower')))) return false;
     if (!ends.length) return false;
   }
-  if (!rooms.some(r => r.kind === 'stairwell') || !destinations.some(r => r.y === storey)) return false;
+  if (!rooms.some(r => r.kind === 'stairwell')) return false;
+  for (let floor=1; floor<levels; floor++) if (!destinations.some(r => r.y === floor*storey)) return false;
   // Walk the socket graph: enter a room at one socket, leave by any socket in the same group.
   const reach = routeReach(layout,intake.id,'north1');
   if (rooms.some(r => !reach.has(r.id))) return false;

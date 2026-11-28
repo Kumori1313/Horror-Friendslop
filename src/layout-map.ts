@@ -4,17 +4,21 @@ import { items } from './mission.ts';
 import type { Layout } from './layout.ts';
 import { storey } from './room-templates.ts';
 import type { Snapshot } from './room.ts';
+import { landingAngle } from './spiral.ts';
 
 const letters: Record<string,string> = {intake:'I',stairwell:'≡'};
 
-// Draw each storey from the same footprint, with upper floors in a second row if needed.
+// Draw each storey from the same footprint, two floors per row.
 export function drawMap(canvas: HTMLCanvasElement, layout: Layout, state: Snapshot) {
   const ctx = canvas.getContext('2d');
   if (!ctx) return;
   const g = geometryFor(layout);
   const xs = g.surfaces.flatMap(s => [s.x-s.w/2,s.x+s.w/2]), zs = g.surfaces.flatMap(s => [s.z-s.d/2,s.z+s.d/2]);
   const x0 = Math.min(...xs), z0 = Math.min(...zs);
-  const floors = facilityStoreys[layout.facility], panelW = canvas.width/2, panelH = canvas.height/Math.ceil(floors/2);
+  const floors = facilityStoreys(layout.facility,layout.seed), rows = Math.ceil(floors/2);
+  const height = rows > 2 ? 263 : 175;
+  if (canvas.height !== height) canvas.height = height;
+  const panelW = canvas.width/2, panelH = canvas.height/rows;
   const scale = Math.min((panelW-16)/(Math.max(...xs)-x0),(panelH-20)/(Math.max(...zs)-z0));
   const level = (y: number) => Math.max(0,Math.min(floors-1,Math.floor((y+0.5)/storey)));
   const col = (floor: number) => (floor%2)*panelW, row = (floor: number) => Math.floor(floor/2)*panelH;
@@ -29,8 +33,20 @@ export function drawMap(canvas: HTMLCanvasElement, layout: Layout, state: Snapsh
   const byId = new Map(layout.rooms.map(r => [r.id,r]));
   for (const s of g.surfaces) {
     const kind = byId.get(s.room)!.kind;
-    ctx.fillStyle = s.rise ? '#5f7a72' : kind === 'corridor' ? '#3b4d4a' : '#4a5f5a';
+    ctx.fillStyle = s.rise || s.arc?.climb ? '#5f7a72' : kind === 'corridor' ? '#3b4d4a' : '#4a5f5a';
     const y = s.rise ? s.y+s.rise/2 : s.y;
+    if (s.arc) {
+      const cx = x(s.x,y), cz = z(s.z,y), seam = Math.PI/2+(s.arc.rotation ?? 0);
+      const from = s.arc.landing ? seam-landingAngle : 0, end = s.arc.landing ? seam : 2*Math.PI;
+      ctx.beginPath();
+      if (s.arc.square) ctx.rect(x(s.x-s.w/2,y),z(s.z-s.d/2,y),s.w*scale,s.d*scale);
+      else ctx.arc(cx,cz,s.arc.outer*scale,from,end);
+      if (!s.arc.landing) ctx.moveTo(cx+s.arc.inner*scale,cz);
+      ctx.arc(cx,cz,s.arc.inner*scale,end,from,true);
+      ctx.closePath();
+      ctx.fill('evenodd');
+      continue;
+    }
     ctx.fillRect(x(s.x-s.w/2,y),z(s.z-s.d/2,y),s.w*scale,s.d*scale);
   }
   for (const d of g.doors) {

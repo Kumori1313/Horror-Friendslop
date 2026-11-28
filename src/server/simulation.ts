@@ -9,7 +9,7 @@ import { swatStalker } from './stalkers.ts';
 import { geometryFor, inPit, nearbyDoor, playerRadius, spawnPoints } from '../layout.ts';
 import type { Layout, Geometry, Rect } from '../layout.ts';
 
-import { climbable, footingAt, footingPace, headHeight, mudDepth, obstaclesAt, pitKill, surfaceAt, surfaceHeight, wadeDepth, waterLevel, type Point3, type Solid } from '../room-templates.ts';
+import { climbable, footingAt, footingPace, headHeight, mudDepth, obstaclesAt, pitKill, surfaceAt, surfaceBottom, surfaceContains, surfaceHeight, surfaceNear, wadeDepth, waterLevel, type Point3, type Solid } from '../room-templates.ts';
 import { assignment, batonReach, bellSpan, breathTime, flatOn, heldBy, recoverAfter, revivedHealth, swingTime, catalog, deliverySpot, distance, diverBody, finished, flareTime, gone, nearestPickup, prices, wallet } from '../mission.ts';
 import { doorReach, home, insideDoors, outdoors, placeOf, riftOpen, riftReach, riftSpot } from '../places.ts';
 import type { Place, Stand } from '../places.ts';
@@ -104,8 +104,10 @@ function headroom(g: Geometry, x: number, z: number, feet: number) {
   const head = feet+bodyHeight-0.02;
   for (const s of [...g.roofs,...solidsOf(g)]) if (s.y >= head && under(s,x,z)) low = Math.min(low,s.y);
   for (const s of g.surfaces) {
-    if (s.field || !under(s,x,z)) continue;
-    const bottom = Math.min(s.y,s.y+(s.rise ?? 0))-0.13;
+    if (s.field) continue;
+    const near = surfaceNear(s,x,z,playerRadius);
+    if (!near) continue;
+    const bottom = surfaceBottom(s,near.x,near.z);
     if (bottom >= head) low = Math.min(low,bottom);
   }
   return low;
@@ -177,9 +179,8 @@ function standable(g: Geometry, x: number, z: number, feet: number, opened: read
   for (const s of g.surfaces) {
     // Rolling ground is the floor itself, not something to bump into.
     if (s.field) continue;
-    const cx = Math.max(s.x-s.w/2,Math.min(s.x+s.w/2,x)), cz = Math.max(s.z-s.d/2,Math.min(s.z+s.d/2,z));
-    if ((cx-x)**2+(cz-z)**2 >= playerRadius*playerRadius) continue;
-    if (surfaceHeight(s,cx,cz) > feet+0.32 && Math.min(s.y,s.y+(s.rise ?? 0))-0.13 < feet+1.75) return false;
+    const near = surfaceNear(s,x,z,playerRadius);
+    if (near && surfaceHeight(s,near.x,near.z) > feet+0.32 && surfaceBottom(s,near.x,near.z) < feet+1.75) return false;
   }
   return true;
 }
@@ -188,7 +189,7 @@ function standable(g: Geometry, x: number, z: number, feet: number, opened: read
 function floorBelow(g: Geometry, x: number, z: number, feet: number) {
   let best: number | undefined;
   for (const s of g.surfaces) {
-    if (Math.abs(x-s.x) > s.w/2+1e-6 || Math.abs(z-s.z) > s.d/2+1e-6) continue;
+    if (!surfaceContains(s,x,z)) continue;
     const y = surfaceHeight(s,x,z);
     if (y < feet && (best === undefined || y > best)) best = y;
   }

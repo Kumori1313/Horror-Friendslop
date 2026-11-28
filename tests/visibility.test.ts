@@ -3,10 +3,10 @@ import { test } from 'node:test';
 import * as T from 'three';
 import { anchor, geometryFor, stairwellLayout } from '../src/layout.ts';
 import type { Geometry, Layout } from '../src/layout.ts';
-import { outward, surfaceAt } from '../src/room-templates.ts';
+import { outward, storey, surfaceAt } from '../src/room-templates.ts';
 import { generateLayout } from '../src/server/generate-layout.ts';
 import { portalGraph, visibleRooms } from '../src/visibility.ts';
-import { spirePlaytestSeed } from '../src/facility-kinds.ts';
+import { facilityStoreys, spirePlaytestSeeds } from '../src/facility-kinds.ts';
 
 function camera(x: number, y: number, z: number, yaw: number, pitch = 0) {
   const c = new T.PerspectiveCamera(72,16/9,0.055,48);
@@ -30,7 +30,7 @@ function occluders(g: Geometry, opened: readonly string[]) {
     boxes.push({min:new T.Vector3(s.x-s.w/2,y0,s.z-s.d/2),max:new T.Vector3(s.x+s.w/2,y1,s.z+s.d/2),rooms});
   for (const s of g.walls) add(s,s.y-0.13,s.y+s.h,[s.room]);
   for (const s of [...g.roofs,...g.props]) add(s,s.y,s.y+s.h,[s.room]);
-  for (const s of g.surfaces) if (!s.rise) add(s,s.y-0.13,s.y,[s.room]);
+  for (const s of g.surfaces) if (!s.rise && !s.arc) add(s,s.y-0.13,s.y,[s.room]);
   for (const o of g.openings) {
     const door = g.doors.find(d => Math.abs(d.x-o.x) < 1e-6 && Math.abs(d.z-o.z) < 1e-6 && Math.abs(d.y-o.y) < 1e-6);
     if (door && !opened.includes(door.id)) add(door,door.y,door.y+door.h,[o.a,o.b]);
@@ -78,14 +78,17 @@ test('the stairwell landing sees across the hall gallery into the closet', () =>
   assert.ok(!east.has('intake'),'Intake lies behind the camera, down the stairs');
 });
 
-test('Spire landings reveal rooms through their own doors and cull the closed-off floors', () => {
-  const plan = generateLayout(spirePlaytestSeed), open = geometryFor(plan).doors.map(d => d.id);
-  const second = look(plan,camera(4,5.59,-16,0),4,open);
-  assert.ok(second.has('lockers') && second.has('stairwell-a'));
-  assert.ok(!second.has('stores'));
-  const fourth = look(plan,camera(16,13.59,0,Math.PI),12,open);
-  assert.ok(fourth.has('stores'));
-  assert.ok(!fourth.has('lockers') && !fourth.has('intake'));
+test('the Spire draws its open shaft and the wing through a visible doorway', () => {
+  for (const seed of Object.values(spirePlaytestSeeds)) {
+    const plan = generateLayout(seed), open = geometryFor(plan).doors.map(d => d.id);
+    const floors = facilityStoreys(plan.facility,seed), y = (floors-1)*storey;
+    const view = floors === 4 ? camera(8.5,y+1.59,-12,-Math.PI/2) : camera(0,y+1.59,-20.5,0);
+    const drawn = look(plan,view,y,open);
+    const wing = (socket: string) => plan.passages.find(p => p.a === 'spire-floor-'+floors && p.from === socket)!.b;
+    for (let floor=1;floor<=floors;floor++) assert.ok(drawn.has('spire-floor-'+floor));
+    assert.ok(drawn.has(wing(floors === 4 ? 'east' : 'north')));
+    assert.ok(!drawn.has(wing(floors === 4 ? 'west' : 'south')) && !drawn.has('intake'));
+  }
 });
 
 test('culling never hides a room the camera can see, and skips most of the facility', t => {

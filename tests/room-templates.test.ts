@@ -29,7 +29,8 @@ test('rotated templates keep their walking routes, ramps and sockets',()=>{
         return {x:s.x+dx,y:s.y,z:s.z+dz};
       };
       const reached=walkable(g,inward(t.sockets[0]));
-      for (const s of t.sockets) assert.ok(reached(inward(s)),kind+' turned '+turn+': '+s.name);
+      // Shaft links join two decks and are exercised in the assembled tower.
+      for (const s of t.sockets.filter(s => !s.shaft)) assert.ok(reached(inward(s)),kind+' turned '+turn+': '+s.name);
       // A turned ramp climbs between the same two heights at the matching ends.
       base.surfaces.forEach((s,i)=>{
         if (!s.rise) return;

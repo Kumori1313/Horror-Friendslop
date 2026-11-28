@@ -2,10 +2,11 @@ import { clearAt } from './room.ts';
 import type { Point } from './room.ts';
 import { facilityStoreys, type FacilityKind } from './facility-kinds.ts';
 
-import { assembleTemplates, cell, climbable, planningGrade, wadeDepth, waterLevel, corridorKinds, destinationPool, isCorridor, orient, roomTemplates, socketAt, storey, supports, surfaceAt, surfaceHeight, obstaclesAt, pitKill } from './room-templates.ts';
+import { assembleTemplates, cell, climbable, planningGrade, wadeDepth, waterLevel, corridorKinds, destinationPool, isCorridor, orient, roomTemplates, socketAt, storey, supports, surfaceAt, surfaceBottom, surfaceContains, surfaceHeight, surfaceNear, obstaclesAt, pitKill } from './room-templates.ts';
 import type { PlacedSurface, Placement, Point3, Solid, TemplateGeometry, TemplateKind, TemplateLink } from './room-templates.ts';
+import { shaftKillDepth, towerRadius } from './spiral.ts';
 
-export const generatorVersion = 10;
+export const generatorVersion = 13;
 export const playerRadius = 0.25;
 export interface Rect extends Point { w: number; d: number }
 export type Kind = Exclude<TemplateKind,typeof corridorKinds[number]> | 'corridor';
@@ -20,7 +21,8 @@ export type Geometry = TemplateGeometry;
 
 export const kindOf = (template: TemplateKind): Kind => isCorridor(template) ? 'corridor' : template as Kind;
 
-export const isSpireFlight = (room: Module) => room.kind === 'stairwell' && room.id.startsWith('spire-flight-');
+export const isSpireFlight = (room: Module) => !!roomTemplates[room.template].tower;
+export const spireRepeatable: readonly TemplateKind[] = ['closet','stores','lockers','coldstore','workshop','hoist-store','survey','counterweight','transfer'];
 
 // Factory and inner stairwells carry a letter. Tower landings show their floor.
 export function roomLabel(room: Module, height = room.y) {
@@ -68,8 +70,14 @@ export function geometryFor(layout: Layout): Geometry {
 export function inPit(layout: Layout, p: {x: number; z: number; feetY?: number}) {
   return layout.rooms.some(r => {
     const t = orient(r.template,r.turn);
+    if (t.tower && r.y === 0) return (p.feetY ?? 0) < -shaftKillDepth && Math.max(Math.abs(p.x-r.x),Math.abs(p.z-r.z)) < towerRadius;
     return t.depth !== undefined && (p.feetY ?? 0) < r.y-pitKill && t.footprint.some(f => Math.abs(p.x-r.x-f.x) <= f.w/2 && Math.abs(p.z-r.z-f.z) <= f.d/2);
   });
+}
+
+export function diverCeiling(room: Module, floor: number) {
+  const template = roomTemplates[room.template];
+  return template.tower === 'flight' ? floor+storey : room.y+template.height;
 }
 
 export function solidsAt(geometry: Geometry, feet: number, opened: readonly string[] = []) {
@@ -124,7 +132,7 @@ export const neighbours = (layout: Layout, room: string) => table(layout).next.g
 // flashlight and their landmarks.
 export function powered(layout: Layout, room: string) {
   const r = layout.rooms.find(m => m.id === room);
-  if (!r || r.kind === 'corridor' || r.kind === 'stairwell' || r.template === 'tunnel') return false;
+  if (!r || isSpireFlight(r) || r.kind === 'corridor' || r.kind === 'stairwell' || r.template === 'tunnel') return false;
   if (r.kind === 'intake' || layout.tour) return true;
   let h = (layout.seed ^ 0x2545f491) >>> 0;
   for (let i=0;i<room.length;i++) h = Math.imul(h ^ room.charCodeAt(i),0x01000193) >>> 0;
@@ -185,6 +193,12 @@ export function socketGroups(kind: TemplateKind) {
   const room: Placement = {id:'probe',template:kind,x:0,y:0,z:0,turn:0};
   const g = assembleTemplates([room],[],true);
   const t = roomTemplates[kind];
+  // The continuous landing joins the radial doors and the curving climb.
+  if (t.tower) {
+    groups = new Map(t.sockets.map(s => [s.name,0]));
+    reachCache.set(kind,groups);
+    return groups;
+  }
   let component = 0;
   for (const s of t.sockets) {
     if (groups.has(s.name)) continue;
@@ -234,7 +248,7 @@ export function collisionIndex(g: Geometry, opened: readonly string[] = [], reac
     surface(x: number, z: number, feet: number, step = 0.32) {
       let best: PlacedSurface | undefined, difference = Infinity;
       for (const s of surfaces(x,z)) {
-        if (Math.abs(x-s.x)>s.w/2+1e-6 || Math.abs(z-s.z)>s.d/2+1e-6) continue;
+        if (!surfaceContains(s,x,z)) continue;
         const delta = Math.abs(surfaceHeight(s,x,z)-feet);
         if (delta<=step && supports(s,delta,best,difference)) { best = s; difference = delta; }
       }
@@ -243,9 +257,8 @@ export function collisionIndex(g: Geometry, opened: readonly string[] = [], reac
     clear(x: number, z: number, feet: number, radius = playerRadius) {
       if (!clearAt(x,z,radius,solids(x,z).filter(s => s.y+s.h > feet+0.01 && s.y < feet+1.75))) return false;
       for (const s of overhead(x,z)) {
-        const cx = Math.max(s.x-s.w/2,Math.min(s.x+s.w/2,x)), cz = Math.max(s.z-s.d/2,Math.min(s.z+s.d/2,z));
-        if ((cx-x)**2+(cz-z)**2 >= radius*radius) continue;
-        if (surfaceHeight(s,cx,cz) > feet+0.32 && Math.min(s.y,s.y+(s.rise ?? 0))-0.13 < feet+1.75) return false;
+        const near = surfaceNear(s,x,z,radius);
+        if (near && surfaceHeight(s,near.x,near.z) > feet+0.32 && surfaceBottom(s,near.x,near.z) < feet+1.75) return false;
       }
       return true;
     },
@@ -301,22 +314,38 @@ export const lampSpawn = {x:0,z:2};
 // per template by `socketGroups`, so walking routes follow from the link graph.
 export function validLayout(layout: Layout) {
   const {rooms,passages} = layout;
-  const levels = facilityStoreys[layout.facility];
+  if (layout.facility !== 'factory' && layout.facility !== 'spire') return false;
+  const levels = facilityStoreys(layout.facility,layout.seed);
   const byId = new Map(rooms.map(r => [r.id,r]));
-  if (!levels || byId.size !== rooms.length || rooms.length < 5) return false;
+  if (byId.size !== rooms.length || rooms.length < 5) return false;
   if (rooms.some(r => !(r.template in roomTemplates) || r.kind !== kindOf(r.template) || ![0,1,2,3].includes(r.turn) ||
       r.y < 0 || r.y >= levels*storey || !Number.isInteger(r.y/storey) || !Number.isInteger(r.x/cell) || !Number.isInteger(r.z/cell))) return false;
+  const tower = rooms.filter(isSpireFlight);
+  if (layout.facility === 'spire') {
+    if (tower.length !== levels || tower.some(r => r.x !== tower[0].x || r.z !== tower[0].z || r.turn !== tower[0].turn ||
+      r.template !== (r.y === (levels-1)*storey ? 'spire-crown' : 'spire-flight'))) return false;
+  } else if (tower.length) return false;
   // A room with a pit sits on the ground storey.
-  if (rooms.some(r => roomTemplates[r.template].depth && r.y !== 0)) return false;
+  if (layout.facility === 'factory' && rooms.some(r => roomTemplates[r.template].depth && r.y !== 0)) return false;
   const intake = rooms.find(r => r.kind === 'intake');
   if (!intake || intake.x !== -4 || intake.y !== 0 || intake.z !== 0 || intake.turn !== 0) return false;
-  const destinations = rooms.filter(r => r.kind !== 'corridor' && r.kind !== 'stairwell');
-  if (new Set(destinations.map(r => r.kind)).size !== destinations.length) return false;
-  if (destinations.some(r => r.kind !== 'intake' && !destinationPool.includes(r.template))) return false;
+  const destinations = rooms.filter(r => r.kind !== 'corridor' && r.kind !== 'stairwell' && !isSpireFlight(r));
+  const singular = destinations.filter(r => layout.facility === 'factory' || !spireRepeatable.includes(r.template));
+  if (new Set(singular.map(r => r.kind)).size !== singular.length) return false;
+  if (destinations.some(r => r.kind !== 'intake' && !destinationPool.includes(r.template) &&
+      (layout.facility === 'factory' || !spireRepeatable.includes(r.template)))) return false;
   const filled = new Set<string>();
   for (const r of rooms) for (const key of cellsOf(r)) {
     if (filled.has(key) || +key.split(',')[2] >= levels) return false;
     filled.add(key);
+  }
+  // A suspended pit reserves the column below it, so its fall never cuts
+  // through an occupied room on a lower floor.
+  for (const r of rooms) if (roomTemplates[r.template].depth) {
+    for (const key of cellsOf(r).filter(k => k.endsWith(','+r.y/storey))) {
+      const column = key.slice(0,key.lastIndexOf(',')+1);
+      for (let level=0; level<r.y/storey; level++) if (filled.has(column+level)) return false;
+    }
   }
   let g: Geometry;
   try { g = assembleTemplates(rooms,passages); } catch { return false; }
@@ -326,7 +355,7 @@ export function validLayout(layout: Layout) {
   for (const p of passages) { linked.get(p.a)!.push(p.from); linked.get(p.b)!.push(p.to); }
   for (const r of rooms) {
     const ends = linked.get(r.id)!;
-    if (r.kind === 'corridor' && ends.length !== roomTemplates[r.template].sockets.length) return false;
+    if (r.kind === 'corridor' && (ends.length < 2 || (layout.facility === 'factory' && ends.length !== roomTemplates[r.template].sockets.length))) return false;
     if (r.kind === 'stairwell' && !(ends.some(e => e.startsWith('upper')) && ends.some(e => e.startsWith('lower')))) return false;
     if (!ends.length) return false;
   }

@@ -52,3 +52,83 @@ chronological order. Use `development-roadmap.md` for phase goals and the local
   work. They have additional feedback to share after the commit.
 - Seeded Spire room layouts, five- and six-storey variants, per-map seed sweeps,
   and the Android frame-time measurements remain open in Phase 18.
+
+## 2026-11-28 — Open-shaft Spire revision
+
+- Playtesters wanted a distinct tower with a spiral and a central drop. Used
+  their local `media/spire_blueprint.png` as reference and ignored `/media/`.
+- Replaced the box stair flights with a helix, a shared shaft, circular steel
+  treads, and doorways to the wings. Stacked flights share a visibility link.
+  Movement, routing, falls, and throws use the same curved surfaces. The void
+  below the base uses the pit death rule and fades into black. Added a stepped
+  circular exterior with round collision and cardinal doors.
+- Generator version 11 retains four levels and the east-wing shortcut between
+  floors two and three. The seed varies the room types and some corridor
+  lengths. Stores, closets, lockers, cold stores, workshops, and the new
+  Hoist supply rooms and Survey stations can recur. One Foreman's office
+  appears at the base. The factory still uses its existing generator.
+- The wings have zero, one, two, and three suspended pit rooms from bottom to
+  top. New Counterweight chambers and Broken transfer galleries share the
+  factory pits' fog and fall handling. Their salvage is across the crossing.
+  Transfer galleries have a route via jumps and a walkable route on a ledge.
+- Game Hub compares the admitted layout version to the game source. Existing
+  version 10 checkpoints follow the established version checks.
+
+### Verification
+
+- Production build and game tests passed, including WebSocket tests on
+  loopback. Simulation tests climbed the tower, used the east-wing shortcut,
+  extracted fourth-floor salvage, fell down the shaft, and jumped the full
+  Broken transfer gallery.
+- All 1,000 sampled Spire seeds passed layout validation and had 28
+  destinations. Forty samples also passed a full room and salvage reachability
+  check on the assembled collision geometry.
+- Chromium rendered the circular façade, shaft, and Broken transfer gallery
+  and restored a top-floor checkpoint. Android frame times are pending.
+- Game Hub's solo acceptance test passed. The two-player test passed on an
+  isolated retry after its outdoor keyboard-steering step stalled on the
+  first run. The build used seed 1 and the existing no-Stalker test flag.
+
+### Spire playtest follow-up
+
+- The user playtested the revised Spire and asked for a steadier Bell Diver
+  on stairs and a deeper, unobstructed shaft.
+- The Bell Diver holds its position and drop countdown within 6 m
+  horizontally and 2.75 m vertically on a stair flight. Its reach spans
+  shared Spire landings, with adjacent flight coverage limited to the
+  landing height.
+- Removed the interior railings and the opaque shaft disc. The shaft now
+  uses the same fog layers as the pit rooms and kills 20 m below the lowest
+  landing. Hid the flashlight's cone mesh from its holder's view after it
+  appeared as a disc over the shaft. Bumped the generator to version 12.
+- The production build and 181 tests passed. Chromium verified the shaft
+  from the lowest and highest floors with the flashlight on.
+- The user tested the version 12 follow-up and confirmed it looks good.
+
+### Seeded five- and six-storey Spires
+
+- Generator version 13 draws the Spire's height from the expedition seed,
+  independently of its outdoor map. The draw can produce four, five, or six
+  storeys. The taller variants extend the central spiral and have three
+  transfer galleries on each new floor. Their pit footprints extend beyond
+  the lower wings to keep the drops clear. The east-wing shortcut still
+  joins floors two and three.
+- The circular façade has a tier for each floor. Diagnostics shows up to
+  six floors in three rows. Solo presets start at seed 1 for four floors
+  (`layout=spire`), seed 3 for five (`layout=spire-5`), and seed 2 for six
+  (`layout=spire-6`). Each preset has its own refresh checkpoint. Existing
+  version 12 checkpoints follow the established version checks.
+- Updated `README.md`, `development-roadmap.md`, and the local
+  `testing-commands.md` with the presets and top-floor checks.
+- The production build and 184 game tests passed. The tests climb each
+  preset, use the inner stairwell, extract top-floor salvage, check doorway
+  culling, and fall from the six-storey crown. A separate sweep validated
+  1,000 seeds per height. Ten seeds per height also passed collision-geometry
+  reachability checks for every room anchor and piece of salvage.
+- Chromium rendered both taller façades, shafts, and top-floor transfer
+  galleries, restored both solo top-floor checkpoints, and displayed every
+  floor in diagnostics. Physical Android frame times are pending.
+- Both Game Hub browser acceptance tests passed with the six-storey Spire
+  pinned to seed 2 and Stalkers disabled through the existing test flag.
+- The user confirmed the taller Spires looked good and approved publishing
+  the release.

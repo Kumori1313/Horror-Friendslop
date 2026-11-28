@@ -35,7 +35,8 @@ function planOf(mission: Mission, id: number) {
 export function spawnGnawers(layout: Layout, mission: Mission, random: () => number): Gnawer[] {
   const hops = connections(layout), intake = layout.rooms.find(r => r.kind === 'intake');
   if (!intake) return [];
-  const rooms = layout.rooms.filter(r => r.kind !== 'corridor' && r.kind !== 'stairwell' && r.kind !== 'intake' && !roomTemplates[r.template].depth && hops(intake.id,r.id) >= 3);
+  const rooms = layout.rooms.filter(r => r.kind !== 'corridor' && r.kind !== 'stairwell' && r.kind !== 'intake' &&
+    !roomTemplates[r.template].depth && !roomTemplates[r.template].tower && hops(intake.id,r.id) >= 3);
   for (let i=rooms.length-1;i>0;i--) { const k = Math.floor(random()*(i+1)); [rooms[i],rooms[k]] = [rooms[k],rooms[i]]; }
   return rooms.slice(0,mission.contract.index >= 1 ? 2 : 1).map((r,i) => {
     const nest = anchor(r);

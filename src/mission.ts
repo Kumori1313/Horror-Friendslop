@@ -1,5 +1,4 @@
-import { anchor, connections, type Layout } from './layout.ts';
-import { roomTemplates } from './room-templates.ts';
+import { anchor, connections, diverCeiling, type Layout } from './layout.ts';
 import { canTake, clearAt, freeSlot } from './room.ts';
 import type { Flight } from './flight.ts';
 import { doorReach, home, outdoors, placeOf } from './places.ts';
@@ -60,7 +59,7 @@ export function deliverySpot(mission: Mission) {
 export function bellSpan(layout: Layout, diver: Diver, mission: Mission) {
   const room = layout.rooms.find(r => r.id === diver.bay);
   if (!room || diver.mode === 'dormant') return;
-  const a = anchor(room), top = room.y+roomTemplates[room.template].height, floor = diver.y ?? a.y, p = pace(mission);
+  const a = anchor(room), floor = diver.y ?? a.y, top = diverCeiling(room,floor), p = pace(mission);
   const reach = Math.max(0.3,Math.min(1,(top-floor-2.1-0.62)/1.2)), depth = Math.max(0,top-floor-0.62-1.2*reach);
   let lowered = 0;
   if (diver.mode === 'falling') lowered = depth*(1-Math.max(0,diver.seconds)/p.fall)**2;
@@ -167,7 +166,7 @@ export const stunTime = 6;
 export function diverBody(layout: Layout, diver: Diver) {
   const room = layout.rooms.find(r => r.id === diver.bay);
   if (!room || diver.mode === 'dormant') return;
-  const a = anchor(room), top = room.y+roomTemplates[room.template].height;
+  const a = anchor(room), top = diverCeiling(room,diver.y ?? a.y);
   const low = diver.mode === 'falling' || diver.mode === 'strike' || diver.mode === 'rising';
   return {x:diver.x ?? a.x,z:diver.z ?? a.z,r:0.7,bottom:low ? diver.y ?? a.y : top-1.3,top};
 }

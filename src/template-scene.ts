@@ -16,6 +16,7 @@ export function drawTemplates(g:TemplateGeometry, emit:RoomBox, accent:(room:str
   const box:Box=(...args)=>emit(room,finish,...args);
   const as=(f:Finish)=>{ finish=f; return box; };
   for (const s of g.surfaces) {
+    if (s.arc) continue;
     room=s.room;
     const rise=s.rise??0;
     if (s.stairs) {

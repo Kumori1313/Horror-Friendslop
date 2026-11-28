@@ -1,12 +1,12 @@
 import type { Events } from './connection.ts';
 import { generatorVersion, stairwellLayout, type Layout } from './layout.ts';
-import { spirePlaytestSeed } from './facility-kinds.ts';
+import { spirePlaytestSeeds } from './facility-kinds.ts';
 import type { Action, Command, Input, Snapshot } from './room.ts';
 import { generateLayout } from './server/generate-layout.ts';
 import { Simulation } from './server/simulation.ts';
 
 interface Checkpoint { version: number; seed: number; state: Snapshot }
-export type SoloLayout = 'stairwell' | 'spire';
+export type SoloLayout = 'stairwell' | keyof typeof spirePlaytestSeeds;
 
 function resume(checkpointKey:string,stairwell:boolean): Simulation | undefined {
   try {
@@ -36,7 +36,7 @@ export class SoloSession {
     const stairwell = preset === 'stairwell';
     this.checkpointKey = `relay-room-${preset ?? 'solo'}-v1`;
     const override = import.meta.env.MODE !== 'pages' && import.meta.env.VITE_RELAY_TEST_SEED;
-    const seed = preset === 'spire' ? spirePlaytestSeed : override ? Number(override) : crypto.getRandomValues(new Uint32Array(1))[0];
+    const seed = preset && preset !== 'stairwell' ? spirePlaytestSeeds[preset] : override ? Number(override) : crypto.getRandomValues(new Uint32Array(1))[0];
     this.sim = resume(this.checkpointKey,stairwell) ?? new Simulation(stairwell ? stairwellLayout() : generateLayout(seed),'solo');
     if (!this.sim.state.players.length) this.sim.join(1);
     this.sim.stalkers = !(import.meta.env.MODE !== 'pages' && import.meta.env.VITE_RELAY_NO_STALKERS);

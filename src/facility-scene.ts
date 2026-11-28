@@ -1,8 +1,9 @@
 import * as T from 'three';
 import { drawTemplates } from './template-scene.ts';
 import { anchor, geometryFor, isSpireFlight, powered, roomLabel } from './layout.ts';
-import type { Layout, Kind } from './layout.ts';
-import { doorWidth, orient, outward, storey } from './room-templates.ts';
+import type { Geometry, Layout, Kind } from './layout.ts';
+import { doorWidth, orient, outward } from './room-templates.ts';
+import { arcEdge, arcPoint, arcRise, landingAngle, shaftDepth, stairOuter, towerRadius, turn } from './spiral.ts';
 import { itemKinds, spawnSalvage, type ItemKind } from './salvage.ts';
 import { shellFinish, surfaceFor, worldUV, type Finish, type Library } from './materials.ts';
 import { insideDoors, intakeDoor } from './places.ts';
@@ -12,6 +13,7 @@ export const colors: Record<Kind,number> = {
   stores:0xb78155, closet:0xc49a6c, boiler:0xb5654a, lockers:0x8c8fb8, control:0x7fb069, coldstore:0x9fd3e6,
   filters:0xa3b86c, generator:0xd4c24f, gallery:0x7d8f99, office:0xc98a9b, workshop:0xb88a4a, tunnel:0x6f8278,
   hall:0x8fa3a0, stairwell:0xd9d2b4, corridor:0x93a599, pit:0x7a8a5a, foundry:0xc0683a,
+  'spire-flight':0x9ec7ca, 'spire-crown':0x9ec7ca, survey:0x74aab1, 'hoist-store':0xc5a268, counterweight:0xd49651, transfer:0xdd8b69,
 };
 const stations: Kind[] = ['intake'];
 const lamp = 0xe4e7c9;
@@ -95,6 +97,44 @@ export class Batch {
 
 export interface SalvageVisual { geometry: T.BufferGeometry; material: T.Material }
 
+function spiralDeck(s: Geometry['surfaces'][number], library: Library) {
+  const arc = s.arc!, inner = arc.square ? stairOuter : arc.inner;
+  const angles = arc.landing ? landingAngle : turn, count = arc.landing ? 8 : 96;
+  const positions: number[] = [], uvs: number[] = [], colors: number[] = [];
+  const steel = new T.Color(0x657d7b), edge = new T.Color(0xaab3a6), stripe = new T.Color(0xc3995e);
+  const face = (a: T.Vector3Like,b: T.Vector3Like,c: T.Vector3Like,d: T.Vector3Like,color: T.Color) => {
+    for (const p of [a,d,c,c,b,a]) {
+      positions.push(p.x,p.y,p.z);
+      uvs.push(p.x,p.z);
+      colors.push(color.r,color.g,color.b);
+    }
+  };
+  for (let i=0;i<count;i++) {
+    const a = i*angles/count, b = (i+1)*angles/count, mid = (a+b)/2;
+    const y = arcRise(arc,mid), next = arcRise(arc,b+angles/(2*count));
+    const start = a-(arc.rotation ?? 0), end = b-(arc.rotation ?? 0);
+    const a0 = arcPoint(s,start,inner,y), a1 = arcPoint(s,start,arcEdge(arc,start),y);
+    const b0 = arcPoint(s,end,inner,y), b1 = arcPoint(s,end,arcEdge(arc,end),y);
+    const below = (p: T.Vector3Like) => ({...p,y:p.y-0.13});
+    face(a0,b0,b1,a1,steel);
+    face(below(a0),below(a1),below(b1),below(b0),steel);
+    face(a0,below(a0),below(b0),b0,edge);
+    face(a1,b1,below(b1),below(a1),edge);
+    if (next>y && i<count-1) {
+      const rise = (p: T.Vector3Like) => ({...p,y:p.y+next-y});
+      face(b0,rise(b0),rise(b1),b1,stripe);
+    }
+  }
+  const mesh = new T.BufferGeometry();
+  mesh.setAttribute('position',new T.Float32BufferAttribute(positions,3));
+  mesh.setAttribute('uv',new T.Float32BufferAttribute(uvs,2));
+  mesh.setAttribute('color',new T.Float32BufferAttribute(colors,3));
+  mesh.computeVertexNormals();
+  // Dim maintenance light on the treads keeps the turns legible above the dark shaft.
+  const material = poweredVariant(unpoweredVariant(library.surfaces.get('grating')!));
+  return new T.Mesh(mesh,material);
+}
+
 // Each room is one group of merged meshes, so whole rooms can be hidden at
 // once. Shell surfaces come from the room's palette, props keep their colour
 // over metal, rust, paint or wood, and markers and lamps glow. Materials are
@@ -130,9 +170,17 @@ export function buildFacility(layout: Layout, library: Library, visuals: Readonl
     batch.add(transform.matrix,normals.getNormalMatrix(transform.matrix),tint,axis === 'wedge' ? Batch.wedge : Batch.unit);
   }
   drawTemplates(geometry,box,id => colors[byId.get(id)!.kind]);
+  for (const s of geometry.surfaces) if (s.arc) groups.get(s.room)!.add(spiralDeck(s,library));
+  for (const r of layout.rooms.filter(isSpireFlight)) {
+    const glow = colors[r.kind], wall = towerRadius-0.075;
+    for (const side of [-1,1]) for (const along of [-2.8,2.8]) {
+      box(r.id,'matte',glow,r.x+side*wall,r.y+0.62,r.z+along,0.035,0.12,0.63);
+      box(r.id,'matte',glow,r.x+along,r.y+0.62,r.z+side*wall,0.63,0.12,0.035);
+    }
+  }
   // Each destination has a coloured floor marker; stations add side stripes.
   for (const room of layout.rooms) {
-    if (room.kind === 'corridor' || room.kind === 'stairwell') continue;
+    if (room.kind === 'corridor' || room.kind === 'stairwell' || isSpireFlight(room)) continue;
     const a = anchor(room), color = colors[room.kind];
     box(room.id,'matte',color,a.x,a.y+0.008,a.z,1.6,0.016,1.6);
     if (stations.includes(room.kind)) for (const side of [-1,1]) box(room.id,'matte',color,a.x+side*0.88,a.y+0.023,a.z,0.09,0.028,2.1);
@@ -154,17 +202,13 @@ export function buildFacility(layout: Layout, library: Library, visuals: Readonl
     mesh.position.set(x,y,z); mesh.rotation.y=angle; groups.get(room)!.add(mesh);
   }
   for (const o of geometry.openings) {
+    if (o.shaft) continue;
     const a = byId.get(o.a)!, b = byId.get(o.b)!;
     const [nx,nz] = outward(o.side);
     // Over each doorway, a sign on either side names the room ahead.
     for (const [here,ahead,sign] of [[a,b,-1],[b,a,1]] as const) {
       if (ahead.kind === 'corridor' || orient(here.template,here.turn).height < 3.1) continue;
-      let name = roomLabel(ahead);
-      if (isSpireFlight(ahead)) {
-        const floor = 1+ahead.y/storey;
-        name = o.y === ahead.y ? 'Up to floor '+(floor+1) : 'Down to floor '+floor;
-      }
-      label(here.id,name,o.x+sign*nx*0.16,o.y+2.78,o.z+sign*nz*0.16,Math.atan2(sign*nx,sign*nz));
+      label(here.id,roomLabel(ahead,o.y),o.x+sign*nx*0.16,o.y+2.78,o.z+sign*nz*0.16,Math.atan2(sign*nx,sign*nz));
     }
     // The amber jambs frame Intake, the way back to base, even after its
     // bulkhead opens. They are drawn once, with Intake, and sit 5 mm inside
@@ -199,19 +243,20 @@ export function buildFacility(layout: Layout, library: Library, visuals: Readonl
   for (const [room,byMaterial] of batches) {
     for (const [material,batch] of byMaterial) groups.get(room)!.add(new T.Mesh(batch.build(),material === glow ? material : power.get(room) ? poweredVariant(material) : unpoweredVariant(material)));
   }
-  // A pit fills with darkness: layers of black haze, each a little more, from
-  // just below the walkways down to a black floor at the foot of its walls,
-  // so the bottom is never seen and a falling operator fades from view.
+  // Black haze fills the pit from just below the walkways to the foot of
+  // its walls, gradually swallowing a falling operator.
   const haze = new T.MeshBasicMaterial({color:0x000000,transparent:true,opacity:0.3,depthWrite:false});
   const black = new T.MeshBasicMaterial({color:0x000000});
   const sheet = new T.PlaneGeometry(1,1).rotateX(-Math.PI/2);
   for (const r of layout.rooms) {
     const t = orient(r.template,r.turn);
-    if (!t.depth) continue;
+    const shaft = t.tower && r.y === 0, depth = shaft ? shaftDepth : t.depth;
+    if (!depth) continue;
     for (const f of t.footprint) {
       const layers = 12;
       for (let i=0;i<=layers;i++) {
-        const y = r.y-0.8-(t.depth-1.2)*(i/layers)**1.3, mesh = new T.Mesh(sheet,i === layers ? black : haze);
+        const y = r.y-0.8-(depth-1.2)*(i/layers)**1.3;
+        const mesh = new T.Mesh(sheet,i === layers && !shaft ? black : haze);
         mesh.scale.set(f.w-0.12,1,f.d-0.12); mesh.position.set(r.x+f.x,y,r.z+f.z); mesh.renderOrder = 1;
         groups.get(r.id)!.add(mesh);
       }

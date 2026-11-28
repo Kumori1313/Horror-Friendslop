@@ -3,7 +3,7 @@ import { doorHeight, doorWidth } from './room-templates.ts';
 import type { Point3 } from './room-templates.ts';
 
 // A doorway seen from one side: the rectangle an operator can look through.
-export interface Portal { from: string; to: string; door?: string; corners: Point3[] }
+export interface Portal { from: string; to: string; door?: string; corners: Point3[]; shaft?: boolean }
 export type PortalGraph = Map<string,Portal[]>;
 type Rect = [number,number,number,number];
 
@@ -16,8 +16,8 @@ export function portalGraph(layout: Layout, g: Geometry): PortalGraph {
       x:o.x+(alongX ? s*doorWidth/2 : 0), y:o.y+h, z:o.z+(alongX ? 0 : s*doorWidth/2),
     })));
     const door = passage?.bulkhead ? passage.id : undefined;
-    graph.get(o.a)!.push({from:o.a,to:o.b,door,corners});
-    graph.get(o.b)!.push({from:o.b,to:o.a,door,corners});
+    graph.get(o.a)!.push({from:o.a,to:o.b,door,corners,shaft:o.shaft});
+    graph.get(o.b)!.push({from:o.b,to:o.a,door,corners,shaft:o.shaft});
   }
   return graph;
 }
@@ -41,8 +41,10 @@ export function visibleRooms(graph: PortalGraph, start: string, viewProjection: 
       const nx = Math.max(Math.min(a.x,d.x),Math.min(eye.x,Math.max(a.x,d.x)));
       const ny = Math.max(a.y,Math.min(eye.y,d.y));
       const nz = Math.max(Math.min(a.z,d.z),Math.min(eye.z,Math.max(a.z,d.z)));
-      if (Math.hypot(nx-eye.x,ny-eye.y,nz-eye.z) > far) continue;
-      const rect = screenBounds(e,portal.corners);
+      if (!portal.shaft && Math.hypot(nx-eye.x,ny-eye.y,nz-eye.z) > far) continue;
+      // Successive flights share one open column. A side room still needs
+      // a real doorway in the remaining screen window.
+      const rect = portal.shaft ? window : screenBounds(e,portal.corners);
       if (!rect) continue;
       const clipped: Rect = [Math.max(rect[0],window[0]),Math.max(rect[1],window[1]),Math.min(rect[2],window[2]),Math.min(rect[3],window[3])];
       if (clipped[0] >= clipped[2] || clipped[1] >= clipped[3]) continue;

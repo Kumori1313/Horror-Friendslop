@@ -1,3 +1,5 @@
+import { arcAngle, arcRise, inArc, shaftDepth, shaftRadius, stairOuter, towerRadius, type Arc } from './spiral.ts';
+
 // Rooms snap to a 4 m grid with 4 m storeys. Local coordinates put a cell
 // centre at the origin, and each socket sits at the middle of a cell edge. A
 // positive rise climbs from north to south, or from west to east along x.
@@ -11,7 +13,7 @@ export interface Point3 { x:number; y:number; z:number }
 export interface Patch { x:number; z:number; w:number; d:number }
 // `solid`: in a room with a pit, built up from the pit's floor (a block of
 // wall fills beneath it) rather than standing over the drop.
-export interface Surface extends Patch { y:number; rise?:number; along?:'x'; stairs?:boolean; catwalk?:boolean; solid?:boolean; field?:Heightfield }
+export interface Surface extends Patch { y:number; rise?:number; along?:'x'; stairs?:boolean; catwalk?:boolean; solid?:boolean; field?:Heightfield; arc?:Arc }
 // Ground shaped by a height map: `n` by `n` heights, `step` metres apart,
 // from the corner (x0, z0). A surface with a field covers the whole map; its
 // `y` is below the lowest height, so the ground is solid all the way down.
@@ -28,7 +30,7 @@ export const maxGrade = 0.7;
 export const climbable = (s:Surface,from:number,to:number,x:number,z:number,limit = maxGrade) =>
   !s.field || to <= from+1e-4 || fieldGrade(s.field,x,z) <= limit*limit;
 export const planningGrade = maxGrade*0.9;
-export interface Socket { name:string; side:Side; x:number; z:number; y:number }
+export interface Socket { name:string; side:Side; x:number; z:number; y:number; shaft?:boolean }
 export type PropKind = 'machine' | 'shelf' | 'tank' | 'locker' | 'crate' | 'console' | 'pump' | 'chiller' |
   'switchboard' | 'relay' | 'generator' | 'filter' | 'bench' | 'desk' | 'pipe' | 'terminal' | 'rock' | 'bell' | 'wreck';
 export interface Prop extends Patch { kind:PropKind; h:number; y?:number }
@@ -36,8 +38,7 @@ export interface RoomTemplate {
   name:string;
   height:number;
   // A bottomless pit, walled this far down into the dark. Falling more than
-  // `pitKill` below the room's floor is death. Such a room sits on the
-  // ground storey only, so nothing lies beneath it.
+  // `pitKill` below the floor is fatal. The layout keeps the column below clear.
   depth?:number;
   footprint:Patch[];
   surfaces:Surface[];
@@ -45,6 +46,9 @@ export interface RoomTemplate {
   props?:Prop[];
   pad?:Point3;
   loot?:boolean;
+  // Some hazard rooms keep the haul on the far side of their crossing.
+  prizeBeyond?:number;
+  tower?:'flight'|'crown';
 }
 
 const patch = (x:number,z:number,w:number,d:number):Patch => ({x,z,w,d});
@@ -76,6 +80,24 @@ function corridor(...parts:Patch[]):(open:Side[]) => RoomTemplate {
 }
 const arm = (side:Side) => ({north:patch(0,-1.6,2.4,0.8),east:patch(1.6,0,0.8,2.4),south:patch(0,1.6,2.4,0.8),west:patch(-1.6,0,0.8,2.4)})[side];
 const hallFloor = patch(0,0,12,12);
+
+function tower(tier: 'flight'|'crown'): RoomTemplate {
+  const ring = patch(0,0,2*towerRadius,2*towerRadius), flight = tier === 'flight';
+  return {name:'Spire landing',height:flight ? storey : 3.6,tower:tier,footprint:[ring],pad:{x:0,y:0,z:8.5},
+    surfaces:[
+      {...ring,y:0,arc:{inner:stairOuter-0.08,outer:towerRadius,square:true}},
+      {...patch(0,0,2*stairOuter,2*stairOuter),y:0,arc:{inner:shaftRadius,outer:stairOuter,...(flight ? {climb:storey} : {landing:true})}},
+    ],
+    sockets:[
+      {name:'north',side:'north',x:0,y:0,z:-towerRadius},{name:'east',side:'east',x:towerRadius,y:0,z:0},
+      {name:'south',side:'south',x:0,y:0,z:towerRadius},{name:'west',side:'west',x:-towerRadius,y:0,z:0},
+      {name:'lower',side:'south',x:0,y:0,z:5,shaft:true},
+      ...(flight ? [{name:'upper',side:'north' as const,x:0,y:storey,z:5,shaft:true}] : []),
+    ]};
+}
+
+const spirePit = patch(4,2,12,8);
+const pitEnds: Socket[] = [{name:'west0',side:'west',x:-2,z:0,y:0}];
 
 const templates = {
   // Intake is base: the cargo lift pad sits in front of the contract terminal
@@ -144,6 +166,21 @@ const templates = {
     {name:'upper-north',side:'north',x:0,z:-2,y:4},{name:'upper-east',side:'east',x:2,z:0,y:4},{name:'upper-west',side:'west',x:-2,z:0,y:4},
     {name:'lower-south',side:'south',x:0,z:14,y:0},{name:'lower-east',side:'east',x:2,z:12,y:0},{name:'lower-west',side:'west',x:-2,z:12,y:0},
   ]},
+  'spire-flight':tower('flight'),
+  'spire-crown':tower('crown'),
+  'survey':block('Survey station',1,2,{props:[prop('console',1.45,2,0.9,1.8,1.45),prop('relay',-1.45,2,0.9,1,1.8)]}),
+  'hoist-store':block('Hoist supply room',1,2,{loot:true,props:[prop('crate',1.45,2,0.8,1.6,1.4),prop('locker',-1.55,2,0.7,1.7,2)]}),
+  'counterweight':{name:'Counterweight chamber',height:3.6,depth:18,loot:true,prizeBeyond:8,footprint:[spirePit],pad:{x:9,y:0,z:0},
+    surfaces:[
+      {...patch(-0.5,2,3,8),y:0},{...patch(4.5,0,7,1.75),y:0},{...patch(9,2,2,8),y:0},
+    ],sockets:pitEnds},
+  'transfer':{name:'Broken transfer gallery',height:3.6,depth:18,loot:true,prizeBeyond:8,footprint:[spirePit],pad:{x:9,y:0,z:0},
+    surfaces:[
+      {...patch(-0.5,2,3,8),y:0},{...patch(9,2,2,8),y:0},
+      {...patch(4.5,5,7,2),y:0},
+      {...patch(2.55,0,1.4,1.8),y:0},{...patch(4.65,0,1.4,1.8),y:0},
+      {...patch(6.75,0,1.4,1.8),y:0},
+    ],sockets:pitEnds},
   straight:corridor(patch(0,0,2.4,4))(['north','south']),
   corner:corridor(patch(0,-0.4,2.4,3.2),arm('east'))(['north','east']),
   tee:corridor(patch(0,0,2.4,4),arm('east'))(['north','east','south']),
@@ -182,6 +219,7 @@ function turnSurface(s:Surface,turn:number):Surface {
     if (along) along = undefined; else { along = 'x'; y += rise!; rise = -rise!; }
   }
   const t = turnPatch(s,turn);
+  if (t.arc && turn) t.arc = {...t.arc,rotation:turn*Math.PI/2};
   delete t.along;
   return {...t,y,...(rise === undefined ? {} : {rise:rise+0}),...(along ? {along} : {})};
 }
@@ -207,7 +245,7 @@ export function socketAt(room:Placement,name:string) {
 
 export interface Solid extends Patch { y:number; h:number }
 export interface PlacedSurface extends Surface { room:string }
-export interface Opening extends Point3 { side:Side; a:string; b:string; index:number }
+export interface Opening extends Point3 { side:Side; a:string; b:string; index:number; shaft?:boolean }
 export interface RoomSolid extends Solid { room:string }
 /** A wall face; `inward` is the sign, along the thin axis, that points into its room. */
 export interface RoomWall extends RoomSolid { inward:number }
@@ -350,7 +388,8 @@ export function assembleTemplates(rooms:Placement[],links:(TemplateLink & {door?
   links.forEach((edge,index) => {
     const a = endpoint(edge.a,edge.from), b = endpoint(edge.b,edge.to);
     if (!same(a.x,b.x) || !same(a.z,b.z) || !same(a.y,b.y) || opposite(a.side) !== b.side) throw Error('Misaligned sockets: '+edge.a+'/'+edge.b);
-    g.openings.push({x:a.x,y:a.y,z:a.z,side:a.side,a:edge.a,b:edge.b,index});
+    if (!!a.shaft !== !!b.shaft) throw Error('Misaligned shaft connection: '+edge.a+'/'+edge.b);
+    g.openings.push({x:a.x,y:a.y,z:a.z,side:a.side,a:edge.a,b:edge.b,index,...(a.shaft ? {shaft:true} : {})});
     if (edge.door) {
       const alongX = a.side === 'north' || a.side === 'south';
       g.doors.push({id:edge.door,x:a.x,z:a.z,y:a.y,h:2.45,w:alongX?doorWidth:0.18,d:alongX?0.18:doorWidth});
@@ -370,9 +409,9 @@ export function assembleTemplates(rooms:Placement[],links:(TemplateLink & {door?
       g.walls.push({x:room.x+(x0+x1)/2,z:room.z+(z0+z1)/2,w:x1-x0,d:z1-z0,y:room.y-t.depth,h:top+t.depth,room:room.id,inward:1});
     }
     for (const p of t.props ?? []) g.props.push({kind:p.kind,x:room.x+p.x,z:room.z+p.z,w:p.w,d:p.d,y:room.y+(p.y??0),h:p.h,room:room.id});
-    const sockets = t.sockets.filter(s=>openAll || open.has(room.id+'/'+s.name));
+    const sockets = t.sockets.filter(s=>!s.shaft && (openAll || open.has(room.id+'/'+s.name)));
     for (const f of t.footprint) {
-      g.roofs.push({...f,x:room.x+f.x,z:room.z+f.z,y:room.y+t.height,h:0.12,room:room.id});
+      if (t.tower !== 'flight') g.roofs.push({...f,x:room.x+f.x,z:room.z+f.z,y:room.y+t.height,h:0.12,room:room.id});
       for (const side of sides) {
         const alongX = side==='north' || side==='south';
         const sign = side==='north' || side==='west' ? -1 : 1;
@@ -383,7 +422,8 @@ export function assembleTemplates(rooms:Placement[],links:(TemplateLink & {door?
         const seams:Interval[] = neighbors.map(p=>[p[axis]-p[length]/2,p[axis]+p[length]/2]);
         const ports = sockets.filter(s=>s.side===side && same(s[across],face));
         // Split horizontally at each sill and lintel, including upper doors.
-        const levels = [...new Set([-(t.depth ?? 0),0,t.height,...ports.flatMap(s=>[s.y,Math.min(t.height,s.y+doorHeight)])])].sort((a,b)=>a-b);
+        const below = t.depth ?? (t.tower && room.y === 0 ? shaftDepth : 0);
+        const levels = [...new Set([-below,0,t.height,...ports.flatMap(s=>[s.y,Math.min(t.height,s.y+doorHeight)])])].sort((a,b)=>a-b);
         for (let i=1;i<levels.length;i++) {
           const low = levels[i-1], high = levels[i];
           const holes:Interval[] = ports.filter(s=>s.y<=low && s.y+doorHeight>=high).map(s=>[s[axis]-doorWidth/2,s[axis]+doorWidth/2]);
@@ -422,8 +462,32 @@ export function assembleTemplates(rooms:Placement[],links:(TemplateLink & {door?
 
 export function surfaceHeight(s:Surface,x:number,z:number) {
   if (s.field) return fieldHeight(s.field,x,z);
+  if (s.arc) return s.y+arcRise(s.arc,arcAngle(x-s.x,z-s.z,s.arc.rotation));
   const t = s.along ? (x-s.x)/s.w+0.5 : (z-s.z)/s.d+0.5;
   return s.y+(s.rise??0)*Math.max(0,Math.min(1,t));
+}
+
+export function surfaceContains(s: Surface, x: number, z: number) {
+  const dx = x-s.x, dz = z-s.z;
+  return s.arc ? inArc(s.arc,dx,dz) : Math.abs(dx)<=s.w/2+1e-6 && Math.abs(dz)<=s.d/2+1e-6;
+}
+
+// Closest point on a built slab to the operator. Curved slabs have a hole.
+export function surfaceNear(s: Surface, x: number, z: number, radius: number) {
+  let cx = Math.max(s.x-s.w/2,Math.min(s.x+s.w/2,x)), cz = Math.max(s.z-s.d/2,Math.min(s.z+s.d/2,z));
+  if (s.arc) {
+    const r = Math.hypot(cx-s.x,cz-s.z);
+    if (r < 1e-6) return;
+    const target = Math.max(s.arc.inner,Math.min(s.arc.square ? Infinity : s.arc.outer,r));
+    cx = s.x+(cx-s.x)*target/r;
+    cz = s.z+(cz-s.z)*target/r;
+    if (!surfaceContains(s,cx,cz)) return;
+  }
+  if ((cx-x)**2+(cz-z)**2 < radius*radius) return {x:cx,z:cz};
+}
+
+export function surfaceBottom(s: Surface, x: number, z: number) {
+  return (s.arc ? surfaceHeight(s,x,z) : Math.min(s.y,s.y+(s.rise ?? 0)))-0.13;
 }
 
 // The squared steepness of the ground at (x, z), across a metre centred on
@@ -458,7 +522,7 @@ export function surfaceAt(g:TemplateGeometry,x:number,z:number,feet:number) {
   let best:PlacedSurface|undefined, difference=Infinity;
   for (const s of g.surfaces) {
     // A hair of tolerance closes seams where rotated corridor arms meet.
-    if (Math.abs(x-s.x)>s.w/2+1e-6 || Math.abs(z-s.z)>s.d/2+1e-6) continue;
+    if (!surfaceContains(s,x,z)) continue;
     const delta = Math.abs(surfaceHeight(s,x,z)-feet);
     if (delta<=0.32 && supports(s,delta,best,difference)) { best=s; difference=delta; }
   }

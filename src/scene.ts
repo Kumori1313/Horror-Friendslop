@@ -6,11 +6,11 @@ import { createLurkerModel, type LurkerModel } from './lurker-model.ts';
 import { catalog, flatOn, itemName, items, pace, stunTime, swingTime, type Diver, type Stalker } from './mission.ts';
 import { buildFacility, type SalvageVisual } from './facility-scene.ts';
 import { environment, materialLibrary } from './materials.ts';
-import { anchor, geometryFor, type Geometry, type Layout } from './layout.ts';
+import { anchor, diverCeiling, geometryFor, type Geometry, type Layout } from './layout.ts';
 import { groundAt, home, outdoors, placeOf, type Place } from './places.ts';
 import { gusting, mapKind, squalling, weather } from './map-kinds.ts';
 import { buildHome, buildOutdoors } from './world-scene.ts';
-import { obstaclesAt, roomTemplates, socketAt, surfaceAt, waterLevel } from './room-templates.ts';
+import { obstaclesAt, socketAt, surfaceAt, surfaceContains, surfaceHeight, waterLevel } from './room-templates.ts';
 import { portalGraph, visibleRooms, type PortalGraph } from './visibility.ts';
 import { batteryLife, chargeOf, lampSlot, selected, walls } from './room.ts';
 import type { Snapshot } from './room.ts';
@@ -576,12 +576,12 @@ export function createScene(canvas: HTMLCanvasElement, generated = false) {
   // between so its drag and fall move smoothly.
   let diverClock = {update:-1,mode:'',seconds:0,travel:0,at:0};
   let tilt = 0, tiltSpeed = 0, heading = 0;
-  const ceiling = (r: Layout['rooms'][number]) => r.y+roomTemplates[r.template].height-0.03;
+  const ceiling = (room: Layout['rooms'][number], floor: number) => diverCeiling(room,floor)-0.03;
   // Its drag from where it was: along the ceiling to the doorway, through
   // the wiring above it, and on to where it settles.
   function dragPath(layout: Layout, creature: Diver, room: Layout['rooms'][number]) {
     const from = creature.from!, start = layout.rooms.find(r => r.id === from.bay) ?? room;
-    const a = new T.Vector3(from.x,ceiling(start),from.z), b = new T.Vector3(creature.x!,ceiling(room),creature.z!);
+    const a = new T.Vector3(from.x,ceiling(start,from.y),from.z), b = new T.Vector3(creature.x!,ceiling(room,creature.y ?? room.y),creature.z!);
     const link = layout.passages.find(l => (l.a === from.bay && l.b === room.id) || (l.b === from.bay && l.a === room.id));
     const door = link && socketAt(layout.rooms.find(r => r.id === link.a)!,link.from);
     return door ? [a,new T.Vector3(door.x,a.y,door.z),new T.Vector3(door.x,b.y,door.z),b] : [a,b];
@@ -602,8 +602,8 @@ export function createScene(canvas: HTMLCanvasElement, generated = false) {
     if (update !== diverClock.update) diverClock = {update,mode:creature.mode,seconds:creature.seconds,travel:creature.travel ?? 0,at:now};
     const elapsed = (now-diverClock.at)/1000;
     const seconds = Math.max(0,diverClock.seconds-elapsed), travelling = Math.max(0,diverClock.travel-elapsed);
-    const p = pace(mission), top = ceiling(room), a = anchor(room);
-    const floor = creature.y ?? a.y, time = now/1000;
+    const p = pace(mission), a = anchor(room);
+    const floor = creature.y ?? a.y, top = ceiling(room,floor), time = now/1000;
     const reach = Math.max(0.3,Math.min(1,(top-floor-2.1-rim)/tineLength));
     // Dragging between spots: its lower body trails behind it.
     let moving = false;
@@ -862,7 +862,8 @@ export function createScene(canvas: HTMLCanvasElement, generated = false) {
       beam.intensity = (stowed ? 32 : 85)*power; beam.distance = stowed ? 10 : 17; beam.angle = stowed ? 0.5 : 0.43;
       (cone.material as T.MeshBasicMaterial).opacity = (stowed ? 0.02 : 0.045)*power;
       barrel.visible = head.visible = lens.visible = !(stowed && l.owner === self);
-      beam.visible = l.on && !l.lost; cone.visible = l.on && !l.lost && !(stowed && l.owner === self);
+      beam.visible = l.on && !l.lost;
+      cone.visible = beam.visible && l.owner !== self;
       // Lit flares nearby, in this place: on the floor, in flight, or in hand.
       const burning = layout && state.mission ? items(layout,state.mission).filter(i => i.kind === 'flare' && state.mission!.haul.find(h => h.id === i.id)?.burn !== undefined && (i.owner === null ? i.place === here : sameHere(state.players.find(q => q.id === i.owner) ?? {}))) : [];
       const spots = burning.map(i => {
@@ -936,8 +937,10 @@ export function createScene(canvas: HTMLCanvasElement, generated = false) {
               // Cull it with the room whose floor is below it.
               let under: string | undefined, top = -Infinity;
               for (const f of g.surfaces) {
-                if (Math.abs(at.x-f.x) > f.w/2 || Math.abs(at.z-f.z) > f.d/2 || f.y > at.y || f.y < top) continue;
-                top = f.y; under = f.room;
+                if (!surfaceContains(f,at.x,at.z)) continue;
+                const y = surfaceHeight(f,at.x,at.z);
+                if (y > at.y || y < top) continue;
+                top = y; under = f.room;
               }
               return {...i,x:at.x,y:at.y-h/2,z:at.z,room:under ?? i.room};
             }

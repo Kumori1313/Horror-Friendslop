@@ -9,8 +9,8 @@ import { fieldHeight, waterLevel } from './room-templates.ts';
 // place costs one draw per material.
 function batcher(library: Library) {
   const batches = new Map<T.Material,Batch>(), transform = new T.Object3D(), normals = new T.Matrix3(), tint = new T.Color();
-  function box(material: T.Material, color: number, x: number, y: number, z: number, w: number, h: number, d: number, angle = 0, axis: 'x' | 'z' | 'wedge' = 'x') {
-    transform.rotation.set(axis === 'x' ? angle : 0,axis === 'wedge' ? angle : 0,axis === 'z' ? angle : 0);
+  function box(material: T.Material, color: number, x: number, y: number, z: number, w: number, h: number, d: number, angle = 0, axis: 'x' | 'z' | 'wedge' | 'y' = 'x') {
+    transform.rotation.set(axis === 'x' ? angle : 0,axis === 'wedge' || axis === 'y' ? angle : 0,axis === 'z' ? angle : 0);
     transform.position.set(x,y,z); transform.scale.set(w,h,d); transform.updateMatrix();
     let batch = batches.get(material);
     if (!batch) batches.set(material,batch = new Batch());
@@ -386,32 +386,37 @@ export function buildOutdoors(map: Outdoors, library: Library) {
   root.add(terrain(map));
   if (map.kind === 'marsh') root.add(mudBanks(map));
   const f = map.building;
-  b.box(wall,0x9aa39a,f.x,f.h/2,f.z,f.w,f.h,f.d);
-  b.box(wall,0x7b847d,f.x,f.h+0.3,f.z,f.w+0.4,0.6,f.d+0.4);
   if (map.tower) {
-    const {shaft,crown} = map.tower, stone = b.surface('concrete');
-    b.box(stone,0x747d84,shaft.x,shaft.y+shaft.h/2,shaft.z,shaft.w,shaft.h,shaft.d);
-    b.box(rust,0x5b6667,crown.x,crown.y+crown.h/2,crown.z,crown.w,crown.h,crown.d);
-    for (const side of [-1,1]) {
-      for (const x of [-1,1]) b.box(stone,0x566067,shaft.x+x*(shaft.w/2-0.28),shaft.y+shaft.h/2,shaft.z+side*shaft.d/2,0.56,shaft.h,0.22);
-      for (const y of [6,10,14]) {
-        const z = shaft.z+side*(shaft.d/2+0.045), x = shaft.x+side*(shaft.w/2+0.045);
-        b.box(rust,0x242d2e,shaft.x,y,z,5.4,1.4,0.08);
-        b.box(rust,0x242d2e,x,y,shaft.z,0.08,1.4,4.2);
-        for (const offset of [-1.2,0,1.2]) {
-          b.box(wall,0x505957,shaft.x+offset,y,z+side*0.045,0.12,1.4,0.06);
-          b.box(wall,0x505957,x+side*0.045,y,shaft.z+offset,0.06,1.4,0.12);
-        }
-      }
-      const top = shaft.y+shaft.h-0.65;
-      b.box(library.glow,0xc38949,shaft.x,top,shaft.z+side*(shaft.d/2+0.04),4.6,0.16,0.08);
-      b.box(library.glow,0xc38949,shaft.x+side*(shaft.w/2+0.04),top,shaft.z,0.08,0.16,3.6);
-      b.box(library.glow,0xc38949,crown.x,crown.y+1.1,crown.z+side*(crown.d/2+0.03),4.6,0.18,0.06);
-      b.box(library.glow,0xc38949,crown.x+side*(crown.w/2+0.03),crown.y+1.1,crown.z,0.06,0.18,3.6);
+    const materials = [b.surface('concrete'),rust].map((source,i) => {
+      const mat = source.clone();
+      mat.vertexColors = false;
+      mat.color.setHex(i ? 0x68716e : 0x929f9f);
+      return mat;
+    });
+    function ring(top: number, bottom: number, y: number, h: number, mat: T.Material) {
+      const mesh = new T.Mesh(new T.CylinderGeometry(top,bottom,h,48),mat);
+      mesh.position.set(f.x,y+h/2,f.z);
+      root.add(mesh);
     }
-  } else for (const y of [3.8,6.6]) {
-    for (const x of [-8,-4,4,8]) for (const side of [-1,1]) b.box(rust,0x2a2f2e,f.x+x,y,f.z+side*(f.d/2+0.02),2.4,0.9,0.06);
-    for (const z of [-4,4]) for (const side of [-1,1]) b.box(rust,0x2a2f2e,f.x+side*(f.w/2+0.02),y,f.z+z,0.06,0.9,2.4);
+    for (const {radius,y,h} of map.tower) {
+      ring(radius,radius,y,h,materials[0]);
+      ring(radius+0.22,radius+0.22,y+h-0.38,0.38,materials[1]);
+      for (let i=0;i<12;i++) {
+        const angle = i*Math.PI/6, x = Math.sin(angle), z = Math.cos(angle);
+        if (y === 0 && i%3 === 0) continue;
+        b.box(rust,0x263538,f.x+x*(radius+0.025),y+h*0.55,f.z+z*(radius+0.025),0.83,1.2,0.12,angle,'y');
+        if (y >= 12 && i%3 === 0)
+          b.box(library.glow,0xc59c58,f.x+x*(radius+0.12),y+h*0.55,f.z+z*(radius+0.12),0.22,0.65,0.05,angle,'y');
+      }
+    }
+    ring(0.45,map.tower.at(-1)!.radius-0.5,f.h,4.4,materials[1]);
+  } else {
+    b.box(wall,0x9aa39a,f.x,f.h/2,f.z,f.w,f.h,f.d);
+    b.box(wall,0x7b847d,f.x,f.h+0.3,f.z,f.w+0.4,0.6,f.d+0.4);
+    for (const y of [3.8,6.6]) {
+      for (const x of [-8,-4,4,8]) for (const side of [-1,1]) b.box(rust,0x2a2f2e,f.x+x,y,f.z+side*(f.d/2+0.02),2.4,0.9,0.06);
+      for (const z of [-4,4]) for (const side of [-1,1]) b.box(rust,0x2a2f2e,f.x+side*(f.w/2+0.02),y,f.z+z,0.06,0.9,2.4);
+    }
   }
   b.box(rust,0x8a6a52,map.door.x,3.2,map.door.z+0.8,3.6,0.18,1.6);
   // Each fire exit: a plain door banded in green under a green lamp, no light cast.

@@ -53,9 +53,9 @@ test('every outdoor map lets the crew walk from the arrival rift to every door a
     assert.ok(new Set(map.doors.map(d => d.face)).size === map.doors.length,'each on its own face');
     if (seed < 12) assert.ok(route(map.geometry,map.spawns[1],map.exit),'seed '+seed+': a planned walk to the main door');
   }
-  const a = outdoors(5), b = outdoors(6);
+  const a = outdoors(21), b = outdoors(6);
   assert.notDeepEqual(a.rocks,b.rocks,'each seed lays out its own map');
-  assert.deepEqual(a.building,outdoors(1).building,'the Spire has a fixed façade');
+  assert.deepEqual(a.building,outdoors(1).building,'four-storey Spires share a façade');
   assert.deepEqual(a.tower,outdoors(1).tower);
   assert.deepEqual(b.building,outdoors(19).building,'the factory has a fixed façade');
   assert.equal(b.tower,undefined);

@@ -1,11 +1,12 @@
-import { collisionIndex, connections, geometryFor, walkable, type Geometry, type Layout } from './layout.ts';
+import { collisionIndex, connections, geometryFor, isSpireFlight, walkable, type Geometry, type Layout } from './layout.ts';
 import { landings, placeBridges, placeFords, placeRuins, placeWrecks, poolFords, riverCourse, riverFloor, riverSurface, riverWater, trail, type Bridge, type River, type Ruin, type Wreck } from './outdoor-features.ts';
 import { channel, poolAt, wadeDepth, waterLevel, type Pool, type Water } from './room-templates.ts';
 import { mapKind, weather, windOf, type MapKind } from './map-kinds.ts';
-import { facilityKind, type FacilityKind } from './facility-kinds.ts';
-import { climbable, fieldGrade, fieldHeight, maxGrade, obstaclesAt, orient, outward, planningGrade, socketAt, surfaceAt } from './room-templates.ts';
+import { facilityKind, facilityStoreys, type FacilityKind } from './facility-kinds.ts';
+import { roundFootprint } from './spiral.ts';
+import { climbable, fieldGrade, fieldHeight, maxGrade, obstaclesAt, orient, outward, planningGrade, socketAt, storey, surfaceAt } from './room-templates.ts';
 import { clearAt } from './room.ts';
-import type { Heightfield, Point3, RoomWall, Solid } from './room-templates.ts';
+import type { Heightfield, Point3, RoomWall } from './room-templates.ts';
 
 // An operator, the flashlight or a piece of salvage is in one of three
 // places, each with its own coordinates: the crew's home dimension, the
@@ -65,7 +66,7 @@ export interface Outdoors {
   // main door and where an operator leaving through it stands.
   building: {x: number; z: number; w: number; d: number; h: number};
   facility: FacilityKind;
-  tower?: {shaft: Solid; crown: Solid};
+  tower?: {radius: number; y: number; h: number}[];
   doors: Doorway[]; door: Point3; exit: Stand;
   // The bell in front of the main door, and where to stand to ring it.
   bell: Point3; ringing: Stand;
@@ -111,12 +112,11 @@ export function outdoors(seed: number): Outdoors {
   // A snowfield rolls a little less, its ditches filled in.
   const relief = kind === 'marsh' ? 0.3 : kind === 'quarry' ? 0.55 : kind === 'snow' ? 0.8 : 1, ditching = kind === 'marsh' ? 0 : kind === 'quarry' || kind === 'snow' ? 0.5 : 1;
   const next = random(seed ^ 0x0d7e1a), half = outdoorSize/2, room = 'outside';
-  const facility = facilityKind(seed);
-  const building = {x:0,z:0,w:24,d:18,h:facility === 'spire' ? 4.2 : 9};
-  const tower = facility === 'spire' ? {
-    shaft:{x:0,z:-1,y:building.h,w:14,d:12,h:12.8},
-    crown:{x:0,z:-1,y:17,w:9,d:8,h:2.4},
-  } : undefined;
+  const facility = facilityKind(seed), levels = facilityStoreys(facility,seed);
+  const tower = facility === 'spire' ? [12,9.6,8.5,7.5,6.8,6.2].slice(0,levels)
+    .map((radius,i) => ({radius,y:i*storey,h:i === levels-1 ? storey+1 : storey})) : undefined;
+  if (tower) tower.push({radius:tower[levels-1].radius-1.3,y:levels*storey+1,h:2});
+  const building = tower ? {x:0,z:0,w:24,d:24,h:levels*storey+3} : {x:0,z:0,w:24,d:18,h:9};
   // Doors: the main door in the south face; one or two fire exits in others.
   const faces: Face[] = ['east','west','north'];
   for (let i=faces.length-1;i>0;i--) { const k = Math.floor(next()*(i+1)); [faces[i],faces[k]] = [faces[k],faces[i]]; }
@@ -128,8 +128,10 @@ export function outdoors(seed: number): Outdoors {
     const yaw = {south:Math.PI,north:0,east:-Math.PI/2,west:Math.PI/2}[face];
     return {id,face,door:{x,y:0,z},exit:{x:x+ox*1.4,y:0,z:z+oz*1.4,yaw}};
   };
-  const fire = faces.slice(0,next() < 0.5 ? 1 : 2).map((face,i) =>
-    doorway('fire-'+(i+1),face,(next()-0.5)*((face === 'north' ? building.w : building.d)-6)));
+  const fire = faces.slice(0,next() < 0.5 ? 1 : 2).map((face,i) => {
+    const along = (next()-0.5)*((face === 'north' ? building.w : building.d)-6);
+    return doorway('fire-'+(i+1),face,tower ? 0 : along);
+  });
   const doors = [doorway('main','south',0),...fire];
   const door = doors[0].door, bell = {x:door.x+5,y:0,z:door.z+7};
   // The arrival rift opens on any side of the building, 55 to 65 m out.
@@ -193,8 +195,11 @@ export function outdoors(seed: number): Outdoors {
     // someone in.
     const edge = half-13;
     for (const [x0,z0,x1,z1] of [[-edge,-edge-0.5,edge,-edge],[-edge,edge,edge,edge+0.5],[-edge-0.5,-edge,-edge,edge],[edge,-edge,edge+0.5,edge]]) g.walls.push(wall(room,x0,z0,x1,z1,low-5,80));
-    g.walls.push(wall(room,building.x-building.w/2,building.z-building.d/2,building.x+building.w/2,building.z+building.d/2,0,building.h));
-    if (tower) for (const part of [tower.shaft,tower.crown]) g.walls.push({...part,room,inward:1});
+    if (tower) {
+      for (const part of tower) for (const footprint of roundFootprint(part.radius,part.y === 0 ? 48 : 24)) {
+        g.walls.push({...footprint,y:part.y,h:part.h,room,inward:1});
+      }
+    } else g.walls.push(wall(room,building.x-building.w/2,building.z-building.d/2,building.x+building.w/2,building.z+building.d/2,0,building.h));
     g.props.push({x:bell.x,z:bell.z,w:1.3,d:1.3,y:0,h:2.7,kind:'bell',room});
     // Nowhere to get stuck: fill any ground that has no way back out.
     for (let pass=0;pass<6 && unstrand(g,ground,{x:ax,y:arrivalLevel,z:az});pass++);
@@ -349,7 +354,9 @@ export function outdoors(seed: number): Outdoors {
       // Where: the first on the pit's floor, then near the wrecks, then
       // anywhere clear.
       const near = wrecks.map(w => ({x:w.boxes[0].x,z:w.boxes[0].z}));
-      for (let t=0;t<320 && toxic.spills.length<10;t++) {
+      // The round tower changes the clear area on its plot. Try more points
+      // in sparse draws to keep at least six spills around a Spire quarry.
+      for (let t=0;t<(tower && toxic.spills.length<6 ? 640 : 320) && toxic.spills.length<10;t++) {
         const floor = !toxic.spills.length && t < 60, base = floor ? {x:quarry.x,z:quarry.z} : t < 180 && near.length ? near[t % near.length] : {x:(spill()-0.5)*110,z:(spill()-0.5)*110};
         const spread = floor ? 5 : t < 180 ? 7 : 0, x = base.x+(spill()-0.5)*spread*2, z = base.z+(spill()-0.5)*spread*2;
         // On the floor, only kept off the ramps (it is too small for the
@@ -628,7 +635,7 @@ export function insideDoors(layout: Layout): InsideDoor[] {
   if (!layout.tour) {
     const fire = outdoors(layout.seed).doors.slice(1), used = new Set(layout.passages.flatMap(l => [l.a+'/'+l.from,l.b+'/'+l.to]));
     const hops = connections(layout), g = geometryFor(layout), next = random(layout.seed ^ 0x2f6b1c);
-    const deep = layout.rooms.filter(r => r.kind !== 'intake' && r.kind !== 'corridor' && r.kind !== 'stairwell')
+    const deep = layout.rooms.filter(r => r.kind !== 'intake' && r.kind !== 'corridor' && r.kind !== 'stairwell' && !isSpireFlight(r))
       .filter(r => layout.facility !== 'spire' || r.y === 0)
       .sort((a,b) => hops('intake',b.id)-hops('intake',a.id) || (a.id < b.id ? -1 : 1));
     for (const d of fire) {

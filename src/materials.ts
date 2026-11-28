@@ -50,6 +50,12 @@ export const palettes: Record<Kind,Palette> = {
   corridor:{wall:'concrete',floor:'concrete',ceiling:'panel'},
   pit:{wall:'concrete',floor:'diamond',ceiling:'concrete'},
   foundry:{wall:'rust',floor:'diamond',ceiling:'corrugated'},
+  'spire-flight':{wall:'concrete',floor:'grating',ceiling:'corrugated'},
+  'spire-crown':{wall:'concrete',floor:'grating',ceiling:'corrugated'},
+  survey:{wall:'panel',floor:'tile',ceiling:'corrugated'},
+  'hoist-store':{wall:'corrugated',floor:'wood',ceiling:'panel'},
+  counterweight:{wall:'rust',floor:'diamond',ceiling:'concrete'},
+  transfer:{wall:'concrete',floor:'grating',ceiling:'corrugated'},
 };
 
 // Wall trims run along every wall, so they use plain steel panel and skip the

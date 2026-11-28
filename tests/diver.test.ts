@@ -188,6 +188,23 @@ test('large rooms split into zones no more than 8 m a side', () => {
   assert.equal(zones(tour,'closet'),1);
 });
 
+test('the Bell Diver keeps its position and drop countdown during a short climb', () => {
+  const foot = at(tour,'stairwell-a');
+  const {mission,run,hang,player,locate} = scene(tour,{1:foot,2:at(tour,'intake')});
+  hang('stairwell-a');
+  run(0.5);
+  const before = mission.diver.drop!;
+  assert.ok(before > 0);
+
+  Object.assign(player(1),{z:foot.z-6,feetY:2});
+  assert.equal(locate(player(1)),'stairwell-a');
+  run(0.5);
+  assert.ok(mission.diver.drop! < before);
+  assert.deepEqual([mission.diver.z,mission.diver.y,mission.diver.moves,mission.diver.travel],[foot.z,foot.y,0,undefined]);
+  run(pace(mission).wait+pace(mission).fall);
+  assert.deepEqual(mission.down.map(p => p.id),[1]);
+});
+
 test('it strikes only its zone of a long room, and drags itself across zones to chase', () => {
   const g = geometryFor(tour), tunnel = g.surfaces.filter(s => s.room === 'tunnel' && !s.rise);
   // Two spots in the tunnel's floor in different zones.

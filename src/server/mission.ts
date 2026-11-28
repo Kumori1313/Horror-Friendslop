@@ -1,4 +1,4 @@
-import { anchor, connections, nextWiredBay, neighbours, zoneAt, type Layout } from '../layout.ts';
+import { anchor, connections, isSpireFlight, nextWiredBay, neighbours, zoneAt, type Layout, type Module } from '../layout.ts';
 import { storey, type Point3 } from '../room-templates.ts';
 import { gone, healthOf, items, kept, maxHealth, pace, recoverAfter, recoverRate, recoverTo, sameStorey, sprawl, stunTime } from '../mission.ts';
 import { spawnGnawers, stepGnawers } from './gnawers.ts';
@@ -40,13 +40,15 @@ export function wake(layout: Layout, mission: Mission, room: string) {
 
 // The storey whose floor an operator stands on.
 const storeyOf = (p: Player) => Math.round((p.feetY ?? 0)/storey)*storey;
+const stairBay = (room: Module) => room.kind === 'stairwell' || isSpireFlight(room);
 
 // Drag into a room through the wiring, choosing this move's chain clip. It
 // settles above an operator in that room, or above the room's pad, taking
 // `travel` seconds to get there from where it was.
 function enter(layout: Layout, diver: Diver, room: string, over: Player | undefined, travel: number, random: () => number) {
-  const a = anchor(layout.rooms.find(r => r.id === room)!);
-  const to = over ? {x:over.x,y:storeyOf(over),z:over.z} : {x:a.x,y:a.y,z:a.z};
+  const bay = layout.rooms.find(r => r.id === room)!;
+  const a = anchor(bay);
+  const to = over ? {x:over.x,y:stairBay(bay) ? over.feetY ?? a.y : storeyOf(over),z:over.z} : a;
   const zone = zoneAt(layout,diver.bay,diver.x ?? a.x,diver.z ?? a.z);
   diver.from = {bay:diver.bay,x:diver.x ?? a.x,y:diver.y ?? a.y,z:diver.z ?? a.z};
   diver.travel = travel;
@@ -56,6 +58,19 @@ function enter(layout: Layout, diver: Diver, room: string, over: Player | undefi
   diver.bay = room;
   diver.moves = (diver.moves ?? 0)+1;
   diver.clip = random() < 0.5 ? 0 : 1;
+}
+
+// Stairs are continuous slopes. Keep the same hanging spot and countdown
+// while an operator stays nearby, including across a shared Spire landing.
+function inStairBerth(layout: Layout, bay: Module, at: Point3, p: Player, room: string | undefined) {
+  const feet = p.feetY ?? 0;
+  if (Math.abs(feet-at.y) > 2.75 || Math.hypot(p.x-at.x,p.z-at.z) > 6) return false;
+  if (room === bay.id) return true;
+  if (!isSpireFlight(bay)) return false;
+  const next = layout.rooms.find(r => r.id === room);
+  if (!next || !isSpireFlight(next) || Math.abs(next.y-bay.y) !== storey) return false;
+  const landing = Math.max(bay.y,next.y);
+  return Math.abs(at.y-landing) < 1.25 && Math.abs(feet-landing) < 1.25;
 }
 
 // Damage to an operator. Recovery waits `recoverAfter` seconds from the last
@@ -94,7 +109,7 @@ export function stun(mission: Mission) {
   }
 }
 
-// Once it has arrived and someone shares its zone and storey, the Diver waits
+// Once it has arrived and someone is beneath it, the Diver waits
 // `pace.wait` seconds, resetting if they all leave, then falls for
 // `pace.fall` seconds whatever they do and strikes everyone beneath it when
 // it lands. It lies there, climbs back and rests. Otherwise, every
@@ -107,8 +122,14 @@ function hunt(layout: Layout, state: Snapshot, mission: Mission, dt: number, loc
   if (diver.mode === 'dormant') return;
   // It hunts only inside the facility; operators elsewhere are out of reach.
   const prey = state.players.filter(q => q.connected && placeOf(q) === 'inside' && !gone(mission,q.id) && !mission.down.some(d => d.id === q.id));
-  const here = () => zoneAt(layout,diver.bay,diver.x ?? 0,diver.z ?? 0);
-  const beneath = () => prey.filter(q => locate(q) === diver.bay && sameStorey(q,{y:diver.y ?? 0}) && zoneAt(layout,diver.bay,q.x,q.z) === here());
+  const beneath = () => {
+    const bay = layout.rooms.find(r => r.id === diver.bay)!;
+    const pad = anchor(bay);
+    const at = {x:diver.x ?? pad.x,y:diver.y ?? pad.y,z:diver.z ?? pad.z};
+    if (stairBay(bay)) return prey.filter(q => inStairBerth(layout,bay,at,q,locate(q)));
+    const here = zoneAt(layout,bay.id,at.x,at.z);
+    return prey.filter(q => locate(q) === bay.id && sameStorey(q,at) && zoneAt(layout,bay.id,q.x,q.z) === here);
+  };
   if (diver.incoming !== undefined) {
     diver.incoming -= dt;
     if (diver.incoming <= 0) { delete diver.incoming; stun(mission); }

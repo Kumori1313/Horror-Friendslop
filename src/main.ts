@@ -478,7 +478,8 @@ function start(render: ReturnType<typeof createScene>, mode?: Crew | 'solo', sce
     },
   };
   const preset = new URLSearchParams(location.search).get('layout');
-  const connection = mode === 'solo' ? new SoloSession(events,preset === 'stairwell' || preset === 'spire' ? preset : undefined)
+  const soloLayout = preset === 'stairwell' || preset === 'spire' || preset === 'spire-5' || preset === 'spire-6' ? preset : undefined;
+  const connection = mode === 'solo' ? new SoloSession(events,soloLayout)
     : crew ? new CreatorSession(crew,events) : new RoomConnection(url.href,saved,events,delay);
   const soloSession = connection instanceof SoloSession ? connection : undefined;
   const network = connection instanceof SoloSession ? undefined : connection;

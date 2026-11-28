@@ -1,5 +1,5 @@
 import type { Geometry } from './layout.ts';
-import { surfaceHeight } from './room-templates.ts';
+import { surfaceBottom, surfaceContains, surfaceHeight } from './room-templates.ts';
 import type { Point3, Solid } from './room-templates.ts';
 
 // Thrown items fly on the same collision geometry the operators walk on. The
@@ -22,7 +22,6 @@ export const flightStep = 1/120;
 export const gravity = 12;
 const maxFlight = 8;
 const friction = 6, rolling = 2.5;
-const slab = 0.13;
 const cell = 2;
 
 type Box = Solid & { prop?: boolean };
@@ -55,7 +54,7 @@ class Space {
   floor(x: number, z: number, bottom: number) {
     let best: {y: number; prop?: Box; ground?: Geometry['surfaces'][number]} | undefined;
     for (const s of this.near(this.floors,x,z)) {
-      if (Math.abs(x-s.x) > s.w/2+1e-6 || Math.abs(z-s.z) > s.d/2+1e-6) continue;
+      if (!surfaceContains(s,x,z)) continue;
       const y = surfaceHeight(s,x,z);
       if (y <= bottom+0.25 && (!best || y > best.y)) best = {y,ground:s.field ? s : undefined};
     }
@@ -71,14 +70,18 @@ class Space {
   // than a step below its surface, is blocked; sliding up a gentle rise is not.
   wedge(x: number, z: number, bottom: number, top: number) {
     for (const s of this.near(this.floors,x,z)) {
-      if (Math.abs(x-s.x) > s.w/2 || Math.abs(z-s.z) > s.d/2) continue;
-      if (surfaceHeight(s,x,z) > bottom+0.25 && top > Math.min(s.y,s.y+(s.rise ?? 0))-slab) return true;
+      if (!surfaceContains(s,x,z)) continue;
+      if (surfaceHeight(s,x,z) > bottom+0.25 && top > surfaceBottom(s,x,z)) return true;
     }
     return false;
   }
   // A floor slab whose underside the body's top crosses while rising.
   ceiling(x: number, z: number, from: number, to: number) {
-    return this.near(this.floors,x,z).some(s => !s.rise && !s.field && Math.abs(x-s.x) < s.w/2 && Math.abs(z-s.z) < s.d/2 && from <= s.y-slab && to > s.y-slab);
+    return this.near(this.floors,x,z).some(s => {
+      if (s.rise || s.field || !surfaceContains(s,x,z)) return false;
+      const underside = surfaceBottom(s,x,z);
+      return from <= underside && to > underside;
+    });
   }
 }
 

@@ -60,6 +60,7 @@ function spots(kind: TemplateKind) {
     if (s.rise) continue;
     for (let x=s.x-s.w/2+0.5; x<=s.x+s.w/2-0.5; x+=0.5) for (let z=s.z-s.d/2+0.5; z<=s.z+s.d/2-0.5; z+=0.5) {
       const p = {x,y:s.y,z};
+      if (t.prizeBeyond !== undefined && x < t.prizeBeyond) continue;
       if (!clearAt(x,z,0.45,obstaclesAt(g,s.y)) || !reached(p)) continue;
       if (t.sockets.some(k => Math.abs(k.y-s.y) < 1 && Math.hypot(k.x-x,k.z-z) < 1.4)) continue;
       if (t.pad && Math.abs(t.pad.y-s.y) < 1 && Math.hypot(t.pad.x-x,t.pad.z-z) < 1.2) continue;
@@ -85,7 +86,7 @@ export function spawnSalvage(layout: Layout): Salvage[] {
     const common: ItemKind[] = ['valve','gauge','fuse','coil'];
     const all = (Object.keys(itemKinds) as ItemKind[]).filter(k => !shopOnly.includes(k));
     for (const room of layout.rooms) {
-      if (room.kind === 'intake' || room.kind === 'corridor' || room.kind === 'stairwell') continue;
+      if (room.kind === 'intake' || room.kind === 'corridor' || room.kind === 'stairwell' || roomTemplates[room.template].tower) continue;
       const loot = !!roomTemplates[room.template].loot;
       const roll = next();
       const count = loot ? (roll < 0.3 ? 2 : 1) : roll < 0.05 ? 2 : roll < 0.35 ? 1 : 0;

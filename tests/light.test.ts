@@ -35,7 +35,7 @@ test('Intake is lit, corridors, stairwells and the service tunnel are dark, and 
       const on = powered(layout,r.id);
       assert.equal(on,powered(layout,r.id),'the same every time');
       if (r.kind === 'intake') assert.equal(on,true);
-      else if (r.kind === 'corridor' || r.kind === 'stairwell' || r.template === 'tunnel') assert.equal(on,false);
+      else if (r.kind === 'corridor' || r.kind === 'stairwell' || r.template === 'tunnel' || r.template.startsWith('spire-')) assert.equal(on,false);
       else { rooms++; if (on) lit++; }
     }
   }

@@ -4,16 +4,7 @@ import { cell, destinationPool, opposite, orient, outward, roomTemplates, socket
 import type { Side, TemplateKind } from '../room-templates.ts';
 import { facilityKind } from '../facility-kinds.ts';
 import { spireLayout } from './spire-layout.ts';
-
-function randomSource(seed: number) {
-  let n = seed >>> 0;
-  return () => {
-    n = (n + 0x6d2b79f5) >>> 0;
-    let t = Math.imul(n ^ (n >>> 15),1 | n);
-    t ^= t + Math.imul(t ^ (t >>> 7),61 | t);
-    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
-  };
-}
+import { randomSource } from './layout-random.ts';
 
 interface Open { room: string; name: string; x: number; y: number; z: number; side: Side }
 const bounds = {x:32, north:-48, south:4};
